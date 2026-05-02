@@ -1,25 +1,64 @@
-// Shared HTML layout for B&W Productions Ops Platform
+// Shared HTML layout for B&W Productions Ops Platform — CI v2.0
 
 import type { AuthUser } from './auth.js'
 import { ROLE_LABELS } from './auth.js'
 
+// BW Productions CI colours extracted from logo analysis:
+// Navy bg: #0d1117  Card: #161b22  Border: #21262d
+// Gold:    #C9A84C  Gold-lt: #F0D080  Gold-dk: #8B6914
+// Flame rainbow: magenta #CC18E8 → red #FF4A1C → orange #FF7A00 → yellow #FFD400 → green #7CFF2B → cyan #18D9FF → blue #1D6BFF
+// "PRODUCTIONS" text: bronze-gold gradient #B67A3A → #D39A52 → #8A5A2B
+
+const FLAME_RING_SVG = `
+<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;overflow:visible">
+  <defs>
+    <radialGradient id="bgGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#2a0050" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#CC18E8"/>
+      <stop offset="16%"  stop-color="#FF4A1C"/>
+      <stop offset="33%"  stop-color="#FF7A00"/>
+      <stop offset="50%"  stop-color="#FFD400"/>
+      <stop offset="66%"  stop-color="#7CFF2B"/>
+      <stop offset="83%"  stop-color="#18D9FF"/>
+      <stop offset="100%" stop-color="#CC18E8"/>
+    </linearGradient>
+  </defs>
+  <!-- outer glow blob -->
+  <circle cx="60" cy="60" r="50" fill="url(#bgGlow)"/>
+  <!-- flame ring -->
+  <circle cx="60" cy="60" r="46" fill="none" stroke="url(#ringGrad)" stroke-width="6" filter="url(#glow)" opacity="0.9"/>
+  <circle cx="60" cy="60" r="38" fill="none" stroke="url(#ringGrad)" stroke-width="3" opacity="0.5"/>
+  <!-- BW monogram -->
+  <text x="60" y="70" text-anchor="middle" font-family="Georgia,serif" font-size="28" font-weight="900"
+    fill="#0d1117" stroke="#0d1117" stroke-width="4">BW</text>
+  <text x="60" y="70" text-anchor="middle" font-family="Georgia,serif" font-size="28" font-weight="900"
+    fill="white" filter="url(#glow)">BW</text>
+</svg>`
+
 export function layout(title: string, body: string, user: AuthUser, activeNav?: string): string {
   const nav = [
-    { href: '/',            icon: '⚡', label: 'Dashboard',   key: 'dashboard',  roles: ['founder','ops_director','finance_director','account_director','crew'] },
-    { href: '/events',      icon: '📅', label: 'Events',      key: 'events',     roles: ['founder','ops_director','finance_director','account_director'] },
-    { href: '/quotes',      icon: '📋', label: 'Quotes',      key: 'quotes',     roles: ['founder','ops_director','finance_director','account_director'] },
-    { href: '/fleet',       icon: '🚛', label: 'Fleet',       key: 'fleet',      roles: ['founder','ops_director'] },
-    { href: '/suppliers',   icon: '🤝', label: 'Suppliers',   key: 'suppliers',  roles: ['founder','ops_director','finance_director'] },
-    { href: '/rate-card',   icon: '💰', label: 'Rate Card',   key: 'rate-card',  roles: ['founder','ops_director','finance_director'] },
-    { href: '/clients',     icon: '🏢', label: 'Clients',     key: 'clients',    roles: ['founder','ops_director','finance_director','account_director'] },
-    { href: '/admin',        icon: '⚙️', label: 'Admin',        key: 'admin',      roles: ['founder'] },
+    { href: '/',          icon: 'fa-gauge-high',    label: 'Dashboard',  key: 'dashboard',  roles: ['founder','ops_director','finance_director','account_director','crew'] },
+    { href: '/events',    icon: 'fa-calendar-days', label: 'Events',     key: 'events',     roles: ['founder','ops_director','finance_director','account_director'] },
+    { href: '/quotes',    icon: 'fa-file-invoice',  label: 'Quotes',     key: 'quotes',     roles: ['founder','ops_director','finance_director','account_director'] },
+    { href: '/fleet',     icon: 'fa-truck',         label: 'Fleet',      key: 'fleet',      roles: ['founder','ops_director'] },
+    { href: '/suppliers', icon: 'fa-handshake',     label: 'Suppliers',  key: 'suppliers',  roles: ['founder','ops_director','finance_director'] },
+    { href: '/rate-card', icon: 'fa-tags',          label: 'Rate Card',  key: 'rate-card',  roles: ['founder','ops_director','finance_director'] },
+    { href: '/clients',   icon: 'fa-building',      label: 'Clients',    key: 'clients',    roles: ['founder','ops_director','finance_director','account_director'] },
+    { href: '/admin',     icon: 'fa-gear',          label: 'Admin',      key: 'admin',      roles: ['founder'] },
   ]
 
   const visibleNav = nav.filter(n => (n.roles as string[]).includes(user.role))
 
   const navLinks = visibleNav.map(n => `
     <a href="${n.href}" class="nav-link${activeNav === n.key ? ' active' : ''}">
-      <span class="nav-icon">${n.icon}</span>
+      <span class="nav-icon"><i class="fas ${n.icon}"></i></span>
       <span class="nav-label">${n.label}</span>
     </a>`).join('')
 
@@ -28,47 +67,64 @@ export function layout(title: string, body: string, user: AuthUser, activeNav?: 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title} — B&W Productions Ops</title>
+  <title>${title} — BW Productions</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;900&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bw-black: #0a0a0a;
-      --bw-dark: #111111;
-      --bw-card: #1a1a1a;
-      --bw-border: #2a2a2a;
-      --bw-border2: #333;
-      --bw-gold: #d4a843;
-      --bw-gold-light: #e8c06a;
-      --bw-white: #f5f5f5;
-      --bw-muted: #888;
-      --bw-success: #10b981;
-      --bw-warn: #f59e0b;
-      --bw-danger: #ef4444;
-      --bw-info: #3b82f6;
-      --bw-purple: #8b5cf6;
-      --sidebar-w: 220px;
+      /* BW Productions CI */
+      --navy:       #0d1117;
+      --navy-mid:   #161b22;
+      --navy-card:  #1c2230;
+      --navy-border:#21262d;
+      --navy-hover: #252d3d;
+      /* Gold */
+      --gold:       #C9A84C;
+      --gold-lt:    #F0D080;
+      --gold-dk:    #8B6914;
+      --gold-metal: linear-gradient(135deg, #B67A3A 0%, #F0D080 40%, #D39A52 60%, #8A5A2B 100%);
+      /* Flame rainbow */
+      --magenta:    #CC18E8;
+      --red-flame:  #FF4A1C;
+      --orange:     #FF7A00;
+      --yellow:     #FFD400;
+      --green-flame:#7CFF2B;
+      --cyan:       #18D9FF;
+      --blue-flame: #1D6BFF;
+      /* Status */
+      --success:    #10b981;
+      --warn:       #f59e0b;
+      --danger:     #ef4444;
+      --info:       #3b82f6;
+      /* Layout */
+      --sidebar-w:  230px;
+      --white:      #f0f4ff;
+      --muted:      #6b7589;
     }
+
+    html { scroll-behavior: smooth; }
 
     body {
       font-family: 'Inter', sans-serif;
-      background: var(--bw-black);
-      color: var(--bw-white);
+      background: var(--navy);
+      color: var(--white);
       min-height: 100vh;
       display: flex;
       font-size: 14px;
       line-height: 1.5;
     }
 
-    /* SIDEBAR */
+    /* ══════════════════════════════════
+       SIDEBAR
+    ══════════════════════════════════ */
     .sidebar {
       width: var(--sidebar-w);
       min-height: 100vh;
-      background: var(--bw-dark);
-      border-right: 1px solid var(--bw-border);
+      background: var(--navy-mid);
+      border-right: 1px solid var(--navy-border);
       display: flex;
       flex-direction: column;
       position: fixed;
@@ -78,88 +134,142 @@ export function layout(title: string, body: string, user: AuthUser, activeNav?: 
     }
 
     .sidebar-brand {
-      padding: 20px 16px 16px;
-      border-bottom: 1px solid var(--bw-border);
-    }
-
-    .brand-logo {
+      padding: 20px 16px 18px;
+      border-bottom: 1px solid var(--navy-border);
       display: flex;
       align-items: center;
-      gap: 10px;
-      margin-bottom: 4px;
+      gap: 12px;
+      text-decoration: none;
     }
 
-    .brand-mark {
-      width: 36px; height: 36px;
-      background: var(--bw-gold);
-      border-radius: 8px;
-      display: flex; align-items: center; justify-content: center;
-      font-weight: 800; font-size: 16px; color: #000;
+    .brand-ring {
+      width: 44px;
+      height: 44px;
       flex-shrink: 0;
+      position: relative;
     }
+
+    .brand-text-wrap { display: flex; flex-direction: column; }
 
     .brand-name {
-      font-size: 15px; font-weight: 700; color: var(--bw-white);
+      font-family: 'Cinzel', serif;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      background: var(--gold-metal);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
       line-height: 1.2;
     }
 
     .brand-sub {
-      font-size: 10px; color: var(--bw-muted); font-weight: 400;
-      letter-spacing: 0.05em; text-transform: uppercase;
-      padding-left: 46px;
+      font-size: 9px;
+      color: var(--muted);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-top: 2px;
     }
 
     .sidebar-nav {
       flex: 1;
-      padding: 12px 8px;
+      padding: 14px 10px;
       display: flex;
       flex-direction: column;
-      gap: 2px;
+      gap: 3px;
+    }
+
+    .nav-section-label {
+      font-size: 9px;
+      font-weight: 600;
+      color: var(--muted);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 10px 8px 4px;
+      margin-top: 4px;
     }
 
     .nav-link {
-      display: flex; align-items: center; gap: 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
       padding: 9px 10px;
       border-radius: 8px;
-      color: var(--bw-muted);
+      color: var(--muted);
       text-decoration: none;
-      font-size: 13px; font-weight: 500;
+      font-size: 13px;
+      font-weight: 500;
       transition: all 0.15s;
+      position: relative;
     }
 
-    .nav-link:hover { background: var(--bw-border); color: var(--bw-white); }
-    .nav-link.active { background: var(--bw-gold); color: #000; font-weight: 600; }
-    .nav-link.active .nav-icon { filter: none; }
-    .nav-icon { font-size: 15px; width: 20px; text-align: center; }
+    .nav-link:hover {
+      background: var(--navy-hover);
+      color: var(--white);
+    }
+
+    .nav-link.active {
+      background: linear-gradient(90deg, rgba(201,168,76,0.15) 0%, rgba(201,168,76,0.05) 100%);
+      color: var(--gold-lt);
+      font-weight: 600;
+    }
+
+    .nav-link.active::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 20%; bottom: 20%;
+      width: 3px;
+      background: linear-gradient(180deg, var(--magenta), var(--cyan));
+      border-radius: 0 2px 2px 0;
+    }
+
+    .nav-icon {
+      font-size: 14px;
+      width: 20px;
+      text-align: center;
+      opacity: 0.8;
+    }
+
+    .nav-link.active .nav-icon { opacity: 1; }
 
     .sidebar-user {
-      padding: 12px 16px;
-      border-top: 1px solid var(--bw-border);
-      display: flex; align-items: center; gap: 10px;
+      padding: 14px 16px;
+      border-top: 1px solid var(--navy-border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
 
     .user-avatar {
-      width: 32px; height: 32px;
-      background: var(--bw-gold);
+      width: 34px;
+      height: 34px;
+      background: linear-gradient(135deg, var(--magenta), var(--blue-flame));
       border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      font-weight: 700; font-size: 13px; color: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 13px;
+      color: #fff;
       flex-shrink: 0;
+      box-shadow: 0 0 12px rgba(204,24,232,0.4);
     }
 
-    .user-name { font-size: 12px; font-weight: 600; color: var(--bw-white); }
-    .user-role { font-size: 10px; color: var(--bw-muted); }
+    .user-name { font-size: 12px; font-weight: 600; color: var(--white); }
+    .user-role { font-size: 10px; color: var(--muted); }
 
     .logout-btn {
       margin-left: auto;
-      color: var(--bw-muted);
+      color: var(--muted);
       text-decoration: none;
-      font-size: 16px;
+      font-size: 15px;
       transition: color 0.15s;
     }
-    .logout-btn:hover { color: var(--bw-danger); }
+    .logout-btn:hover { color: var(--danger); }
 
-    /* MAIN */
+    /* ══════════════════════════════════
+       MAIN CONTENT
+    ══════════════════════════════════ */
     .main {
       margin-left: var(--sidebar-w);
       flex: 1;
@@ -169,155 +279,374 @@ export function layout(title: string, body: string, user: AuthUser, activeNav?: 
     }
 
     .topbar {
-      padding: 16px 28px;
-      border-bottom: 1px solid var(--bw-border);
-      display: flex; align-items: center; justify-content: space-between;
-      position: sticky; top: 0; z-index: 50;
-      background: var(--bw-black);
+      padding: 14px 28px;
+      border-bottom: 1px solid var(--navy-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: rgba(13,17,23,0.95);
+      backdrop-filter: blur(12px);
     }
 
+    .topbar-left { display: flex; align-items: center; gap: 12px; }
+
     .page-title {
-      font-size: 20px; font-weight: 700; color: var(--bw-white);
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--white);
+      font-family: 'Cinzel', serif;
+      letter-spacing: 0.02em;
     }
 
     .topbar-actions { display: flex; gap: 10px; align-items: center; }
 
     .content { padding: 24px 28px; flex: 1; }
 
-    /* CARDS */
+    /* ══════════════════════════════════
+       CARDS
+    ══════════════════════════════════ */
     .card {
-      background: var(--bw-card);
-      border: 1px solid var(--bw-border);
+      background: var(--navy-card);
+      border: 1px solid var(--navy-border);
       border-radius: 12px;
       padding: 20px;
       margin-bottom: 20px;
     }
 
+    .card-glow {
+      box-shadow: 0 0 0 1px var(--navy-border), 0 4px 24px rgba(201,168,76,0.06);
+    }
+
     .card-header {
-      display: flex; align-items: center; justify-content: space-between;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
       margin-bottom: 16px;
     }
 
     .card-title {
-      font-size: 15px; font-weight: 600; color: var(--bw-white);
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--white);
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
-    /* STATS GRID */
+    .card-title-icon {
+      width: 28px; height: 28px;
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px;
+      background: rgba(201,168,76,0.12);
+      color: var(--gold);
+    }
+
+    /* ══════════════════════════════════
+       STATS GRID
+    ══════════════════════════════════ */
     .stats-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
       gap: 16px;
       margin-bottom: 24px;
     }
 
     .stat-card {
-      background: var(--bw-card);
-      border: 1px solid var(--bw-border);
+      background: var(--navy-card);
+      border: 1px solid var(--navy-border);
       border-radius: 12px;
       padding: 18px 20px;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.15s, box-shadow 0.15s;
     }
 
-    .stat-label { font-size: 11px; color: var(--bw-muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500; margin-bottom: 6px; }
-    .stat-value { font-size: 26px; font-weight: 700; color: var(--bw-white); }
-    .stat-sub { font-size: 11px; color: var(--bw-muted); margin-top: 2px; }
-    .stat-gold { border-left: 3px solid var(--bw-gold); }
-    .stat-green { border-left: 3px solid var(--bw-success); }
-    .stat-warn { border-left: 3px solid var(--bw-warn); }
-    .stat-danger { border-left: 3px solid var(--bw-danger); }
+    .stat-card:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
 
-    /* TABLE */
+    .stat-card::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+    }
+
+    .stat-gold::after  { background: linear-gradient(90deg, var(--gold-dk), var(--gold-lt)); }
+    .stat-green::after { background: linear-gradient(90deg, #065f46, var(--success)); }
+    .stat-warn::after  { background: linear-gradient(90deg, #92400e, var(--warn)); }
+    .stat-danger::after{ background: linear-gradient(90deg, #7f1d1d, var(--danger)); }
+    .stat-flame::after { background: linear-gradient(90deg, var(--magenta), var(--cyan)); }
+
+    .stat-label {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .stat-value {
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--white);
+      line-height: 1;
+    }
+
+    .stat-sub {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+
+    /* ══════════════════════════════════
+       TABLES
+    ══════════════════════════════════ */
     .table-wrap { overflow-x: auto; }
+
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
+
     thead th {
-      text-align: left; padding: 10px 12px;
-      font-size: 11px; font-weight: 600; color: var(--bw-muted);
-      text-transform: uppercase; letter-spacing: 0.06em;
-      border-bottom: 1px solid var(--bw-border);
+      text-align: left;
+      padding: 10px 12px;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      border-bottom: 1px solid var(--navy-border);
+      background: rgba(255,255,255,0.02);
     }
-    tbody tr { border-bottom: 1px solid var(--bw-border); transition: background 0.1s; }
+
+    tbody tr {
+      border-bottom: 1px solid rgba(33,38,45,0.8);
+      transition: background 0.1s;
+    }
+
     tbody tr:last-child { border-bottom: none; }
-    tbody tr:hover { background: rgba(255,255,255,0.03); }
-    tbody td { padding: 10px 12px; color: var(--bw-white); vertical-align: middle; }
-    td.muted { color: var(--bw-muted); }
-    td.mono { font-family: 'Courier New', monospace; font-size: 12px; }
+    tbody tr:hover { background: rgba(201,168,76,0.04); }
 
-    /* BUTTONS */
-    .btn {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 8px 16px; border-radius: 8px;
-      font-size: 13px; font-weight: 600;
-      border: none; cursor: pointer; text-decoration: none;
-      transition: all 0.15s;
+    tbody td {
+      padding: 11px 12px;
+      color: var(--white);
+      vertical-align: middle;
     }
-    .btn-gold { background: var(--bw-gold); color: #000; }
-    .btn-gold:hover { background: var(--bw-gold-light); }
-    .btn-outline { background: transparent; color: var(--bw-white); border: 1px solid var(--bw-border2); }
-    .btn-outline:hover { background: var(--bw-border); }
-    .btn-danger { background: var(--bw-danger); color: #fff; }
-    .btn-danger:hover { background: #dc2626; }
-    .btn-success { background: var(--bw-success); color: #fff; }
-    .btn-sm { padding: 4px 10px; font-size: 12px; border-radius: 6px; }
-    .btn-icon { padding: 6px; border-radius: 6px; font-size: 14px; }
 
-    /* FORMS */
-    .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+    td.muted { color: var(--muted); }
+    td.mono  { font-family: 'Courier New', monospace; font-size: 12px; }
+    td.gold  { color: var(--gold); font-weight: 600; }
+
+    /* ══════════════════════════════════
+       BUTTONS
+    ══════════════════════════════════ */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+
+    .btn-gold {
+      background: linear-gradient(135deg, var(--gold-dk) 0%, var(--gold) 50%, var(--gold-lt) 100%);
+      color: #000;
+      box-shadow: 0 2px 12px rgba(201,168,76,0.3);
+    }
+
+    .btn-gold:hover {
+      box-shadow: 0 4px 20px rgba(201,168,76,0.5);
+      transform: translateY(-1px);
+    }
+
+    .btn-outline {
+      background: transparent;
+      color: var(--white);
+      border: 1px solid var(--navy-border);
+    }
+
+    .btn-outline:hover {
+      background: var(--navy-hover);
+      border-color: var(--muted);
+    }
+
+    .btn-flame {
+      background: linear-gradient(135deg, var(--magenta), var(--blue-flame));
+      color: #fff;
+      box-shadow: 0 2px 12px rgba(204,24,232,0.3);
+    }
+
+    .btn-flame:hover {
+      box-shadow: 0 4px 20px rgba(24,217,255,0.4);
+      transform: translateY(-1px);
+    }
+
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-sm { padding: 5px 11px; font-size: 12px; border-radius: 6px; }
+    .btn-icon { padding: 7px; border-radius: 6px; font-size: 14px; }
+
+    /* ══════════════════════════════════
+       FORMS
+    ══════════════════════════════════ */
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+    }
+
     .form-group { display: flex; flex-direction: column; gap: 6px; }
     .form-group.full { grid-column: 1 / -1; }
-    label { font-size: 12px; font-weight: 500; color: var(--bw-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+    label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+    }
+
     input, select, textarea {
-      background: var(--bw-black); border: 1px solid var(--bw-border2);
-      border-radius: 8px; padding: 9px 12px;
-      color: var(--bw-white); font-family: 'Inter', sans-serif; font-size: 13px;
-      transition: border-color 0.15s;
+      background: var(--navy);
+      border: 1px solid var(--navy-border);
+      border-radius: 8px;
+      padding: 9px 12px;
+      color: var(--white);
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      transition: border-color 0.15s, box-shadow 0.15s;
       width: 100%;
     }
+
     input:focus, select:focus, textarea:focus {
-      outline: none; border-color: var(--bw-gold);
+      outline: none;
+      border-color: var(--gold);
+      box-shadow: 0 0 0 3px rgba(201,168,76,0.1);
     }
-    select option { background: var(--bw-dark); }
+
+    select option { background: var(--navy-mid); }
     textarea { resize: vertical; min-height: 80px; }
 
-    /* ALERTS */
-    .alert { padding: 12px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
-    .alert-success { background: rgba(16,185,129,0.15); border: 1px solid var(--bw-success); color: var(--bw-success); }
-    .alert-error { background: rgba(239,68,68,0.15); border: 1px solid var(--bw-danger); color: var(--bw-danger); }
-    .alert-warn { background: rgba(245,158,11,0.15); border: 1px solid var(--bw-warn); color: var(--bw-warn); }
-    .alert-info { background: rgba(59,130,246,0.15); border: 1px solid var(--bw-info); color: var(--bw-info); }
-
-    /* BADGES */
-    .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-    .badge-gold { background: rgba(212,168,67,0.2); color: var(--bw-gold); border: 1px solid var(--bw-gold); }
-    .badge-sab { background: #1e3a5f; color: #60a5fa; border: 1px solid #3b82f6; font-size: 10px; }
-
-    /* FLEX UTILS */
-    .flex { display: flex; }
-    .items-center { align-items: center; }
-    .justify-between { justify-content: space-between; }
-    .gap-2 { gap: 8px; }
-    .gap-3 { gap: 12px; }
-    .mt-2 { margin-top: 8px; }
-    .mt-4 { margin-top: 16px; }
-    .mb-2 { margin-bottom: 8px; }
-    .text-muted { color: var(--bw-muted); }
-    .text-gold { color: var(--bw-gold); }
-    .text-success { color: var(--bw-success); }
-    .text-danger { color: var(--bw-danger); }
-    .text-warn { color: var(--bw-warn); }
-    .text-right { text-align: right; }
-    .font-bold { font-weight: 700; }
-    .font-mono { font-family: 'Courier New', monospace; }
-    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; }
-
-    /* MOBILE */
-    .mobile-menu-btn {
-      display: none;
-      background: none; border: none; color: var(--bw-white);
-      font-size: 20px; cursor: pointer; padding: 4px;
+    /* ══════════════════════════════════
+       ALERTS
+    ══════════════════════════════════ */
+    .alert {
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
     }
 
-    @media (max-width: 768px) {
-      .sidebar { transform: translateX(-100%); transition: transform 0.2s; }
-      .sidebar.open { transform: translateX(0); }
+    .alert-success { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); color: #6ee7b7; }
+    .alert-error   { background: rgba(239,68,68,0.1);  border: 1px solid rgba(239,68,68,0.3);  color: #fca5a5; }
+    .alert-warn    { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); color: #fcd34d; }
+    .alert-info    { background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3); color: #93c5fd; }
+
+    /* ══════════════════════════════════
+       BADGES
+    ══════════════════════════════════ */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 9px;
+      border-radius: 20px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .badge-gold    { background: rgba(201,168,76,0.15);  color: var(--gold-lt); border: 1px solid rgba(201,168,76,0.3); }
+    .badge-success { background: rgba(16,185,129,0.15);  color: #6ee7b7;       border: 1px solid rgba(16,185,129,0.3); }
+    .badge-warn    { background: rgba(245,158,11,0.15);  color: #fcd34d;       border: 1px solid rgba(245,158,11,0.3); }
+    .badge-danger  { background: rgba(239,68,68,0.15);   color: #fca5a5;       border: 1px solid rgba(239,68,68,0.3); }
+    .badge-info    { background: rgba(59,130,246,0.15);  color: #93c5fd;       border: 1px solid rgba(59,130,246,0.3); }
+    .badge-sab     { background: rgba(30,58,95,0.5);     color: #60a5fa;       border: 1px solid rgba(59,130,246,0.3); }
+    .badge-flame   { background: linear-gradient(90deg,rgba(204,24,232,0.2),rgba(24,217,255,0.2)); color: #e8b4ff; border: 1px solid rgba(204,24,232,0.3); }
+
+    /* ══════════════════════════════════
+       FLAME DIVIDER
+    ══════════════════════════════════ */
+    .flame-divider {
+      height: 1px;
+      background: linear-gradient(90deg,
+        transparent 0%,
+        var(--magenta) 15%,
+        var(--orange) 30%,
+        var(--yellow) 50%,
+        var(--green-flame) 70%,
+        var(--cyan) 85%,
+        transparent 100%);
+      margin: 20px 0;
+      opacity: 0.5;
+    }
+
+    /* ══════════════════════════════════
+       PRIORITY INDICATORS
+    ══════════════════════════════════ */
+    .priority-high   { color: var(--danger);  }
+    .priority-medium { color: var(--warn);    }
+    .priority-low    { color: var(--success); }
+
+    /* ══════════════════════════════════
+       UTILS
+    ══════════════════════════════════ */
+    .flex             { display: flex; }
+    .items-center     { align-items: center; }
+    .justify-between  { justify-content: space-between; }
+    .gap-2            { gap: 8px; }
+    .gap-3            { gap: 12px; }
+    .gap-4            { gap: 16px; }
+    .mt-2             { margin-top: 8px; }
+    .mt-4             { margin-top: 16px; }
+    .mb-2             { margin-bottom: 8px; }
+    .mb-4             { margin-bottom: 16px; }
+    .text-muted       { color: var(--muted); }
+    .text-gold        { color: var(--gold); }
+    .text-gold-lt     { color: var(--gold-lt); }
+    .text-success     { color: var(--success); }
+    .text-danger      { color: var(--danger); }
+    .text-warn        { color: var(--warn); }
+    .text-right       { text-align: right; }
+    .text-center      { text-align: center; }
+    .font-bold        { font-weight: 700; }
+    .font-mono        { font-family: 'Courier New', monospace; }
+    .font-cinzel      { font-family: 'Cinzel', serif; }
+    .w-full           { width: 100%; }
+
+    /* ══════════════════════════════════
+       MOBILE
+    ══════════════════════════════════ */
+    .mobile-menu-btn {
+      display: none;
+      background: none;
+      border: none;
+      color: var(--white);
+      font-size: 20px;
+      cursor: pointer;
+      padding: 4px;
+    }
+
+    @media (max-width: 900px) {
+      .sidebar { transform: translateX(-100%); transition: transform 0.25s; box-shadow: none; }
+      .sidebar.open { transform: translateX(0); box-shadow: 4px 0 32px rgba(0,0,0,0.6); }
       .main { margin-left: 0; }
       .mobile-menu-btn { display: block; }
       .content { padding: 16px; }
@@ -326,33 +655,41 @@ export function layout(title: string, body: string, user: AuthUser, activeNav?: 
       .form-grid { grid-template-columns: 1fr; }
       .hide-mobile { display: none; }
     }
+
+    @media (max-width: 480px) {
+      .stats-grid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
+  <!-- SIDEBAR -->
   <nav class="sidebar" id="sidebar">
-    <div class="sidebar-brand">
-      <div class="brand-logo">
-        <div class="brand-mark">B&W</div>
-        <div class="brand-name">B&amp;W Productions</div>
+    <a class="sidebar-brand" href="/">
+      <div class="brand-ring">${FLAME_RING_SVG}</div>
+      <div class="brand-text-wrap">
+        <div class="brand-name">BW Productions</div>
+        <div class="brand-sub">Ops Platform v2</div>
       </div>
-      <div class="brand-sub">Ops Platform v1</div>
-    </div>
+    </a>
+
     <div class="sidebar-nav">
       ${navLinks}
     </div>
+
     <div class="sidebar-user">
-      <div class="user-avatar">${user.name.charAt(0)}</div>
+      <div class="user-avatar">${user.name.charAt(0).toUpperCase()}</div>
       <div>
         <div class="user-name">${user.name.split(' ')[0]}</div>
         <div class="user-role">${ROLE_LABELS[user.role]}</div>
       </div>
-      <a href="/logout" class="logout-btn" title="Logout"><i class="fas fa-sign-out-alt"></i></a>
+      <a href="/logout" class="logout-btn" title="Logout"><i class="fas fa-right-from-bracket"></i></a>
     </div>
   </nav>
 
+  <!-- MAIN -->
   <main class="main">
     <div class="topbar">
-      <div class="flex items-center gap-2">
+      <div class="topbar-left">
         <button class="mobile-menu-btn" onclick="document.getElementById('sidebar').classList.toggle('open')">
           <i class="fas fa-bars"></i>
         </button>
@@ -366,11 +703,11 @@ export function layout(title: string, body: string, user: AuthUser, activeNav?: 
   </main>
 
   <script>
-    // Close sidebar on mobile when clicking outside
+    // Close sidebar on mobile click-outside
     document.addEventListener('click', function(e) {
       const sidebar = document.getElementById('sidebar')
       const menuBtn = document.querySelector('.mobile-menu-btn')
-      if (window.innerWidth <= 768 && sidebar.classList.contains('open')) {
+      if (window.innerWidth <= 900 && sidebar.classList.contains('open')) {
         if (!sidebar.contains(e.target) && e.target !== menuBtn) {
           sidebar.classList.remove('open')
         }
@@ -381,80 +718,262 @@ export function layout(title: string, body: string, user: AuthUser, activeNav?: 
 </html>`
 }
 
+// ─── LOGIN PAGE ──────────────────────────────────────────────────────────────
 export function loginPage(error?: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Login — B&W Productions Ops</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <title>Sign In — BW Productions</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
       font-family: 'Inter', sans-serif;
-      background: #0a0a0a;
-      color: #f5f5f5;
+      background: #0d1117;
+      color: #f0f4ff;
       min-height: 100vh;
-      display: flex; align-items: center; justify-content: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       padding: 20px;
+      position: relative;
+      overflow: hidden;
     }
+
+    /* Ambient glow blobs */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -200px; left: -200px;
+      width: 600px; height: 600px;
+      background: radial-gradient(circle, rgba(204,24,232,0.08) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    body::after {
+      content: '';
+      position: fixed;
+      bottom: -200px; right: -200px;
+      width: 600px; height: 600px;
+      background: radial-gradient(circle, rgba(24,217,255,0.08) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .login-wrap {
+      width: 100%; max-width: 420px;
+      position: relative; z-index: 1;
+    }
+
+    /* Logo area */
+    .login-logo {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+
+    .logo-ring {
+      width: 100px;
+      height: 100px;
+      margin: 0 auto 16px;
+      position: relative;
+      filter: drop-shadow(0 0 20px rgba(201,168,76,0.3));
+    }
+
+    .logo-ring svg { width: 100%; height: 100%; overflow: visible; }
+
+    .logo-title {
+      font-family: 'Cinzel', serif;
+      font-size: 22px;
+      font-weight: 900;
+      letter-spacing: 0.05em;
+      background: linear-gradient(135deg, #B67A3A 0%, #F0D080 40%, #D39A52 60%, #8A5A2B 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .logo-sub {
+      font-size: 10px;
+      color: #6b7589;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin-top: 4px;
+    }
+
+    /* Card */
     .login-card {
-      background: #111;
-      border: 1px solid #2a2a2a;
+      background: #161b22;
+      border: 1px solid #21262d;
       border-radius: 16px;
-      padding: 40px;
-      width: 100%; max-width: 400px;
+      padding: 36px;
+      box-shadow: 0 8px 48px rgba(0,0,0,0.6), 0 0 0 1px rgba(201,168,76,0.05);
     }
-    .brand { text-align: center; margin-bottom: 32px; }
-    .brand-mark {
-      width: 56px; height: 56px;
-      background: #d4a843; border-radius: 12px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 22px; font-weight: 800; color: #000;
-      margin: 0 auto 12px;
+
+    /* Flame top accent */
+    .login-card::before {
+      content: '';
+      display: block;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #CC18E8, #FF7A00, #FFD400, #18D9FF, transparent);
+      border-radius: 2px 2px 0 0;
+      margin: -36px -36px 36px;
     }
-    .brand-name { font-size: 20px; font-weight: 700; }
-    .brand-sub { font-size: 12px; color: #888; margin-top: 2px; letter-spacing: 0.05em; text-transform: uppercase; }
-    .form-group { margin-bottom: 16px; }
-    label { display: block; font-size: 12px; font-weight: 500; color: #888; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+
+    .form-group { margin-bottom: 18px; }
+
+    label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: #6b7589;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 7px;
+    }
+
+    .input-wrap { position: relative; }
+
+    .input-icon {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #6b7589;
+      font-size: 13px;
+    }
+
     input {
-      width: 100%; background: #0a0a0a; border: 1px solid #333;
-      border-radius: 8px; padding: 10px 14px;
-      color: #f5f5f5; font-family: 'Inter', sans-serif; font-size: 14px;
+      width: 100%;
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 11px 12px 11px 36px;
+      color: #f0f4ff;
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      transition: border-color 0.15s, box-shadow 0.15s;
     }
-    input:focus { outline: none; border-color: #d4a843; }
+
+    input:focus {
+      outline: none;
+      border-color: #C9A84C;
+      box-shadow: 0 0 0 3px rgba(201,168,76,0.12);
+    }
+
+    input::placeholder { color: #404655; }
+
     .btn-login {
-      width: 100%; padding: 12px; border-radius: 8px;
-      background: #d4a843; color: #000;
-      border: none; font-size: 14px; font-weight: 700;
-      cursor: pointer; transition: background 0.15s; margin-top: 8px;
+      width: 100%;
+      padding: 13px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #8B6914 0%, #C9A84C 50%, #F0D080 100%);
+      color: #000;
+      border: none;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-top: 6px;
+      font-family: 'Cinzel', serif;
+      letter-spacing: 0.08em;
+      box-shadow: 0 4px 16px rgba(201,168,76,0.25);
     }
-    .btn-login:hover { background: #e8c06a; }
-    .error { background: rgba(239,68,68,0.15); border: 1px solid #ef4444; color: #ef4444; padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
-    .hint { font-size: 11px; color: #555; text-align: center; margin-top: 20px; }
+
+    .btn-login:hover {
+      box-shadow: 0 6px 28px rgba(201,168,76,0.45);
+      transform: translateY(-1px);
+    }
+
+    .error {
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.3);
+      color: #fca5a5;
+      padding: 11px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .footer-hint {
+      font-size: 11px;
+      color: #404655;
+      text-align: center;
+      margin-top: 24px;
+      letter-spacing: 0.02em;
+    }
   </style>
 </head>
 <body>
-  <div class="login-card">
-    <div class="brand">
-      <div class="brand-mark">B&W</div>
-      <div class="brand-name">B&amp;W Productions</div>
-      <div class="brand-sub">Internal Operations Platform</div>
+  <div class="login-wrap">
+    <div class="login-logo">
+      <div class="logo-ring">
+        <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" overflow="visible">
+          <defs>
+            <radialGradient id="lgBg" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#2a0050" stop-opacity="0.5"/>
+              <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+            </radialGradient>
+            <filter id="lgGlow" x="-40%" y="-40%" width="180%" height="180%">
+              <feGaussianBlur stdDeviation="4" result="blur"/>
+              <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+            <linearGradient id="lgRing" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%"   stop-color="#CC18E8"/>
+              <stop offset="16%"  stop-color="#FF4A1C"/>
+              <stop offset="33%"  stop-color="#FF7A00"/>
+              <stop offset="50%"  stop-color="#FFD400"/>
+              <stop offset="66%"  stop-color="#7CFF2B"/>
+              <stop offset="83%"  stop-color="#18D9FF"/>
+              <stop offset="100%" stop-color="#CC18E8"/>
+            </linearGradient>
+            <linearGradient id="lgGold" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%"   stop-color="#B67A3A"/>
+              <stop offset="40%"  stop-color="#F0D080"/>
+              <stop offset="70%"  stop-color="#D39A52"/>
+              <stop offset="100%" stop-color="#8A5A2B"/>
+            </linearGradient>
+          </defs>
+          <circle cx="60" cy="60" r="52" fill="url(#lgBg)"/>
+          <circle cx="60" cy="60" r="50" fill="none" stroke="url(#lgRing)" stroke-width="7" filter="url(#lgGlow)" opacity="0.95"/>
+          <circle cx="60" cy="60" r="41" fill="none" stroke="url(#lgRing)" stroke-width="2.5" opacity="0.45"/>
+          <text x="60" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="30" font-weight="900"
+            fill="#0d1117" stroke="#0d1117" stroke-width="5">BW</text>
+          <text x="60" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="30" font-weight="900"
+            fill="url(#lgGold)" filter="url(#lgGlow)">BW</text>
+        </svg>
+      </div>
+      <div class="logo-title">BW PRODUCTIONS</div>
+      <div class="logo-sub">Internal Operations Platform</div>
     </div>
-    ${error ? `<div class="error">⚠ ${error}</div>` : ''}
-    <form method="POST" action="/login">
-      <div class="form-group">
-        <label>Email Address</label>
-        <input type="email" name="email" placeholder="you@bwproductions.co.za" required autofocus>
-      </div>
-      <div class="form-group">
-        <label>Password</label>
-        <input type="password" name="password" placeholder="••••••••" required>
-      </div>
-      <button type="submit" class="btn-login">Sign In →</button>
-    </form>
-    <div class="hint">B&W Productions · VAT 4790261301 · Randvaal, 1943</div>
+
+    <div class="login-card">
+      ${error ? `<div class="error"><i class="fas fa-circle-exclamation"></i> ${error}</div>` : ''}
+      <form method="POST" action="/login">
+        <div class="form-group">
+          <label>Email Address</label>
+          <div class="input-wrap">
+            <i class="fas fa-envelope input-icon"></i>
+            <input type="email" name="email" placeholder="you@bwproductions.co.za" required autofocus>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <div class="input-wrap">
+            <i class="fas fa-lock input-icon"></i>
+            <input type="password" name="password" placeholder="••••••••" required>
+          </div>
+        </div>
+        <button type="submit" class="btn-login">Sign In</button>
+      </form>
+    </div>
+
+    <div class="footer-hint">BW Productions · VAT 4790261301 · Randvaal, 1943</div>
   </div>
 </body>
 </html>`

@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BW Productions — Event Logistics & Production</title>
+  <meta name="description" content="BW Productions — South Africa's premier event logistics, production and supply chain partner. Randvaal, Gauteng.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --navy:        #0d1117;
+      --navy-mid:    #161b22;
+      --navy-card:   #1c2230;
+      --navy-border: #21262d;
+      --gold:        #C9A84C;
+      --gold-lt:     #F0D080;
+      --gold-dk:     #8B6914;
+      --white:       #f0f4ff;
+      --muted:       #6b7589;
+      --magenta:     #CC18E8;
+      --red-f:       #FF4A1C;
+      --orange:      #FF7A00;
+      --yellow:      #FFD400;
+      --green-f:     #7CFF2B;
+      --cyan:        #18D9FF;
+      --blue-f:      #1D6BFF;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--navy);
+      color: var(--white);
+      overflow-x: hidden;
+    }
+
+    /* ─── FLAME RING SVG INLINE ─────────────────────────── */
+    .flame-ring-wrap {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* ─── NAV ───────────────────────────────────────────── */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 48px;
+      background: rgba(13,17,23,0.88);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid rgba(33,38,45,0.8);
+      transition: padding 0.3s;
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+    }
+
+    .nav-ring { width: 38px; height: 38px; }
+
+    .nav-title {
+      font-family: 'Cinzel', serif;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      background: linear-gradient(135deg, #B67A3A, #F0D080, #D39A52);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 32px;
+      list-style: none;
+    }
+
+    .nav-links a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      transition: color 0.15s;
+    }
+
+    .nav-links a:hover { color: var(--white); }
+
+    .nav-cta {
+      background: linear-gradient(135deg, var(--gold-dk), var(--gold), var(--gold-lt)) !important;
+      color: #000 !important;
+      padding: 8px 20px;
+      border-radius: 8px;
+      font-weight: 700 !important;
+      transition: box-shadow 0.2s, transform 0.2s !important;
+    }
+
+    .nav-cta:hover {
+      box-shadow: 0 4px 20px rgba(201,168,76,0.4);
+      transform: translateY(-1px);
+      color: #000 !important;
+    }
+
+    /* ─── HERO ──────────────────────────────────────────── */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 120px 24px 80px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Ambient glow backgrounds */
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -20%; left: 50%;
+      transform: translateX(-50%);
+      width: 900px; height: 900px;
+      background: radial-gradient(circle, rgba(204,24,232,0.06) 0%, rgba(24,217,255,0.04) 40%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero-content { position: relative; z-index: 2; max-width: 900px; margin: 0 auto; }
+
+    .hero-logo {
+      width: 200px;
+      height: 200px;
+      margin: 0 auto 32px;
+      filter: drop-shadow(0 0 40px rgba(201,168,76,0.25));
+      animation: float 6s ease-in-out infinite;
+    }
+
+    @keyframes float {
+      0%,100% { transform: translateY(0); }
+      50%      { transform: translateY(-12px); }
+    }
+
+    .hero-eyebrow {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+
+    .hero-eyebrow::before,
+    .hero-eyebrow::after {
+      content: '';
+      display: block;
+      height: 1px;
+      width: 40px;
+      background: linear-gradient(90deg, transparent, var(--muted));
+    }
+
+    .hero-eyebrow::after {
+      background: linear-gradient(90deg, var(--muted), transparent);
+    }
+
+    .hero-title {
+      font-family: 'Cinzel', serif;
+      font-size: clamp(36px, 6vw, 72px);
+      font-weight: 900;
+      line-height: 1.1;
+      letter-spacing: 0.02em;
+      background: linear-gradient(135deg, #B67A3A 0%, #F0D080 35%, #ffffff 50%, #F0D080 65%, #8A5A2B 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 8px;
+    }
+
+    .hero-sub-title {
+      font-family: 'Cinzel', serif;
+      font-size: clamp(16px, 2.5vw, 28px);
+      font-weight: 600;
+      color: var(--muted);
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin-bottom: 24px;
+    }
+
+    .hero-desc {
+      font-size: 16px;
+      color: #8892a4;
+      line-height: 1.7;
+      max-width: 640px;
+      margin: 0 auto 40px;
+    }
+
+    .hero-ctas {
+      display: flex;
+      gap: 14px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn-hero-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 32px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 700;
+      text-decoration: none;
+      background: linear-gradient(135deg, var(--gold-dk), var(--gold), var(--gold-lt));
+      color: #000;
+      box-shadow: 0 4px 24px rgba(201,168,76,0.35);
+      transition: all 0.2s;
+      font-family: 'Cinzel', serif;
+      letter-spacing: 0.04em;
+    }
+
+    .btn-hero-primary:hover {
+      box-shadow: 0 8px 40px rgba(201,168,76,0.55);
+      transform: translateY(-2px);
+    }
+
+    .btn-hero-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 32px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      text-decoration: none;
+      background: transparent;
+      color: var(--white);
+      border: 1px solid var(--navy-border);
+      transition: all 0.2s;
+    }
+
+    .btn-hero-secondary:hover {
+      background: var(--navy-card);
+      border-color: var(--muted);
+    }
+
+    /* Flame divider */
+    .flame-line {
+      height: 1px;
+      background: linear-gradient(90deg,
+        transparent 0%,
+        var(--magenta) 15%,
+        var(--orange) 30%,
+        var(--yellow) 50%,
+        var(--green-f) 70%,
+        var(--cyan) 85%,
+        transparent 100%);
+      opacity: 0.6;
+      margin: 0;
+    }
+
+    /* ─── SECTIONS ──────────────────────────────────────── */
+    section { padding: 96px 24px; }
+
+    .section-inner { max-width: 1100px; margin: 0 auto; }
+
+    .section-eyebrow {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin-bottom: 10px;
+      text-align: center;
+    }
+
+    .section-title {
+      font-family: 'Cinzel', serif;
+      font-size: clamp(24px, 3.5vw, 40px);
+      font-weight: 700;
+      text-align: center;
+      color: var(--white);
+      margin-bottom: 12px;
+    }
+
+    .section-desc {
+      text-align: center;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.7;
+      max-width: 600px;
+      margin: 0 auto 60px;
+    }
+
+    /* ─── SERVICES GRID ─────────────────────────────────── */
+    .services-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+
+    .service-card {
+      background: var(--navy-card);
+      border: 1px solid var(--navy-border);
+      border-radius: 16px;
+      padding: 28px;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .service-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+    }
+
+    .service-card:nth-child(1)::before { background: linear-gradient(90deg, var(--magenta), var(--red-f)); }
+    .service-card:nth-child(2)::before { background: linear-gradient(90deg, var(--orange), var(--yellow)); }
+    .service-card:nth-child(3)::before { background: linear-gradient(90deg, var(--yellow), var(--green-f)); }
+    .service-card:nth-child(4)::before { background: linear-gradient(90deg, var(--green-f), var(--cyan)); }
+    .service-card:nth-child(5)::before { background: linear-gradient(90deg, var(--cyan), var(--blue-f)); }
+    .service-card:nth-child(6)::before { background: linear-gradient(90deg, var(--blue-f), var(--magenta)); }
+
+    .service-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 16px 48px rgba(0,0,0,0.4);
+      border-color: rgba(201,168,76,0.15);
+    }
+
+    .service-icon {
+      width: 52px; height: 52px;
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px;
+      margin-bottom: 18px;
+      background: rgba(201,168,76,0.1);
+    }
+
+    .service-card:nth-child(1) .service-icon { background: rgba(204,24,232,0.12); }
+    .service-card:nth-child(2) .service-icon { background: rgba(255,122,0,0.12); }
+    .service-card:nth-child(3) .service-icon { background: rgba(255,212,0,0.12); }
+    .service-card:nth-child(4) .service-icon { background: rgba(124,255,43,0.12); }
+    .service-card:nth-child(5) .service-icon { background: rgba(24,217,255,0.12); }
+    .service-card:nth-child(6) .service-icon { background: rgba(29,107,255,0.12); }
+
+    .service-title {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--white);
+      margin-bottom: 10px;
+      font-family: 'Cinzel', serif;
+    }
+
+    .service-desc {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
+    /* ─── STATS BAND ────────────────────────────────────── */
+    .stats-band {
+      background: var(--navy-mid);
+      border-top: 1px solid var(--navy-border);
+      border-bottom: 1px solid var(--navy-border);
+      padding: 60px 24px;
+    }
+
+    .stats-band-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 32px;
+      text-align: center;
+    }
+
+    .band-stat-number {
+      font-family: 'Cinzel', serif;
+      font-size: 44px;
+      font-weight: 900;
+      background: linear-gradient(135deg, var(--gold-dk), var(--gold-lt));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      line-height: 1;
+      margin-bottom: 8px;
+    }
+
+    .band-stat-label {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-weight: 600;
+    }
+
+    /* ─── FLEET SECTION ─────────────────────────────────── */
+    .fleet-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+    }
+
+    .fleet-card {
+      background: var(--navy-card);
+      border: 1px solid var(--navy-border);
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+
+    .fleet-card:hover {
+      border-color: rgba(201,168,76,0.2);
+      transform: translateY(-2px);
+    }
+
+    .fleet-icon {
+      font-size: 32px;
+      margin-bottom: 12px;
+    }
+
+    .fleet-class {
+      font-family: 'Cinzel', serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin-bottom: 4px;
+    }
+
+    .fleet-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--white);
+      margin-bottom: 4px;
+    }
+
+    .fleet-detail {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    /* ─── CLIENTS / PARTNERS BAND ───────────────────────── */
+    .partners-band {
+      background: var(--navy-mid);
+      border-top: 1px solid var(--navy-border);
+      border-bottom: 1px solid var(--navy-border);
+      padding: 48px 24px;
+    }
+
+    .partners-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .partners-label {
+      text-align: center;
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      font-weight: 600;
+      margin-bottom: 28px;
+    }
+
+    .partners-logos {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .partner-pill {
+      background: var(--navy-card);
+      border: 1px solid var(--navy-border);
+      border-radius: 40px;
+      padding: 8px 20px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .partner-pill:hover {
+      color: var(--white);
+      border-color: var(--muted);
+      background: var(--navy-hover, #252d3d);
+    }
+
+    .partner-pill.highlight {
+      border-color: rgba(201,168,76,0.3);
+      color: var(--gold);
+      background: rgba(201,168,76,0.06);
+    }
+
+    /* ─── CTA SECTION ───────────────────────────────────── */
+    .cta-section {
+      text-align: center;
+      padding: 96px 24px;
+    }
+
+    .cta-inner {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+
+    .cta-ring {
+      width: 120px;
+      height: 120px;
+      margin: 0 auto 32px;
+      filter: drop-shadow(0 0 24px rgba(201,168,76,0.3));
+    }
+
+    .cta-title {
+      font-family: 'Cinzel', serif;
+      font-size: clamp(26px, 4vw, 44px);
+      font-weight: 900;
+      color: var(--white);
+      margin-bottom: 16px;
+    }
+
+    .cta-desc {
+      font-size: 16px;
+      color: var(--muted);
+      line-height: 1.7;
+      margin-bottom: 36px;
+    }
+
+    /* ─── FOOTER ────────────────────────────────────────── */
+    footer {
+      background: var(--navy-mid);
+      border-top: 1px solid var(--navy-border);
+      padding: 48px 24px 32px;
+    }
+
+    .footer-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .footer-top {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr 1fr;
+      gap: 40px;
+      margin-bottom: 48px;
+    }
+
+    .footer-brand .footer-logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+      text-decoration: none;
+    }
+
+    .footer-ring { width: 40px; height: 40px; }
+
+    .footer-brand-name {
+      font-family: 'Cinzel', serif;
+      font-size: 15px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #B67A3A, #F0D080, #D39A52);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .footer-brand p {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.65;
+      max-width: 280px;
+    }
+
+    .footer-col h4 {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin-bottom: 16px;
+    }
+
+    .footer-col ul { list-style: none; }
+
+    .footer-col li { margin-bottom: 8px; }
+
+    .footer-col a {
+      font-size: 13px;
+      color: var(--muted);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+
+    .footer-col a:hover { color: var(--white); }
+
+    .footer-bottom {
+      border-top: 1px solid var(--navy-border);
+      padding-top: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .footer-copy {
+      font-size: 12px;
+      color: #404655;
+    }
+
+    .footer-vat {
+      font-size: 12px;
+      color: #404655;
+      font-family: 'Courier New', monospace;
+    }
+
+    /* ─── SCROLL ANIMATIONS ─────────────────────────────── */
+    .fade-up {
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+
+    .fade-up.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* ─── MOBILE ────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      nav { padding: 12px 20px; }
+      .nav-links { display: none; }
+      .footer-top { grid-template-columns: 1fr 1fr; }
+      section { padding: 64px 20px; }
+    }
+
+    @media (max-width: 480px) {
+      .footer-top { grid-template-columns: 1fr; }
+      .hero-logo { width: 140px; height: 140px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ═══ NAV ════════════════════════════════════════════ -->
+  <nav>
+    <a class="nav-brand" href="/">
+      <div class="nav-ring">
+        <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" overflow="visible" width="38" height="38">
+          <defs>
+            <filter id="nGlow" x="-40%" y="-40%" width="180%" height="180%">
+              <feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+            <linearGradient id="nRing" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#CC18E8"/>
+              <stop offset="33%" stop-color="#FF7A00"/>
+              <stop offset="66%" stop-color="#7CFF2B"/>
+              <stop offset="100%" stop-color="#CC18E8"/>
+            </linearGradient>
+            <linearGradient id="nGold" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#B67A3A"/>
+              <stop offset="50%" stop-color="#F0D080"/>
+              <stop offset="100%" stop-color="#8A5A2B"/>
+            </linearGradient>
+          </defs>
+          <circle cx="60" cy="60" r="50" fill="none" stroke="url(#nRing)" stroke-width="7" filter="url(#nGlow)" opacity="0.9"/>
+          <circle cx="60" cy="60" r="42" fill="none" stroke="url(#nRing)" stroke-width="2" opacity="0.35"/>
+          <text x="60" y="70" text-anchor="middle" font-family="Georgia,serif" font-size="28" font-weight="900"
+            fill="#0d1117" stroke="#0d1117" stroke-width="4">BW</text>
+          <text x="60" y="70" text-anchor="middle" font-family="Georgia,serif" font-size="28" font-weight="900"
+            fill="url(#nGold)">BW</text>
+        </svg>
+      </div>
+      <span class="nav-title">BW PRODUCTIONS</span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="#services">Services</a></li>
+      <li><a href="#fleet">Fleet</a></li>
+      <li><a href="#partners">Partners</a></li>
+      <li><a href="#contact">Contact</a></li>
+      <li><a href="/login" class="nav-cta">Staff Login</a></li>
+    </ul>
+  </nav>
+
+  <!-- ═══ HERO ═══════════════════════════════════════════ -->
+  <section class="hero">
+    <div class="hero-content">
+      <!-- Logo -->
+      <div class="hero-logo">
+        <svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg" overflow="visible" width="200" height="200">
+          <defs>
+            <radialGradient id="hBg" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#3a0070" stop-opacity="0.55"/>
+              <stop offset="60%" stop-color="#0d0030" stop-opacity="0.2"/>
+              <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+            </radialGradient>
+            <filter id="hGlow" x="-30%" y="-30%" width="160%" height="160%">
+              <feGaussianBlur stdDeviation="5" result="b"/>
+              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+            <filter id="hGlow2" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="10" result="b"/>
+              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+            <linearGradient id="hRing" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%"   stop-color="#CC18E8"/>
+              <stop offset="14%"  stop-color="#FF4A1C"/>
+              <stop offset="28%"  stop-color="#FF7A00"/>
+              <stop offset="42%"  stop-color="#FFD400"/>
+              <stop offset="57%"  stop-color="#7CFF2B"/>
+              <stop offset="71%"  stop-color="#18D9FF"/>
+              <stop offset="85%"  stop-color="#1D6BFF"/>
+              <stop offset="100%" stop-color="#CC18E8"/>
+            </linearGradient>
+            <linearGradient id="hGold" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%"   stop-color="#B67A3A"/>
+              <stop offset="30%"  stop-color="#F0D080"/>
+              <stop offset="60%"  stop-color="#D39A52"/>
+              <stop offset="100%" stop-color="#8A5A2B"/>
+            </linearGradient>
+          </defs>
+          <!-- Ambient blob -->
+          <circle cx="120" cy="120" r="108" fill="url(#hBg)"/>
+          <!-- Outer glow ring -->
+          <circle cx="120" cy="120" r="104" fill="none" stroke="url(#hRing)" stroke-width="2" opacity="0.25" filter="url(#hGlow2)"/>
+          <!-- Main flame ring -->
+          <circle cx="120" cy="120" r="98" fill="none" stroke="url(#hRing)" stroke-width="10" filter="url(#hGlow)" opacity="0.95"/>
+          <!-- Inner accent ring -->
+          <circle cx="120" cy="120" r="82" fill="none" stroke="url(#hRing)" stroke-width="3" opacity="0.4"/>
+          <!-- BW monogram shadow -->
+          <text x="120" y="138" text-anchor="middle" font-family="Georgia,serif" font-size="62" font-weight="900"
+            fill="#0d1117" stroke="#0d1117" stroke-width="10">BW</text>
+          <!-- BW monogram gold -->
+          <text x="120" y="138" text-anchor="middle" font-family="Georgia,serif" font-size="62" font-weight="900"
+            fill="url(#hGold)" filter="url(#hGlow)">BW</text>
+        </svg>
+      </div>
+
+      <div class="hero-eyebrow">South Africa's Premier</div>
+
+      <h1 class="hero-title">BW PRODUCTIONS</h1>
+      <p class="hero-sub-title">Productions</p>
+
+      <p class="hero-desc">
+        Event logistics, production supply chain and fleet management —
+        executed with precision from Randvaal, Gauteng to events across Southern Africa.
+      </p>
+
+      <div class="hero-ctas">
+        <a href="/login" class="btn-hero-primary">
+          <i class="fas fa-gauge-high"></i> Operations Dashboard
+        </a>
+        <a href="#services" class="btn-hero-secondary">
+          <i class="fas fa-arrow-down"></i> Our Services
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <div class="flame-line"></div>
+
+  <!-- ═══ STATS BAND ══════════════════════════════════════ -->
+  <div class="stats-band">
+    <div class="stats-band-inner">
+      <div>
+        <div class="band-stat-number">14</div>
+        <div class="band-stat-label">Fleet Vehicles</div>
+      </div>
+      <div>
+        <div class="band-stat-number">5</div>
+        <div class="band-stat-label">Load Classes</div>
+      </div>
+      <div>
+        <div class="band-stat-number">60+</div>
+        <div class="band-stat-label">Event Cars Deployed</div>
+      </div>
+      <div>
+        <div class="band-stat-number">100%</div>
+        <div class="band-stat-label">SAB SOW Aligned</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flame-line"></div>
+
+  <!-- ═══ SERVICES ════════════════════════════════════════ -->
+  <section id="services">
+    <div class="section-inner">
+      <div class="section-eyebrow">What We Do</div>
+      <h2 class="section-title">Full-Spectrum Event Services</h2>
+      <p class="section-desc">
+        From first load to last chair, we handle every moving part of your event logistics with
+        verified load classes, rated fleet and experienced crew.
+      </p>
+
+      <div class="services-grid">
+        <div class="service-card fade-up">
+          <div class="service-icon">🚛</div>
+          <div class="service-title">Fleet Logistics</div>
+          <p class="service-desc">
+            14-vehicle fleet across 4 load classes — from Isuzu 1-ton bakkies to 14-ton GVM Mercedes Atego.
+            Full load-class scheduling and driver dispatch.
+          </p>
+        </div>
+        <div class="service-card fade-up">
+          <div class="service-icon">🎪</div>
+          <div class="service-title">Event Production</div>
+          <p class="service-desc">
+            End-to-end event setup and breakdown: staging, furniture, gazebos, generators,
+            PA systems and branded equipment.
+          </p>
+        </div>
+        <div class="service-card fade-up">
+          <div class="service-icon">🍺</div>
+          <div class="service-title">Beverage Supply Chain</div>
+          <p class="service-desc">
+            SAB-aligned beverage logistics, brand activation support and
+            responsible service compliance for corporate events.
+          </p>
+        </div>
+        <div class="service-card fade-up">
+          <div class="service-icon">🖨️</div>
+          <div class="service-title">Event Print & Branding</div>
+          <p class="service-desc">
+            Branded event print — A3 Correx boards, A1 pull-up banners, A4 flyers and
+            full large-format print production.
+          </p>
+        </div>
+        <div class="service-card fade-up">
+          <div class="service-icon">👷</div>
+          <div class="service-title">Crew & Labour</div>
+          <p class="service-desc">
+            Experienced event crew from set-up to teardown. Tiered crew packages
+            from R1,250 to R5,350 for events of any scale.
+          </p>
+        </div>
+        <div class="service-card fade-up">
+          <div class="service-icon">📋</div>
+          <div class="service-title">Quotes & Rate Management</div>
+          <p class="service-desc">
+            Transparent rate cards, EG supplier benchmarking and formal quote-to-invoice
+            management through our ops platform.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="flame-line"></div>
+
+  <!-- ═══ FLEET ════════════════════════════════════════════ -->
+  <section id="fleet" style="padding: 80px 24px; background: var(--navy-mid);">
+    <div class="section-inner">
+      <div class="section-eyebrow">Transport Capability</div>
+      <h2 class="section-title">Verified Fleet Register</h2>
+      <p class="section-desc">
+        Every vehicle verified, classed and rated. Two independent load class systems —
+        EG benchmark vs B&W fleet hire — for transparent pricing.
+      </p>
+
+      <div class="fleet-grid">
+        <div class="fleet-card fade-up">
+          <div class="fleet-icon">🛻</div>
+          <div class="fleet-class">Class L1</div>
+          <div class="fleet-name">Isuzu Bakkie × 2</div>
+          <div class="fleet-detail">1-ton · R1,500/day · R1,950/trip EG</div>
+        </div>
+        <div class="fleet-card fade-up">
+          <div class="fleet-icon">🚐</div>
+          <div class="fleet-class">Class L2 · 6 Units</div>
+          <div class="fleet-name">Hyundai, Hino, Tata, Dyna</div>
+          <div class="fleet-detail">~4-ton · R3,500/trip EG</div>
+        </div>
+        <div class="fleet-card fade-up">
+          <div class="fleet-icon">🚛</div>
+          <div class="fleet-class">Class L3</div>
+          <div class="fleet-name">FAW 15.180FL × 2</div>
+          <div class="fleet-detail">8-ton · R4,500/trip EG</div>
+        </div>
+        <div class="fleet-card fade-up">
+          <div class="fleet-icon">🚚</div>
+          <div class="fleet-class">Class L4 · Flagship</div>
+          <div class="fleet-name">Mercedes Atego 1418 × 2</div>
+          <div class="fleet-detail">14-ton GVM confirmed · R5,000/trip EG</div>
+        </div>
+        <div class="fleet-card fade-up">
+          <div class="fleet-icon">🏗️</div>
+          <div class="fleet-class">Class L4 · Heavy</div>
+          <div class="fleet-name">FAW 10-ton / MAN 10-ton</div>
+          <div class="fleet-detail">10-ton · R10,900/trip (Mega Events)</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="flame-line"></div>
+
+  <!-- ═══ PARTNERS / CLIENTS ══════════════════════════════ -->
+  <div class="partners-band" id="partners">
+    <div class="partners-inner">
+      <div class="partners-label">Brands & Partners We Work With</div>
+      <div class="partners-logos">
+        <span class="partner-pill highlight">SAB / AB InBev</span>
+        <span class="partner-pill highlight">Castle Lite</span>
+        <span class="partner-pill">Heineken</span>
+        <span class="partner-pill">Stella Artois</span>
+        <span class="partner-pill">Smirnoff</span>
+        <span class="partner-pill">EG Logistics</span>
+        <span class="partner-pill">Inkredible Print</span>
+        <span class="partner-pill">Ultra SA</span>
+        <span class="partner-pill">Control A</span>
+        <span class="partner-pill">Stage One</span>
+        <span class="partner-pill">Mac-Mahon</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="flame-line"></div>
+
+  <!-- ═══ CTA ══════════════════════════════════════════════ -->
+  <section class="cta-section" id="contact">
+    <div class="cta-inner">
+      <div class="cta-ring">
+        <svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg" overflow="visible" width="120" height="120">
+          <defs>
+            <filter id="cGlow" x="-40%" y="-40%" width="180%" height="180%">
+              <feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+            <linearGradient id="cRing" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#CC18E8"/>
+              <stop offset="25%" stop-color="#FF7A00"/>
+              <stop offset="50%" stop-color="#FFD400"/>
+              <stop offset="75%" stop-color="#18D9FF"/>
+              <stop offset="100%" stop-color="#CC18E8"/>
+            </linearGradient>
+            <linearGradient id="cGold" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#B67A3A"/>
+              <stop offset="50%" stop-color="#F0D080"/>
+              <stop offset="100%" stop-color="#8A5A2B"/>
+            </linearGradient>
+          </defs>
+          <circle cx="120" cy="120" r="100" fill="none" stroke="url(#cRing)" stroke-width="10" filter="url(#cGlow)" opacity="0.9"/>
+          <circle cx="120" cy="120" r="84" fill="none" stroke="url(#cRing)" stroke-width="3" opacity="0.35"/>
+          <text x="120" y="138" text-anchor="middle" font-family="Georgia,serif" font-size="58" font-weight="900"
+            fill="#0d1117" stroke="#0d1117" stroke-width="8">BW</text>
+          <text x="120" y="138" text-anchor="middle" font-family="Georgia,serif" font-size="58" font-weight="900"
+            fill="url(#cGold)" filter="url(#cGlow)">BW</text>
+        </svg>
+      </div>
+      <h2 class="cta-title">Ready to Move?</h2>
+      <p class="cta-desc">
+        Whether you need one bakkie or a full L4 convoy — our team is set up, classed and ready.
+        Reach us at BW Productions, Randvaal.
+      </p>
+      <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
+        <a href="/login" class="btn-hero-primary">
+          <i class="fas fa-gauge-high"></i> Staff Portal
+        </a>
+        <a href="tel:+27000000000" class="btn-hero-secondary">
+          <i class="fas fa-phone"></i> Call Us
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ FOOTER ══════════════════════════════════════════ -->
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <a class="footer-logo" href="/">
+            <div class="footer-ring">
+              <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" overflow="visible" width="40" height="40">
+                <defs>
+                  <filter id="fGlow" x="-40%" y="-40%" width="180%" height="180%">
+                    <feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+                  </filter>
+                  <linearGradient id="fRing" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#CC18E8"/>
+                    <stop offset="50%" stop-color="#FFD400"/>
+                    <stop offset="100%" stop-color="#18D9FF"/>
+                  </linearGradient>
+                  <linearGradient id="fGold" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#B67A3A"/>
+                    <stop offset="50%" stop-color="#F0D080"/>
+                    <stop offset="100%" stop-color="#8A5A2B"/>
+                  </linearGradient>
+                </defs>
+                <circle cx="60" cy="60" r="52" fill="none" stroke="url(#fRing)" stroke-width="7" filter="url(#fGlow)" opacity="0.9"/>
+                <text x="60" y="70" text-anchor="middle" font-family="Georgia,serif" font-size="28" font-weight="900"
+                  fill="#0d1117" stroke="#0d1117" stroke-width="4">BW</text>
+                <text x="60" y="70" text-anchor="middle" font-family="Georgia,serif" font-size="28" font-weight="900"
+                  fill="url(#fGold)">BW</text>
+              </svg>
+            </div>
+            <span class="footer-brand-name">BW PRODUCTIONS</span>
+          </a>
+          <p>Premier event logistics and production supply chain partner. Randvaal, Gauteng, South Africa.</p>
+        </div>
+
+        <div class="footer-col">
+          <h4>Services</h4>
+          <ul>
+            <li><a href="#services">Fleet Logistics</a></li>
+            <li><a href="#services">Event Production</a></li>
+            <li><a href="#services">Beverage Supply</a></li>
+            <li><a href="#services">Event Print</a></li>
+            <li><a href="#services">Crew & Labour</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h4>Company</h4>
+          <ul>
+            <li><a href="#fleet">Fleet Register</a></li>
+            <li><a href="#partners">Partners</a></li>
+            <li><a href="#contact">Contact</a></li>
+            <li><a href="/login">Staff Login</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h4>Contact</h4>
+          <ul>
+            <li><a href="#">Randvaal, 1943</a></li>
+            <li><a href="#">Gauteng, SA</a></li>
+            <li><a href="tel:+27000000000">+27 (0) 00 000 0000</a></li>
+            <li><a href="mailto:ops@bwproductions.co.za">ops@bwproductions.co.za</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <div class="footer-copy">© 2026 BW Productions. All rights reserved.</div>
+        <div class="footer-vat">VAT Reg: 4790261301</div>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Scroll-triggered fade-up animations
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry, i) => {
+        if (entry.isIntersecting) {
+          setTimeout(() => entry.target.classList.add('visible'), i * 80)
+          observer.unobserve(entry.target)
+        }
+      })
+    }, { threshold: 0.1 })
+
+    document.querySelectorAll('.fade-up').forEach(el => observer.observe(el))
+
+    // Nav scroll shrink
+    window.addEventListener('scroll', () => {
+      const nav = document.querySelector('nav')
+      if (window.scrollY > 60) {
+        nav.style.padding = '10px 48px'
+      } else {
+        nav.style.padding = '14px 48px'
+      }
+    })
+  </script>
+</body>
+</html>

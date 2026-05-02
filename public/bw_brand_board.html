@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>B&W Productions — Brand Identity Board</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Inter:wght@300;400;500;600&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --gold:    #C9A84C;
+    --gold-lt: #F0D080;
+    --gold-dk: #8B6914;
+    --cyan:    #00D4FF;
+    --magenta: #FF00CC;
+    --purple:  #7B00FF;
+    --green:   #00FF88;
+    --orange:  #FF6600;
+    --white:   #FFFFFF;
+    --off-wht: #F8F6F0;
+    --black:   #0A0A0A;
+    --dark:    #111111;
+    --mid:     #1A1A1A;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--black);
+    color: var(--white);
+    overflow-x: hidden;
+  }
+
+  /* ── NAV ── */
+  nav {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(10,10,10,0.95);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(201,168,76,0.3);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 40px;
+  }
+  .nav-logo {
+    font-family: 'Cinzel', serif;
+    font-size: 13px; letter-spacing: 4px;
+    color: var(--gold); text-transform: uppercase;
+  }
+  .nav-links { display: flex; gap: 32px; }
+  .nav-links a {
+    color: rgba(255,255,255,0.6); text-decoration: none;
+    font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
+    transition: color .2s;
+  }
+  .nav-links a:hover { color: var(--gold); }
+
+  /* ── HERO — BLACK VERSION ── */
+  .hero-black {
+    position: relative; overflow: hidden;
+    min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse 80% 60% at 50% 50%, #1a0a00 0%, #0d0508 40%, #000000 100%);
+  }
+  .hero-black::before {
+    content: '';
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(circle 300px at 20% 30%, rgba(255,0,204,0.08) 0%, transparent 70%),
+      radial-gradient(circle 400px at 80% 60%, rgba(0,212,255,0.06) 0%, transparent 70%),
+      radial-gradient(circle 250px at 50% 80%, rgba(0,255,136,0.05) 0%, transparent 60%);
+    pointer-events: none;
+  }
+
+  .section-label {
+    font-family: 'Cinzel', serif;
+    font-size: 10px; letter-spacing: 6px; text-transform: uppercase;
+    color: var(--gold); opacity: 0.7;
+    margin-bottom: 32px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .section-label::before, .section-label::after {
+    content: ''; flex: 1; max-width: 60px;
+    height: 1px; background: linear-gradient(90deg, transparent, var(--gold));
+  }
+  .section-label::after { background: linear-gradient(90deg, var(--gold), transparent); }
+
+  .hero-img {
+    width: 100%; max-width: 1100px;
+    border-radius: 4px;
+    box-shadow:
+      0 0 80px rgba(201,168,76,0.15),
+      0 0 160px rgba(255,0,204,0.08),
+      0 40px 80px rgba(0,0,0,0.8);
+  }
+
+  .hero-meta {
+    margin-top: 40px; text-align: center;
+  }
+  .version-pill {
+    display: inline-block;
+    padding: 6px 20px;
+    border: 1px solid rgba(201,168,76,0.4);
+    border-radius: 20px;
+    font-size: 10px; letter-spacing: 3px; text-transform: uppercase;
+    color: var(--gold); margin: 0 8px;
+  }
+
+  /* ── DIVIDER ── */
+  .divider {
+    height: 2px;
+    background: linear-gradient(90deg,
+      transparent 0%, var(--magenta) 15%, var(--purple) 30%,
+      var(--cyan) 50%, var(--green) 70%, var(--orange) 85%, transparent 100%);
+    margin: 0;
+  }
+
+  /* ── HERO WHITE VERSION ── */
+  .hero-white {
+    position: relative; overflow: hidden;
+    min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse 70% 60% at 50% 50%, #fffff8 0%, #f5f3ef 50%, #ede9e0 100%);
+    padding: 80px 40px;
+  }
+  .hero-white .section-label { color: #8B6914; }
+  .hero-white .section-label::before { background: linear-gradient(90deg, transparent, #C9A84C); }
+  .hero-white .section-label::after  { background: linear-gradient(90deg, #C9A84C, transparent); }
+
+  .hero-white .hero-img {
+    box-shadow:
+      0 0 60px rgba(201,168,76,0.2),
+      0 0 120px rgba(255,0,204,0.06),
+      0 30px 60px rgba(0,0,0,0.12);
+  }
+  .hero-white .version-pill {
+    border-color: rgba(139,105,20,0.4); color: #8B6914;
+  }
+
+  /* ── ASSETS GRID ── */
+  .assets-section {
+    padding: 80px 40px;
+    background: var(--dark);
+  }
+  .assets-title {
+    font-family: 'Cinzel', serif;
+    font-size: 11px; letter-spacing: 5px; text-transform: uppercase;
+    color: var(--gold); text-align: center; margin-bottom: 48px;
+  }
+  .assets-grid {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 24px;
+    max-width: 1100px; margin: 0 auto;
+  }
+  .asset-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px; overflow: hidden;
+    transition: transform .3s, border-color .3s, box-shadow .3s;
+  }
+  .asset-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(201,168,76,0.4);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 30px rgba(201,168,76,0.1);
+  }
+  .asset-card img { width: 100%; display: block; }
+  .asset-caption {
+    padding: 14px 16px;
+    font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+    color: rgba(255,255,255,0.4);
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+
+  /* ── COLOUR PALETTE ── */
+  .palette-section {
+    padding: 80px 40px;
+    background: var(--black);
+  }
+  .palette-grid {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    max-width: 1100px; margin: 0 auto;
+    justify-content: center;
+  }
+  .swatch {
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    cursor: default;
+  }
+  .swatch-color {
+    width: 72px; height: 72px; border-radius: 50%;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    transition: transform .2s, box-shadow .2s;
+  }
+  .swatch:hover .swatch-color {
+    transform: scale(1.15);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  }
+  .swatch-name {
+    font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase;
+    color: rgba(255,255,255,0.4); text-align: center; width: 72px;
+  }
+
+  /* ── USAGE PANEL ── */
+  .usage-section {
+    padding: 80px 40px;
+    background: var(--mid);
+  }
+  .usage-grid {
+    display: grid; grid-template-columns: 1fr 1fr 1fr;
+    gap: 24px; max-width: 1100px; margin: 0 auto;
+  }
+  .usage-card {
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px; padding: 28px 24px;
+  }
+  .usage-card-icon {
+    font-size: 28px; margin-bottom: 16px;
+  }
+  .usage-card-title {
+    font-family: 'Cinzel', serif;
+    font-size: 12px; letter-spacing: 3px; text-transform: uppercase;
+    color: var(--gold); margin-bottom: 12px;
+  }
+  .usage-card-body {
+    font-size: 12px; line-height: 1.8;
+    color: rgba(255,255,255,0.55);
+  }
+  .usage-card-body li { list-style: none; padding: 3px 0; }
+  .usage-card-body li::before { content: '→ '; color: var(--gold); }
+
+  /* ── FOOTER ── */
+  footer {
+    padding: 40px;
+    text-align: center;
+    border-top: 1px solid rgba(201,168,76,0.2);
+    background: var(--black);
+  }
+  footer p {
+    font-size: 10px; letter-spacing: 3px; text-transform: uppercase;
+    color: rgba(255,255,255,0.2);
+  }
+
+  /* ── SCROLL FADE IN ── */
+  .fade-in {
+    opacity: 0; transform: translateY(30px);
+    transition: opacity .7s ease, transform .7s ease;
+  }
+  .fade-in.visible { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-logo">B&W Productions — Brand Identity</div>
+  <div class="nav-links">
+    <a href="#black">Dark</a>
+    <a href="#white">Light</a>
+    <a href="#assets">Assets</a>
+    <a href="#palette">Palette</a>
+    <a href="#usage">Usage</a>
+  </div>
+</nav>
+
+<!-- ═══ HERO BLACK ═══ -->
+<section class="hero-black" id="black">
+  <div class="section-label fade-in">Dark Version</div>
+  <img
+    class="hero-img fade-in"
+    src="https://www.genspark.ai/api/files/s/943cl6ML?cache_control=3600"
+    alt="B&W Productions — Black Brand Banner"
+  />
+  <div class="hero-meta fade-in">
+    <span class="version-pill">Black Background</span>
+    <span class="version-pill">16:9 Wide Format</span>
+    <span class="version-pill">Digital Primary</span>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ═══ HERO WHITE ═══ -->
+<section class="hero-white" id="white">
+  <div class="section-label fade-in">Light Version</div>
+  <img
+    class="hero-img fade-in"
+    src="https://www.genspark.ai/api/files/s/vAN5j3Sr?cache_control=3600"
+    alt="B&W Productions — White Brand Banner"
+  />
+  <div class="hero-meta fade-in">
+    <span class="version-pill">White Background</span>
+    <span class="version-pill">16:9 Wide Format</span>
+    <span class="version-pill">Print Ready</span>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ═══ ASSET GRID ═══ -->
+<section class="assets-section" id="assets">
+  <div class="assets-title fade-in">Asset Library</div>
+  <div class="assets-grid">
+
+    <!-- Square icon -->
+    <div class="asset-card fade-in">
+      <img
+        src="https://www.genspark.ai/api/files/s/wIIszrW5?cache_control=3600"
+        alt="BW Icon — Square Black"
+      />
+      <div class="asset-caption">Icon Mark · Square · Dark · Social / Avatar</div>
+    </div>
+
+    <!-- Horizontal lockup -->
+    <div class="asset-card fade-in">
+      <img
+        src="https://www.genspark.ai/api/files/s/IOmHuFQ6?cache_control=3600"
+        alt="BW Horizontal Lockup — White"
+      />
+      <div class="asset-caption">Horizontal Lockup · White · Document Header / Letterhead</div>
+    </div>
+
+    <!-- Original black banner smaller -->
+    <div class="asset-card fade-in" style="grid-column: 1 / -1;">
+      <img
+        src="https://www.genspark.ai/api/files/s/qV2jod2X"
+        alt="BW Productions Original Logo — Dark"
+        style="max-height: 300px; object-fit: contain; background: #060a14;"
+      />
+      <div class="asset-caption">Original Logo — Dark Background · Source Asset</div>
+    </div>
+
+    <!-- Transparent icon -->
+    <div class="asset-card fade-in" style="background: repeating-conic-gradient(#222 0% 25%, #111 0% 50%) 0 0 / 20px 20px;">
+      <img
+        src="https://www.genspark.ai/api/files/s/hiGG8vAg"
+        alt="BW Monogram — Transparent"
+      />
+      <div class="asset-caption">Monogram Only · Transparent PNG · Any Background</div>
+    </div>
+
+    <!-- White transparent variant -->
+    <div class="asset-card fade-in" style="background: repeating-conic-gradient(#ccc 0% 25%, #eee 0% 50%) 0 0 / 20px 20px;">
+      <img
+        src="https://www.genspark.ai/api/files/s/7pieFFeg"
+        alt="BW Monogram + Productions — Transparent"
+      />
+      <div class="asset-caption">Full Mark · Transparent PNG · Versatile Placement</div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══ COLOUR PALETTE ═══ -->
+<section class="palette-section" id="palette">
+  <div class="assets-title fade-in">Brand Colour Spectrum</div>
+  <div class="palette-grid fade-in">
+    <div class="swatch">
+      <div class="swatch-color" style="background: #FF00CC; box-shadow: 0 4px 24px rgba(255,0,204,0.5);"></div>
+      <div class="swatch-name">Magenta</div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #8800FF; box-shadow: 0 4px 24px rgba(136,0,255,0.5);"></div>
+      <div class="swatch-name">Violet</div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #4400DD; box-shadow: 0 4px 24px rgba(68,0,221,0.5);"></div>
+      <div class="swatch-name">Indigo</div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #0066FF; box-shadow: 0 4px 24px rgba(0,102,255,0.5);"></div>
+      <div class="swatch-name">Electric Blue</div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #00D4FF; box-shadow: 0 4px 24px rgba(0,212,255,0.5);"></div>
+      <div class="swatch-name">Cyan</div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #00FFCC; box-shadow: 0 4px 24px rgba(0,255,204,0.5);"></div>
+      <div class="swatch-name">Teal</div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #00FF66; box-shadow: 0 4px 24px rgba(0,255,102,0.5);"></div>
+      <div class="swatch-name">Lime</div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #AAFF00; box-shadow: 0 4px 24px rgba(170,255,0,0.5);"></div>
+      <div class="swatch-name">Yellow-Green</div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #FFD700; box-shadow: 0 4px 24px rgba(255,215,0,0.5);"></div>
+      <div class="swatch-name">Gold</div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #FF8800; box-shadow: 0 4px 24px rgba(255,136,0,0.5);"></div>
+      <div class="swatch-name">Amber</div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #FF4400; box-shadow: 0 4px 24px rgba(255,68,0,0.5);"></div>
+      <div class="swatch-name">Orange Red</div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #CC0000; box-shadow: 0 4px 24px rgba(204,0,0,0.5);"></div>
+      <div class="swatch-name">Crimson</div>
+    </div>
+    <!-- Neutrals -->
+    <div class="swatch">
+      <div class="swatch-color" style="background: #0A0A0A; border: 1px solid #333;"></div>
+      <div class="swatch-name">Matte Black</div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #C9A84C; box-shadow: 0 4px 24px rgba(201,168,76,0.4);"></div>
+      <div class="swatch-name">Brand Gold</div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #FFFFFF; border: 1px solid #ddd;"></div>
+      <div class="swatch-name">White</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ USAGE GUIDELINES ═══ -->
+<section class="usage-section" id="usage">
+  <div class="assets-title fade-in" style="color: var(--gold);">Usage Guidelines</div>
+  <div class="usage-grid">
+
+    <div class="usage-card fade-in">
+      <div class="usage-card-icon">⚫</div>
+      <div class="usage-card-title">Dark Version</div>
+      <div class="usage-card-body">
+        <ul>
+          <li>Digital screens, presentations</li>
+          <li>Social media banners & posts</li>
+          <li>Event backdrops & LED walls</li>
+          <li>Video titles & motion graphics</li>
+          <li>Email headers (dark mode)</li>
+          <li>Website hero sections</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="usage-card fade-in">
+      <div class="usage-card-icon">⚪</div>
+      <div class="usage-card-title">Light Version</div>
+      <div class="usage-card-body">
+        <ul>
+          <li>Printed documents & reports</li>
+          <li>Proposals & quotations</li>
+          <li>Letterheads & invoices</li>
+          <li>Business cards (white BG)</li>
+          <li>Print advertising</li>
+          <li>Document cover pages</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="usage-card fade-in">
+      <div class="usage-card-icon">🔲</div>
+      <div class="usage-card-title">Icon Mark</div>
+      <div class="usage-card-body">
+        <ul>
+          <li>Social media profile pictures</li>
+          <li>App icons & favicons</li>
+          <li>Watermarks on event photos</li>
+          <li>Merchandise & branded gear</li>
+          <li>Corner badge on all docs</li>
+          <li>WhatsApp / Teams display</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="usage-card fade-in">
+      <div class="usage-card-icon">📐</div>
+      <div class="usage-card-title">Clear Space Rule</div>
+      <div class="usage-card-body">
+        <ul>
+          <li>Minimum clear space = height of "B" in BW</li>
+          <li>Never place on busy photographic backgrounds</li>
+          <li>Never stretch or skew proportions</li>
+          <li>Never recolour the BW monogram</li>
+          <li>Never remove the flame ring</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="usage-card fade-in">
+      <div class="usage-card-icon">🎨</div>
+      <div class="usage-card-title">Do's</div>
+      <div class="usage-card-body">
+        <ul>
+          <li>Use gold (#C9A84C) for body text accents</li>
+          <li>Use Cinzel serif for display headings</li>
+          <li>Use Inter for body copy</li>
+          <li>Spectrum dividers between sections</li>
+          <li>Black or white backgrounds only</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="usage-card fade-in">
+      <div class="usage-card-icon">🚫</div>
+      <div class="usage-card-title">Don'ts</div>
+      <div class="usage-card-body">
+        <ul>
+          <li>No grey or coloured backgrounds</li>
+          <li>No logo below 40px wide</li>
+          <li>No drop shadows added externally</li>
+          <li>No low-resolution exports below 300dpi (print)</li>
+          <li>No unapproved colour variants</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══ FOOTER ═══ -->
+<footer>
+  <p>B&W Productions CC · VAT 4790261301 · Brand Identity v3.1 · May 2026</p>
+</footer>
+
+<script>
+  // Scroll fade-in
+  const obs = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        e.target.classList.add('visible');
+        obs.unobserve(e.target);
+      }
+    });
+  }, { threshold: 0.15 });
+
+  document.querySelectorAll('.fade-in').forEach(el => obs.observe(el));
+</script>
+
+</body>
+</html>
