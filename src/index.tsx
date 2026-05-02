@@ -10,6 +10,7 @@ import suppliers from './routes/suppliers.js'
 import events from './routes/events.js'
 import rateCard from './routes/rate-card.js'
 import quotes from './routes/quotes.js'
+import admin from './routes/admin.js'
 
 type Env = { Bindings: { DB: D1Database } }
 
@@ -28,6 +29,7 @@ app.route('/suppliers', suppliers)
 app.route('/events', events)
 app.route('/rate-card', rateCard)
 app.route('/quotes', quotes)
+app.route('/admin', admin)
 
 // Rate card API (for quote builder)
 app.get('/api/rate-card', async (c) => {

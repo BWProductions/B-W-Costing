@@ -12,6 +12,7 @@ export function layout(title: string, body: string, user: AuthUser, activeNav?: 
     { href: '/suppliers',   icon: '🤝', label: 'Suppliers',   key: 'suppliers',  roles: ['founder','ops_director','finance_director'] },
     { href: '/rate-card',   icon: '💰', label: 'Rate Card',   key: 'rate-card',  roles: ['founder','ops_director','finance_director'] },
     { href: '/clients',     icon: '🏢', label: 'Clients',     key: 'clients',    roles: ['founder','ops_director','finance_director','account_director'] },
+    { href: '/admin',        icon: '⚙️', label: 'Admin',        key: 'admin',      roles: ['founder'] },
   ]
 
   const visibleNav = nav.filter(n => (n.roles as string[]).includes(user.role))

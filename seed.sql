@@ -1,12 +1,12 @@
 -- B&W Productions Seed Data
 -- Passwords are hashed: "bw2024!" for all users (bcrypt-style, stored as SHA-256 hex for edge compat)
 
--- USERS (password = "bw2024!" => sha256 hex)
-INSERT OR IGNORE INTO users (email, password_hash, name, role) VALUES
-  ('bibi@bwproductions.co.za',   'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2', 'Bibi Burness',    'founder'),
-  ('brian@bwproductions.co.za',  'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2', 'Brian Ndlovu',    'ops_director'),
-  ('bernie@bwproductions.co.za', 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2', 'Bernie Burness',  'finance_director'),
-  ('rebel@bwproductions.co.za',  'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2', 'Rebel Ravenhill', 'account_director');
+-- USERS — only Bibi active by default. Others added via Admin panel.
+INSERT OR IGNORE INTO users (email, password_hash, name, role, active) VALUES
+  ('info@bwproductions.co.za',   'a0f84805401eee2818103c11866808a1fec4206ff6c29d542a7529c50fe05a43', 'Bibi Burness',    'founder',          1),
+  ('brian@bwproductions.co.za',  'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2', 'Brian Ndlovu',    'ops_director',     0),
+  ('bernie@bwproductions.co.za', 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2', 'Bernie Burness',  'finance_director', 0),
+  ('revel@bwproductions.co.za',  'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2', 'Revel Ravenhill', 'account_director', 0);
 
 -- CLIENTS
 INSERT OR IGNORE INTO clients (name, type, vat_number, payment_terms, contact_primary, contact_email, contact_phone) VALUES
@@ -42,7 +42,7 @@ INSERT OR IGNORE INTO suppliers (name, role, vat_registered, vat_number, payment
   ('CoolZone Rentals',  'Pass-Through', 1, '4500555666', 30, 'Lindiwe Moyo',     'lindiwe@coolzone.co.za',      '086 555 1005'),
   ('Pro Staffing SA',   'COS',          1, '4600666777', 7,  'David Khumalo',    'david@prostaffing.co.za',     '082 555 1006'),
   ('Rapid Fencing',     'Expendable',   1, '4700777888', 30, 'Christo Botha',    'christo@rapidfencing.co.za',  '083 555 1007'),
-  ('BW Internal',       'OPEX',         1, '4790261301', 0,  'Bibi Burness',     'bibi@bwproductions.co.za',    '082 555 1000');
+  ('BW Internal',       'OPEX',         1, '4790261301', 0,  'Bibi Burness',     'info@bwproductions.co.za',    '082 555 1000');
 
 -- LOAD CLASSES
 INSERT OR IGNORE INTO load_classes (class, label, pax_min, pax_max, pallet_min, pallet_max, truck_class, disbursement_multiplier, notes) VALUES
