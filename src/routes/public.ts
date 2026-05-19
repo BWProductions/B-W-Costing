@@ -18,6 +18,19 @@ const PUBLIC_HTML = `<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BW Productions — Event Logistics & Production</title>
   <meta name="description" content="BW Productions — South Africa's premier event logistics, production and supply chain partner. Randvaal, Gauteng.">
+  <!-- ── BW Productions branding (favicon + touch icons) ── -->
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/favicon-192.png">
+  <link rel="shortcut icon" href="/static/favicon.ico">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+  <meta name="theme-color" content="#0A0A0A">
+  <!-- ── Open Graph for shared marketing site link ── -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="B&amp;W Productions">
+  <meta property="og:title" content="BW Productions — Event Logistics & Production">
+  <meta property="og:description" content="South Africa's premier event logistics, production and supply chain partner.">
+  <meta property="og:image" content="/static/bw-logo.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
@@ -71,8 +84,8 @@ const PUBLIC_HTML = `<!DOCTYPE html>
     }
     .hero-content { position: relative; z-index: 2; max-width: 900px; margin: 0 auto; }
     .hero-logo {
-      width: 200px; height: 200px; margin: 0 auto 36px;
-      filter: drop-shadow(0 0 40px rgba(201,168,76,0.28));
+      width: 340px; height: 340px; margin: 0 auto 28px;
+      filter: drop-shadow(0 0 60px rgba(201,168,76,0.38));
       animation: float 6s ease-in-out infinite;
     }
     @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-12px)} }
@@ -225,26 +238,7 @@ const PUBLIC_HTML = `<!DOCTYPE html>
 <!-- NAV -->
 <nav id="nav">
   <a class="nav-brand" href="/about">
-    <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" overflow="visible" width="36" height="36">
-      <defs>
-        <filter id="ng" x="-40%" y="-40%" width="180%" height="180%">
-          <feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-        </filter>
-        <linearGradient id="nr" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#CC18E8"/><stop offset="33%" stop-color="#FF7A00"/>
-          <stop offset="66%" stop-color="#7CFF2B"/><stop offset="100%" stop-color="#CC18E8"/>
-        </linearGradient>
-        <linearGradient id="ngd" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#B67A3A"/><stop offset="50%" stop-color="#F0D080"/><stop offset="100%" stop-color="#8A5A2B"/>
-        </linearGradient>
-      </defs>
-      <circle cx="60" cy="60" r="50" fill="none" stroke="url(#nr)" stroke-width="7" filter="url(#ng)" opacity="0.9"/>
-      <circle cx="60" cy="60" r="42" fill="none" stroke="url(#nr)" stroke-width="2" opacity="0.35"/>
-      <text x="60" y="70" text-anchor="middle" font-family="Georgia,serif" font-size="28" font-weight="900"
-        fill="#0d1117" stroke="#0d1117" stroke-width="4">BW</text>
-      <text x="60" y="70" text-anchor="middle" font-family="Georgia,serif" font-size="28" font-weight="900"
-        fill="url(#ngd)" filter="url(#ng)">BW</text>
-    </svg>
+    <img src="/static/bw-logo.png" alt="BW Productions" width="40" height="40" style="object-fit:contain;display:block;filter:drop-shadow(0 0 6px rgba(201,168,76,0.3))">
     <span class="nav-title">BW PRODUCTIONS</span>
   </a>
   <ul class="nav-links">
@@ -260,42 +254,11 @@ const PUBLIC_HTML = `<!DOCTYPE html>
 <section class="hero">
   <div class="hero-content">
     <div class="hero-logo">
-      <svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg" overflow="visible" width="200" height="200">
-        <defs>
-          <radialGradient id="hb" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stop-color="#3a0070" stop-opacity="0.5"/>
-            <stop offset="100%" stop-color="#000" stop-opacity="0"/>
-          </radialGradient>
-          <filter id="hg" x="-30%" y="-30%" width="160%" height="160%">
-            <feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-          <filter id="hg2" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="10" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-          <linearGradient id="hr" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#CC18E8"/><stop offset="14%" stop-color="#FF4A1C"/>
-            <stop offset="28%" stop-color="#FF7A00"/><stop offset="42%" stop-color="#FFD400"/>
-            <stop offset="57%" stop-color="#7CFF2B"/><stop offset="71%" stop-color="#18D9FF"/>
-            <stop offset="85%" stop-color="#1D6BFF"/><stop offset="100%" stop-color="#CC18E8"/>
-          </linearGradient>
-          <linearGradient id="hgd" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#B67A3A"/><stop offset="30%" stop-color="#F0D080"/>
-            <stop offset="60%" stop-color="#D39A52"/><stop offset="100%" stop-color="#8A5A2B"/>
-          </linearGradient>
-        </defs>
-        <circle cx="120" cy="120" r="108" fill="url(#hb)"/>
-        <circle cx="120" cy="120" r="104" fill="none" stroke="url(#hr)" stroke-width="2" opacity="0.22" filter="url(#hg2)"/>
-        <circle cx="120" cy="120" r="98" fill="none" stroke="url(#hr)" stroke-width="10" filter="url(#hg)" opacity="0.95"/>
-        <circle cx="120" cy="120" r="82" fill="none" stroke="url(#hr)" stroke-width="3" opacity="0.38"/>
-        <text x="120" y="140" text-anchor="middle" font-family="Georgia,serif" font-size="64" font-weight="900"
-          fill="#0d1117" stroke="#0d1117" stroke-width="10">BW</text>
-        <text x="120" y="140" text-anchor="middle" font-family="Georgia,serif" font-size="64" font-weight="900"
-          fill="url(#hgd)" filter="url(#hg)">BW</text>
-      </svg>
+      <img src="/static/bw-logo.png" alt="BW Productions" style="width:100%;height:100%;object-fit:contain;display:block">
     </div>
     <div class="hero-eyebrow">South Africa's Premier</div>
     <h1 class="hero-title">BW PRODUCTIONS</h1>
-    <p class="hero-sub">Productions</p>
+    <p class="hero-sub">Event Logistics &amp; Production</p>
     <p class="hero-desc">
       Event logistics, production supply chain and fleet management —
       executed with precision from Randvaal, Gauteng to events across Southern Africa.
@@ -414,7 +377,6 @@ const PUBLIC_HTML = `<!DOCTYPE html>
     <div class="partners-logos">
       <span class="partner-pill hl">SAB / AB InBev</span>
       <span class="partner-pill hl">Castle Lite</span>
-      <span class="partner-pill">Heineken</span>
       <span class="partner-pill">Stella Artois</span>
       <span class="partner-pill">Smirnoff</span>
       <span class="partner-pill">EG Logistics</span>
@@ -433,26 +395,7 @@ const PUBLIC_HTML = `<!DOCTYPE html>
 <div class="cta-wrap" id="contact">
   <div class="cta-inner">
     <div class="cta-logo">
-      <svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg" overflow="visible" width="110" height="110">
-        <defs>
-          <filter id="cg" x="-40%" y="-40%" width="180%" height="180%">
-            <feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-          <linearGradient id="cr" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#CC18E8"/><stop offset="33%" stop-color="#FFD400"/>
-            <stop offset="66%" stop-color="#18D9FF"/><stop offset="100%" stop-color="#CC18E8"/>
-          </linearGradient>
-          <linearGradient id="cgd" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#B67A3A"/><stop offset="50%" stop-color="#F0D080"/><stop offset="100%" stop-color="#8A5A2B"/>
-          </linearGradient>
-        </defs>
-        <circle cx="120" cy="120" r="100" fill="none" stroke="url(#cr)" stroke-width="10" filter="url(#cg)" opacity="0.9"/>
-        <circle cx="120" cy="120" r="84" fill="none" stroke="url(#cr)" stroke-width="3" opacity="0.32"/>
-        <text x="120" y="140" text-anchor="middle" font-family="Georgia,serif" font-size="60" font-weight="900"
-          fill="#0d1117" stroke="#0d1117" stroke-width="8">BW</text>
-        <text x="120" y="140" text-anchor="middle" font-family="Georgia,serif" font-size="60" font-weight="900"
-          fill="url(#cgd)" filter="url(#cg)">BW</text>
-      </svg>
+      <img src="/static/bw-logo.png" alt="BW Productions" style="width:100%;height:100%;object-fit:contain;display:block">
     </div>
     <h2 class="cta-title">Ready to Move?</h2>
     <p class="cta-desc">Whether you need one bakkie or a full L4 convoy — our team is classed, rated and ready. BW Productions, Randvaal, Gauteng.</p>
@@ -469,24 +412,7 @@ const PUBLIC_HTML = `<!DOCTYPE html>
     <div class="footer-top">
       <div class="footer-brand">
         <a class="footer-logo" href="/about">
-          <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" overflow="visible" width="38" height="38">
-            <defs>
-              <filter id="fg" x="-40%" y="-40%" width="180%" height="180%">
-                <feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-              </filter>
-              <linearGradient id="fr" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#CC18E8"/><stop offset="50%" stop-color="#FFD400"/><stop offset="100%" stop-color="#18D9FF"/>
-              </linearGradient>
-              <linearGradient id="fgd" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#B67A3A"/><stop offset="50%" stop-color="#F0D080"/><stop offset="100%" stop-color="#8A5A2B"/>
-              </linearGradient>
-            </defs>
-            <circle cx="60" cy="60" r="52" fill="none" stroke="url(#fr)" stroke-width="7" filter="url(#fg)" opacity="0.9"/>
-            <text x="60" y="70" text-anchor="middle" font-family="Georgia,serif" font-size="28" font-weight="900"
-              fill="#0d1117" stroke="#0d1117" stroke-width="4">BW</text>
-            <text x="60" y="70" text-anchor="middle" font-family="Georgia,serif" font-size="28" font-weight="900"
-              fill="url(#fgd)">BW</text>
-          </svg>
+          <img src="/static/bw-logo.png" alt="BW Productions" width="42" height="42" style="object-fit:contain;display:block;filter:drop-shadow(0 0 6px rgba(201,168,76,0.3))">
           <span class="footer-brand-name">BW PRODUCTIONS</span>
         </a>
         <p>Premier event logistics and production supply chain. Randvaal, Gauteng, South Africa.</p>

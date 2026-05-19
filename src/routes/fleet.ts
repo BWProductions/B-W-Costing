@@ -3,7 +3,7 @@
 import { Hono } from 'hono'
 import { requireAuth } from '../middleware/auth.js'
 import { layout } from '../lib/layout.js'
-import { formatZAR, formatDate, statusBadge } from '../lib/format.js'
+import { formatZAR, statusBadge } from '../lib/format.js'
 import type { AuthUser } from '../lib/auth.js'
 
 type Env = { Bindings: { DB: D1Database }; Variables: { user: AuthUser } }
@@ -11,57 +11,79 @@ type Env = { Bindings: { DB: D1Database }; Variables: { user: AuthUser } }
 const fleet = new Hono<Env>()
 fleet.use('*', requireAuth)
 
-// Fleet list
+// ── DROPDOWN OPTIONS (single source of truth) ─────────────────────────────
+const TONNAGE_OPTIONS    = ['1 ton', '4 ton', '6 ton', '8 ton', '10 ton', '14 ton', 'Other']
+const VEHICLE_TYPE_OPTS  = [
+  ['sedan',        'Sedan / Light Vehicle'],
+  ['bakkie',       'Bakkie'],
+  ['truck',        'Truck'],
+  ['experiential', 'Experiential / Brand Vehicle'],
+  ['trailer',      'Trailer'],
+  ['other',        'Other'],
+] as const
+const COLOUR_OPTIONS     = ['White', 'Black', 'Blue', 'Red Castle Lager', 'Silver', 'Grey', 'Other']
+const STATUS_OPTIONS     = ['available', 'allocated', 'maintenance', 'retired']
+
+// ── FLEET LIST ────────────────────────────────────────────────────────────
 fleet.get('/', async (c) => {
   const user = c.get('user')
   const db = c.env.DB
   const msg = c.req.query('msg')
 
   const vehicles = await db.prepare(
-    `SELECT * FROM fleet WHERE active=1 ORDER BY vehicle_type, reg_number`
+    `SELECT * FROM fleet WHERE active=1 ORDER BY experiential ASC, vehicle_type, reg_number`
   ).all<any>()
 
-  const rows = vehicles.results.map((v: any) => `
+  const rows = (vehicles.results || []).map((v: any) => {
+    const dims = (v.box_length_m && v.box_width_m && v.box_height_m)
+      ? `${v.box_length_m} × ${v.box_width_m} × ${v.box_height_m} m`
+      : '<span class="text-muted" style="font-size:11px">— measure pending —</span>'
+    const vol = v.box_volume_m3 ? `<span class="text-muted" style="font-size:11px">${v.box_volume_m3} m³</span>` : ''
+    return `
     <tr>
       <td>
         <span class="font-mono" style="font-size:12px;color:var(--bw-gold)">${v.reg_number}</span>
-        ${v.sab_restricted ? '<br><span class="badge badge-sab">SAB Only</span>' : ''}
+        ${v.experiential ? '<br><span class="badge" style="background:rgba(168,85,247,0.18);color:#c4b5fd;border:1px solid rgba(168,85,247,0.4);font-size:10px">🎪 Experiential</span>' : ''}
       </td>
       <td>
-        <div style="font-weight:500">${v.description}</div>
-        <div class="text-muted" style="font-size:11px">${vehicleTypeLabel(v.vehicle_type)} · Class ${v.truck_class ?? '—'}</div>
+        <div style="font-weight:600">${esc(v.description)}</div>
+        <div class="text-muted" style="font-size:11px">${esc(v.model || '')}</div>
       </td>
-      <td class="text-right hide-mobile">${v.payload_kg ? (v.payload_kg/1000).toFixed(1)+'t' : '—'}</td>
+      <td><span class="badge" style="background:rgba(212,175,55,0.15);color:var(--bw-gold);border:1px solid rgba(212,175,55,0.35)">${v.tonnage || '—'}</span></td>
+      <td class="hide-mobile">${colourChip(v.colour)}</td>
+      <td class="hide-mobile" style="font-size:12px">${dims}<br>${vol}</td>
       <td class="text-right hide-mobile">${formatZAR(v.daily_hire_rate ?? 0)}<span class="text-muted">/day</span></td>
       <td class="text-right hide-mobile">${v.fuel_rate_per_km ? 'R '+v.fuel_rate_per_km+'/km' : '—'}</td>
       <td>${statusBadge(v.status)}</td>
-      <td class="hide-mobile text-muted" style="font-size:12px">${v.next_maintenance ? formatDate(v.next_maintenance) : '—'}</td>
       <td>
         <div style="display:flex;gap:6px">
           <a href="/fleet/${v.id}/edit" class="btn btn-outline btn-sm">Edit</a>
           <form method="POST" action="/fleet/${v.id}/status" style="display:inline">
             <select name="status" onchange="this.form.submit()" style="padding:4px 8px;font-size:12px;background:var(--bw-black);border:1px solid var(--bw-border2);border-radius:6px;color:var(--bw-white)">
               <option value="">Change…</option>
-              <option value="available" ${v.status==='available'?'selected':''}>Available</option>
-              <option value="allocated" ${v.status==='allocated'?'selected':''}>Allocated</option>
-              <option value="maintenance" ${v.status==='maintenance'?'selected':''}>Maintenance</option>
-              <option value="retired" ${v.status==='retired'?'selected':''}>Retired</option>
+              ${STATUS_OPTIONS.map(s =>
+                `<option value="${s}" ${v.status===s?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`
+              ).join('')}
             </select>
           </form>
         </div>
       </td>
-    </tr>`).join('')
+    </tr>`
+  }).join('')
 
-  // Summary counts by type
-  const types = vehicles.results.reduce((acc: any, v: any) => {
-    acc[v.vehicle_type] = (acc[v.vehicle_type] || 0) + 1
-    return acc
-  }, {} as Record<string, number>)
+  // Summary counts by tonnage
+  const tonnageCounts: Record<string, number> = {}
+  for (const v of (vehicles.results || [])) {
+    const k = v.tonnage || 'Other'
+    tonnageCounts[k] = (tonnageCounts[k] || 0) + 1
+  }
 
-  const available = vehicles.results.filter((v: any) => v.status === 'available').length
-  const allocated = vehicles.results.filter((v: any) => v.status === 'allocated').length
-  const maint     = vehicles.results.filter((v: any) => v.status === 'maintenance').length
-  const sab       = vehicles.results.filter((v: any) => v.sab_restricted).length
+  const total       = vehicles.results.length
+  const available   = vehicles.results.filter((v: any) => v.status === 'available').length
+  const allocated   = vehicles.results.filter((v: any) => v.status === 'allocated').length
+  const maint       = vehicles.results.filter((v: any) => v.status === 'maintenance').length
+  const experiential= vehicles.results.filter((v: any) => v.experiential).length
+  const deliveryCap = total - experiential
 
   const body = `
     ${msg === 'saved' ? '<div class="alert alert-success">✅ Vehicle saved successfully.</div>' : ''}
@@ -71,8 +93,8 @@ fleet.get('/', async (c) => {
     <div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
       <div class="stat-card stat-gold">
         <div class="stat-label">Total Fleet</div>
-        <div class="stat-value">${vehicles.results.length}</div>
-        <div class="stat-sub">Active vehicles</div>
+        <div class="stat-value">${total}</div>
+        <div class="stat-sub">${deliveryCap} delivery · ${experiential} experiential</div>
       </div>
       <div class="stat-card stat-green">
         <div class="stat-label">Available</div>
@@ -89,25 +111,19 @@ fleet.get('/', async (c) => {
         <div class="stat-value">${maint}</div>
         <div class="stat-sub">Off-road</div>
       </div>
-      <div class="stat-card">
-        <div class="stat-label">SAB-Restricted</div>
-        <div class="stat-value">${sab}</div>
-        <div class="stat-sub">MAN truck only</div>
-      </div>
     </div>
 
-    <!-- FLEET BREAKDOWN -->
+    <!-- TONNAGE BREAKDOWN -->
     <div class="card" style="margin-bottom:20px">
       <div class="card-header">
-        <span class="card-title">Fleet Composition</span>
+        <span class="card-title">Fleet by Tonnage</span>
         <a href="/fleet/new" class="btn btn-gold btn-sm"><i class="fas fa-plus"></i> Add Vehicle</a>
       </div>
       <div style="display:flex;gap:12px;flex-wrap:wrap">
-        ${Object.entries(types).map(([type, count]) =>
-          `<div style="background:var(--bw-black);border:1px solid var(--bw-border);border-radius:8px;padding:10px 16px;text-align:center">
-            <div style="font-size:20px">${vehicleEmoji(type)}</div>
-            <div style="font-size:18px;font-weight:700">${count}</div>
-            <div style="font-size:11px;color:var(--bw-muted)">${vehicleTypeLabel(type)}</div>
+        ${TONNAGE_OPTIONS.filter(t => tonnageCounts[t]).map(t =>
+          `<div style="background:var(--bw-black);border:1px solid var(--bw-border);border-radius:8px;padding:10px 16px;text-align:center;min-width:80px">
+            <div style="font-size:18px;font-weight:700;color:var(--bw-gold)">${tonnageCounts[t]}</div>
+            <div style="font-size:11px;color:var(--bw-muted);text-transform:uppercase;letter-spacing:0.04em">${t}</div>
           </div>`).join('')}
       </div>
     </div>
@@ -128,21 +144,22 @@ fleet.get('/', async (c) => {
             <tr>
               <th>Reg #</th>
               <th>Vehicle</th>
-              <th class="text-right hide-mobile">Payload</th>
+              <th>Tonnage</th>
+              <th class="hide-mobile">Colour</th>
+              <th class="hide-mobile">Box (L × W × H)</th>
               <th class="text-right hide-mobile">Day Rate</th>
               <th class="text-right hide-mobile">Fuel</th>
               <th>Status</th>
-              <th class="hide-mobile">Next Maint.</th>
               <th>Actions</th>
             </tr>
           </thead>
-          <tbody>${rows || '<tr><td colspan="8" class="text-muted" style="text-align:center;padding:20px">No vehicles. <a href="/fleet/new" style="color:var(--bw-gold)">Add first vehicle</a></td></tr>'}</tbody>
+          <tbody>${rows || '<tr><td colspan="9" class="text-muted" style="text-align:center;padding:20px">No vehicles. <a href="/fleet/new" style="color:var(--bw-gold)">Add first vehicle</a></td></tr>'}</tbody>
         </table>
       </div>
     </div>
 
     <div class="alert alert-warn" style="font-size:12px">
-      🔒 <strong>MAN TGS — FC 89 PN GP</strong> is restricted to SAB events only and will never be auto-allocated to non-SAB jobs.
+      🎪 <strong>Experiential vehicles</strong> (Castle Lager truck FC89PNGP, V-Truck DM29KPGP) are tagged for brand activations only and are excluded from delivery / collection vehicle dropdowns.
     </div>
 
     <script>
@@ -158,13 +175,13 @@ fleet.get('/', async (c) => {
   return c.html(layout('Fleet', body, user, 'fleet'))
 })
 
-// New vehicle form
+// ── NEW VEHICLE FORM ─────────────────────────────────────────────────────
 fleet.get('/new', (c) => {
   const user = c.get('user')
   return c.html(layout('Add Vehicle', vehicleForm(null), user, 'fleet'))
 })
 
-// Edit vehicle form
+// ── EDIT VEHICLE FORM ────────────────────────────────────────────────────
 fleet.get('/:id/edit', async (c) => {
   const user = c.get('user')
   const v = await c.env.DB.prepare('SELECT * FROM fleet WHERE id=?').bind(c.req.param('id')).first<any>()
@@ -172,133 +189,180 @@ fleet.get('/:id/edit', async (c) => {
   return c.html(layout('Edit Vehicle', vehicleForm(v), user, 'fleet'))
 })
 
-// Create vehicle
+// ── CREATE VEHICLE ───────────────────────────────────────────────────────
 fleet.post('/new', async (c) => {
   const body = await c.req.parseBody()
+  const L = numOrNull(body.box_length_m)
+  const W = numOrNull(body.box_width_m)
+  const H = numOrNull(body.box_height_m)
+  const vol = (L && W && H) ? Math.round(L * W * H * 100) / 100 : null
   await c.env.DB.prepare(`
-    INSERT INTO fleet (reg_number,description,vehicle_type,payload_kg,daily_hire_rate,fuel_rate_per_km,truck_class,sab_restricted,status,next_maintenance,replacement_horizon,notes)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+    INSERT INTO fleet
+      (reg_number, description, model, tonnage, vehicle_type,
+       box_length_m, box_width_m, box_height_m, box_volume_m3,
+       colour, daily_hire_rate, fuel_rate_per_km, experiential, status, notes)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).bind(
-    body.reg_number, body.description, body.vehicle_type,
-    Number(body.payload_kg)||0, Number(body.daily_hire_rate)||0,
-    Number(body.fuel_rate_per_km)||0, body.truck_class,
-    body.sab_restricted === 'on' ? 1 : 0,
-    body.status || 'available',
-    body.next_maintenance || null, body.replacement_horizon || null, body.notes || null
+    String(body.reg_number || '').trim(),
+    String(body.description || '').trim(),
+    String(body.model || '').trim() || null,
+    String(body.tonnage || '').trim() || null,
+    String(body.vehicle_type || 'truck').trim(),
+    L, W, H, vol,
+    String(body.colour || '').trim() || null,
+    Number(body.daily_hire_rate) || 0,
+    Number(body.fuel_rate_per_km) || 0,
+    body.experiential === 'on' ? 1 : 0,
+    String(body.status || 'available'),
+    String(body.notes || '').trim() || null
   ).run()
   return c.redirect('/fleet?msg=saved')
 })
 
-// Update vehicle
+// ── UPDATE VEHICLE ───────────────────────────────────────────────────────
 fleet.post('/:id/edit', async (c) => {
   const body = await c.req.parseBody()
+  const L = numOrNull(body.box_length_m)
+  const W = numOrNull(body.box_width_m)
+  const H = numOrNull(body.box_height_m)
+  const vol = (L && W && H) ? Math.round(L * W * H * 100) / 100 : null
   await c.env.DB.prepare(`
-    UPDATE fleet SET reg_number=?,description=?,vehicle_type=?,payload_kg=?,
-    daily_hire_rate=?,fuel_rate_per_km=?,truck_class=?,sab_restricted=?,
-    status=?,next_maintenance=?,replacement_horizon=?,notes=?
+    UPDATE fleet SET
+      reg_number=?, description=?, model=?, tonnage=?, vehicle_type=?,
+      box_length_m=?, box_width_m=?, box_height_m=?, box_volume_m3=?,
+      colour=?, daily_hire_rate=?, fuel_rate_per_km=?, experiential=?,
+      status=?, notes=?, updated_at=CURRENT_TIMESTAMP
     WHERE id=?
   `).bind(
-    body.reg_number, body.description, body.vehicle_type,
-    Number(body.payload_kg)||0, Number(body.daily_hire_rate)||0,
-    Number(body.fuel_rate_per_km)||0, body.truck_class,
-    body.sab_restricted === 'on' ? 1 : 0,
-    body.status,
-    body.next_maintenance || null, body.replacement_horizon || null, body.notes || null,
+    String(body.reg_number || '').trim(),
+    String(body.description || '').trim(),
+    String(body.model || '').trim() || null,
+    String(body.tonnage || '').trim() || null,
+    String(body.vehicle_type || 'truck').trim(),
+    L, W, H, vol,
+    String(body.colour || '').trim() || null,
+    Number(body.daily_hire_rate) || 0,
+    Number(body.fuel_rate_per_km) || 0,
+    body.experiential === 'on' ? 1 : 0,
+    String(body.status || 'available'),
+    String(body.notes || '').trim() || null,
     c.req.param('id')
   ).run()
   return c.redirect('/fleet?msg=saved')
 })
 
-// Quick status change
+// ── QUICK STATUS CHANGE ──────────────────────────────────────────────────
 fleet.post('/:id/status', async (c) => {
   const body = await c.req.parseBody()
   if (body.status) {
-    await c.env.DB.prepare('UPDATE fleet SET status=? WHERE id=?')
+    await c.env.DB.prepare('UPDATE fleet SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')
       .bind(body.status, c.req.param('id')).run()
   }
   return c.redirect('/fleet')
 })
 
-// Soft-delete
+// ── SOFT-DELETE ──────────────────────────────────────────────────────────
 fleet.post('/:id/delete', async (c) => {
-  await c.env.DB.prepare('UPDATE fleet SET active=0 WHERE id=?').bind(c.req.param('id')).run()
+  await c.env.DB.prepare('UPDATE fleet SET active=0, updated_at=CURRENT_TIMESTAMP WHERE id=?')
+    .bind(c.req.param('id')).run()
   return c.redirect('/fleet?msg=deleted')
 })
 
-// --- HELPERS ---
+// ── HELPERS ──────────────────────────────────────────────────────────────
 function vehicleForm(v: any): string {
   const isEdit = !!v
   return `
-    <div style="max-width:720px">
+    <div style="max-width:760px">
       <div style="margin-bottom:20px">
         <a href="/fleet" class="btn btn-outline btn-sm">← Back to Fleet</a>
       </div>
       <div class="card">
         <div class="card-header">
-          <span class="card-title">${isEdit ? `Edit — ${v.reg_number}` : 'Add New Vehicle'}</span>
+          <span class="card-title">${isEdit ? `Edit — ${esc(v.reg_number)}` : 'Add New Vehicle'}</span>
         </div>
         <form method="POST" action="${isEdit ? `/fleet/${v.id}/edit` : '/fleet/new'}">
           <div class="form-grid">
             <div class="form-group">
               <label>Registration Number *</label>
-              <input type="text" name="reg_number" value="${v?.reg_number??''}" placeholder="e.g. BW 01 GP" required>
+              <input type="text" name="reg_number" value="${attr(v?.reg_number)}" placeholder="e.g. MB10JLGP" required>
             </div>
             <div class="form-group">
               <label>Status</label>
               <select name="status">
-                ${['available','allocated','maintenance','retired'].map(s =>
+                ${STATUS_OPTIONS.map(s =>
                   `<option value="${s}" ${v?.status===s?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`
                 ).join('')}
               </select>
             </div>
+
             <div class="form-group full">
-              <label>Description *</label>
-              <input type="text" name="description" value="${v?.description??''}" placeholder="e.g. Isuzu NPR 400 4t Truck" required>
+              <label>Vehicle Name / Description *</label>
+              <input type="text" name="description" value="${attr(v?.description)}" placeholder="e.g. ISUZU BAKKIE NO 1" required>
+            </div>
+
+            <div class="form-group full">
+              <label>Model</label>
+              <input type="text" name="model" value="${attr(v?.model)}" placeholder="e.g. ISUZU D-MAX 4JA1HP5318">
+            </div>
+
+            <div class="form-group">
+              <label>Tonnage *</label>
+              <select name="tonnage" required>
+                <option value="">— select —</option>
+                ${TONNAGE_OPTIONS.map(t =>
+                  `<option value="${t}" ${v?.tonnage===t?'selected':''}>${t}</option>`
+                ).join('')}
+              </select>
             </div>
             <div class="form-group">
               <label>Vehicle Type *</label>
               <select name="vehicle_type" required>
-                ${[['bakkie','Bakkie'],['4t','4t Truck'],['8t','8t Truck'],['10t','10t Truck'],['trailer','Trailer'],['other','Other']].map(([val,lbl]) =>
+                ${VEHICLE_TYPE_OPTS.map(([val,lbl]) =>
                   `<option value="${val}" ${v?.vehicle_type===val?'selected':''}>${lbl}</option>`
                 ).join('')}
               </select>
             </div>
             <div class="form-group">
-              <label>Load Class</label>
-              <select name="truck_class">
-                ${['L1','L2','L3','L4','any'].map(cls =>
-                  `<option value="${cls}" ${v?.truck_class===cls?'selected':''}>${cls}</option>`
+              <label>Colour</label>
+              <select name="colour">
+                <option value="">— select —</option>
+                ${COLOUR_OPTIONS.map(col =>
+                  `<option value="${col}" ${v?.colour===col?'selected':''}>${col}</option>`
                 ).join('')}
               </select>
             </div>
-            <div class="form-group">
-              <label>Payload (kg)</label>
-              <input type="number" name="payload_kg" value="${v?.payload_kg??''}" placeholder="4000" min="0">
+
+            <div class="form-group full">
+              <label style="display:flex;align-items:center;justify-content:space-between">
+                <span>Cargo Box Dimensions (metres)</span>
+                <span class="text-muted" style="font-size:11px;font-weight:400;text-transform:none;letter-spacing:0">Volume auto-calculated · leave blank if not applicable (sedans)</span>
+              </label>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+                <input type="number" name="box_length_m" value="${attr(v?.box_length_m)}" placeholder="L (m)" step="0.01" min="0">
+                <input type="number" name="box_width_m"  value="${attr(v?.box_width_m)}"  placeholder="W (m)" step="0.01" min="0">
+                <input type="number" name="box_height_m" value="${attr(v?.box_height_m)}" placeholder="H (m)" step="0.01" min="0">
+              </div>
+              ${v?.box_volume_m3 ? `<div class="text-muted" style="font-size:12px;margin-top:6px">Current volume: <strong style="color:var(--bw-gold)">${v.box_volume_m3} m³</strong></div>` : ''}
             </div>
+
             <div class="form-group">
               <label>Daily Hire Rate (R)</label>
-              <input type="number" name="daily_hire_rate" value="${v?.daily_hire_rate??''}" placeholder="1800" min="0" step="50">
+              <input type="number" name="daily_hire_rate" value="${attr(v?.daily_hire_rate)}" placeholder="3500" min="0" step="50">
             </div>
             <div class="form-group">
               <label>Fuel Rate (R/km)</label>
-              <input type="number" name="fuel_rate_per_km" value="${v?.fuel_rate_per_km??''}" placeholder="3.20" min="0" step="0.10">
+              <input type="number" name="fuel_rate_per_km" value="${attr(v?.fuel_rate_per_km)}" placeholder="27.00" min="0" step="0.10">
             </div>
-            <div class="form-group">
-              <label>Next Maintenance</label>
-              <input type="date" name="next_maintenance" value="${v?.next_maintenance??''}">
-            </div>
-            <div class="form-group">
-              <label>Replacement Horizon</label>
-              <input type="date" name="replacement_horizon" value="${v?.replacement_horizon??''}">
-            </div>
+
             <div class="form-group full">
               <label>Notes</label>
-              <textarea name="notes" placeholder="Any notes about this vehicle…">${v?.notes??''}</textarea>
+              <textarea name="notes" placeholder="Any notes about this vehicle…">${esc(v?.notes ?? '')}</textarea>
             </div>
+
             <div class="form-group full">
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-size:13px">
-                <input type="checkbox" name="sab_restricted" ${v?.sab_restricted?'checked':''} style="width:auto">
-                <span>🔒 SAB-Restricted — this vehicle can ONLY be allocated to SAB events</span>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-size:13px;background:rgba(168,85,247,0.08);padding:10px 14px;border-radius:8px;border:1px solid rgba(168,85,247,0.25)">
+                <input type="checkbox" name="experiential" ${v?.experiential?'checked':''} style="width:auto">
+                <span>🎪 <strong>Experiential / Brand Vehicle</strong> — used for activations only, will be excluded from delivery vehicle dropdowns</span>
               </label>
             </div>
           </div>
@@ -316,14 +380,39 @@ function vehicleForm(v: any): string {
     </div>`
 }
 
-function vehicleTypeLabel(t: string): string {
-  const m: Record<string,string> = { bakkie:'Bakkie', '4t':'4t Truck', '8t':'8t Truck', '10t':'10t Truck', trailer:'Trailer', other:'Other' }
-  return m[t] ?? t
+function colourChip(colour: string | null): string {
+  if (!colour) return '<span class="text-muted">—</span>'
+  const swatch: Record<string, string> = {
+    'White':            '#f5f5f5',
+    'Black':            '#1a1a1a',
+    'Blue':             '#3b82f6',
+    'Red Castle Lager': '#dc2626',
+    'Silver':           '#c0c0c0',
+    'Grey':             '#6b7280',
+  }
+  const c = swatch[colour] || '#888'
+  return `<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px"><span style="width:12px;height:12px;border-radius:50%;background:${c};border:1px solid rgba(255,255,255,0.2);display:inline-block"></span>${esc(colour)}</span>`
 }
 
-function vehicleEmoji(t: string): string {
-  const m: Record<string,string> = { bakkie:'🛻', '4t':'🚛', '8t':'🚚', '10t':'🏗', trailer:'⛟', other:'🚗' }
-  return m[t] ?? '🚗'
+function numOrNull(v: any): number | null {
+  if (v === null || v === undefined || v === '') return null
+  const n = Number(v)
+  return isFinite(n) && n > 0 ? n : null
+}
+
+function esc(s: any): string {
+  if (s === null || s === undefined) return ''
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function attr(s: any): string {
+  if (s === null || s === undefined) return ''
+  return String(s).replace(/"/g, '&quot;')
 }
 
 export default fleet

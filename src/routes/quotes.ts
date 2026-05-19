@@ -562,11 +562,11 @@ function quoteBuilderHTML(
               <label>Allocated Vehicle</label>
               <select name="fleet_id" id="fleetSelect">
                 <option value="">— Auto / TBD —</option>
-                ${fleet.map(v => `<option value="${v.id}" data-sab="${v.sab_restricted}">${v.reg_number} — ${v.description} (${formatZAR(v.daily_hire_rate)}/day)</option>`).join('')}
+                ${fleet.filter(v => !v.experiential).map(v => `<option value="${v.id}" data-experiential="${v.experiential || 0}">${v.description} — ${v.tonnage || ''} (${v.reg_number}) — ${formatZAR(v.daily_hire_rate)}/day</option>`).join('')}
               </select>
             </div>
-            <div id="sabFleetWarning" style="display:none" class="alert alert-warn" style="font-size:12px">
-              ⚠ Non-SAB event — MAN FC 89 PN GP is excluded
+            <div style="font-size:11px;color:var(--bw-muted);margin-top:4px">
+              🎪 Experiential vehicles (Castle Lager truck, V-Truck) are hidden from this list — they're for brand activations only.
             </div>
             <div class="form-group">
               <label>Disbursement Multiplier</label>

@@ -13,6 +13,13 @@ import rateCard from './routes/rate-card.js'
 import quotes from './routes/quotes.js'
 import admin from './routes/admin.js'
 import { publicLanding } from './routes/public.js'
+import account from './routes/account.js'
+import questionSheet from './routes/question-sheet.js'
+import printSheets from './routes/print-sheets.js'
+import field, { musicbusApp, djdriversApp } from './routes/field.js'
+import fieldAdmin from './routes/field-admin.js'
+import plannerExtractor from './routes/planner-extractor.js'
+import productsAdmin from './routes/products-admin.js'
 
 type Env = { Bindings: { DB: D1Database } }
 
@@ -29,7 +36,26 @@ app.get('/about', publicLanding)
 // ── Auth routes (login / logout — no auth required)
 app.route('/', auth)
 
+// ── Planning Calendar Extractor — mounted under /field/admin/planner-extractor
+//     Must be registered BEFORE the broader /field/admin and /field routes
+app.route('/field/admin/planner-extractor', plannerExtractor)
+
+// ── Master Products Admin — mounted under /field/admin/products
+//     Must be registered BEFORE the broader /field/admin route
+app.route('/field/admin/products', productsAdmin)
+
+// ── Field Admin (login-protected) — MUST be before /field to avoid prefix clash
+app.route('/field/admin', fieldAdmin)
+
+// ── Field Operations App (public — no login required) — MUST be before dashboard /
+app.route('/field', field)
+
+// ── Music Bus + DJ Drivers fleet apps (public — no login) — separate from B&W
+app.route('/musicbus', musicbusApp)
+app.route('/djdrivers', djdriversApp)
+
 // ── Protected app routes
+app.route('/account', account)
 app.route('/', dashboard)
 app.route('/fleet', fleet)
 app.route('/clients', clients)
@@ -38,6 +64,8 @@ app.route('/events', events)
 app.route('/rate-card', rateCard)
 app.route('/quotes', quotes)
 app.route('/admin', admin)
+app.route('/question-sheet', questionSheet)
+app.route('/print-sheets', printSheets)
 
 // ── API: Rate card
 app.get('/api/rate-card', async (c) => {
@@ -98,29 +126,7 @@ app.notFound((c) => c.html(`<!DOCTYPE html>
 <body>
   <div class="wrap">
     <div class="ring">
-      <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" overflow="visible" width="100" height="100">
-        <defs>
-          <filter id="g" x="-40%" y="-40%" width="180%" height="180%">
-            <feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-          <linearGradient id="r" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#CC18E8"/>
-            <stop offset="33%" stop-color="#FF7A00"/>
-            <stop offset="66%" stop-color="#7CFF2B"/>
-            <stop offset="100%" stop-color="#18D9FF"/>
-          </linearGradient>
-          <linearGradient id="gd" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#B67A3A"/>
-            <stop offset="50%" stop-color="#F0D080"/>
-            <stop offset="100%" stop-color="#8A5A2B"/>
-          </linearGradient>
-        </defs>
-        <circle cx="60" cy="60" r="52" fill="none" stroke="url(#r)" stroke-width="6" filter="url(#g)" opacity="0.9"/>
-        <text x="60" y="70" text-anchor="middle" font-family="Georgia,serif" font-size="26" font-weight="900"
-          fill="#0d1117" stroke="#0d1117" stroke-width="4">BW</text>
-        <text x="60" y="70" text-anchor="middle" font-family="Georgia,serif" font-size="26" font-weight="900"
-          fill="url(#gd)" filter="url(#g)">BW</text>
-      </svg>
+      <img src="/static/bw-logo.png" alt="BW Productions" width="110" height="110" style="object-fit:contain;display:block;filter:drop-shadow(0 0 18px rgba(201,168,76,0.35))">
     </div>
     <h1>Lost in Transit</h1>
     <p>That route isn't on the load sheet.<br>Let's get you back on track.</p>

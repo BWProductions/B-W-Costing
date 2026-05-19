@@ -67,13 +67,14 @@ dashboard.get('/', async (c) => {
 
   // Open actions data (hardcoded from session data — will be DB-driven in v2)
   const openActionsHigh = [
-    { label: 'EG 60-day terms', detail: 'Get written confirmation — 7-day printed term is only enforceable one', owner: 'Brian (Sihpo)' },
+    { label: 'EG 60-day terms', detail: 'Get written confirmation — 7-day printed term is only enforceable one', owner: 'Brian (Sipho)' },
     { label: 'Inkredible Print VAT', detail: '0% VAT on ~R21k — request corrected tax invoice', owner: 'Finance' },
     { label: 'Stage One reclassify', detail: 'Instruct accountant to move 8-ton asset to Fixed Asset register', owner: 'Finance' },
-    { label: 'FAW 2nd reg number', detail: 'Second FAW 8-ton reg outstanding — needed for insurance & dispatch', owner: 'Brian (Sihpo)' },
-    { label: 'Toyota Dyna GVM', detail: 'Verify actual GVM — currently unconfirmed, affects load class', owner: 'Ops' },
-    { label: 'Control A contact', detail: 'Castle Lite items off-site since Feb — no cover on 60+ items', owner: 'Brian (Sihpo)' },
+    { label: 'FAW 2nd reg number', detail: 'Second FAW 8-ton reg outstanding — needed for insurance & dispatch', owner: 'Brian (Sipho)' },
+    { label: 'Toyota Dyna GVM', detail: 'Verify actual GVM — currently unconfirmed, affects load class', owner: 'Brian (Sipho)' },
+    { label: 'Control A contact', detail: 'Castle Lite items off-site since Feb — no cover on 60+ items', owner: 'Brian (Sipho)' },
     { label: 'Stella recount', detail: '33 SKUs on hold — physical recount required', owner: 'Warehouse' },
+    { label: 'Vouchers — CLOSED', detail: 'Voucher system is closed. No new vouchers to be issued or processed.', owner: 'Finance' },
   ]
 
   const actionRows = openActionsHigh.map(a => `
@@ -86,10 +87,10 @@ dashboard.get('/', async (c) => {
 
   // Fleet summary (from verified data)
   const fleetSummary = [
-    { reg: 'MB10JLGP / MB11JLGP', type: 'Isuzu Bakkie', class: 'L1 — 1-ton', status: '✅ Active', rate: 'R1,500/day' },
+    { reg: 'KB250-01 / KB250-02', type: 'Isuzu KB 250 D-TEQ × 2', class: 'L1 — 1-ton', status: '✅ Active', rate: 'R950/day' },
     { reg: 'Various (6 units)',    type: 'L2 Mix (Hyundai EX8, Hino, Tata, Dyna)', class: 'L2 — ~4-ton', status: '✅ Active', rate: 'R3,500/trip' },
     { reg: 'FAW-001 / pending',   type: 'FAW 15.180FL × 2', class: 'L3 — 8-ton', status: '⚠ 2nd Reg', rate: 'R4,500/trip' },
-    { reg: 'Atego-01 / Atego-02', type: 'Mercedes Atego 1418 × 2', class: 'L4 — 14-ton GVM', status: '✅ Active', rate: 'R5,000/trip' },
+    { reg: 'Atego-01 / Atego-02', type: 'Mercedes Atego 1418 × 2', class: 'L4 — 14-ton GVM', status: '✅ Active — BW Owned', rate: 'R5,000/trip' },
     { reg: 'FAW-10T / MAN-10T',   type: 'FAW 10-ton / MAN 10-ton', class: 'L4 — 10-ton', status: '✅ Active', rate: 'R10,900/trip' },
   ]
 

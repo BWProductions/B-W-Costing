@@ -1,6 +1,7 @@
 // Admin routes — User Management (Founder only)
 
 import { Hono } from 'hono'
+import * as XLSX from 'xlsx/xlsx.mjs'
 import { layout } from '../lib/layout.js'
 import { can, hashPassword } from '../lib/auth.js'
 import type { AuthUser } from '../lib/auth.js'
@@ -106,7 +107,7 @@ admin.get('/', async (c) => {
 
     <div class="card">
       <div class="card-header">
-        <span class="card-title"><i class="fas fa-users" style="color:var(--bw-gold)"></i> &nbsp;System Users</span>
+        <span class="card-title"><i class="fas fa-users" style="color:var(--gold)"></i> &nbsp;System Users</span>
         <button class="btn btn-gold btn-sm" onclick="openAdd()">
           <i class="fas fa-user-plus"></i> Add User
         </button>
@@ -128,8 +129,37 @@ admin.get('/', async (c) => {
       </div>
     </div>
 
-    <div class="card" style="border-color:#333">
-      <div class="card-title" style="margin-bottom:12px"><i class="fas fa-shield-alt" style="color:var(--bw-gold)"></i> &nbsp;Role Permissions</div>
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title"><i class="fas fa-file-export" style="color:var(--gold)"></i> &nbsp;Export Data (.xlsx)</span>
+      </div>
+      <div style="padding:14px 4px;color:var(--muted);font-size:13px;line-height:1.6">
+        Download the full contents of each table as an Excel workbook. Headers match the database columns 1:1, so future imports can use the same format.
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;padding:0 4px 8px">
+        <a href="/admin/export/clients.xlsx" class="btn btn-outline btn-sm">
+          <i class="fas fa-building"></i> Clients
+        </a>
+        <a href="/admin/export/events.xlsx" class="btn btn-outline btn-sm">
+          <i class="fas fa-calendar-day"></i> Events
+        </a>
+        <a href="/admin/export/quotes.xlsx" class="btn btn-outline btn-sm">
+          <i class="fas fa-file-invoice-dollar"></i> Quotes (with line items)
+        </a>
+        <a href="/admin/export/rate-card.xlsx" class="btn btn-outline btn-sm">
+          <i class="fas fa-list-ol"></i> Rate Card
+        </a>
+        <a href="/admin/export/fleet.xlsx" class="btn btn-outline btn-sm">
+          <i class="fas fa-truck"></i> Fleet
+        </a>
+        <a href="/admin/export/all.xlsx" class="btn btn-gold btn-sm">
+          <i class="fas fa-file-zipper"></i> Everything (one file)
+        </a>
+      </div>
+    </div>
+
+    <div class="card card-glow">
+      <div class="card-title" style="margin-bottom:12px"><i class="fas fa-shield-halved" style="color:var(--gold)"></i> &nbsp;Role Permissions</div>
       <div class="perm-grid">
         <div class="perm-row perm-header">
           <div>Permission</div>
@@ -211,14 +241,15 @@ admin.get('/', async (c) => {
       .user-cell { display:flex; align-items:center; gap:10px; }
       .user-avatar-sm {
         width:34px; height:34px; border-radius:50%;
-        background:var(--bw-gold); color:#000;
+        background:linear-gradient(135deg,var(--magenta),var(--blue-flame)); color:#fff;
         display:flex; align-items:center; justify-content:center;
         font-weight:700; font-size:14px; flex-shrink:0;
+        box-shadow:0 0 10px rgba(204,24,232,0.3);
       }
       .user-full-name { font-weight:600; font-size:13px; }
       .user-email-sm { font-size:11px; color:var(--bw-muted); }
       .you-tag {
-        background:var(--bw-gold); color:#000;
+        background:linear-gradient(135deg,var(--gold-dk),var(--gold-lt)); color:#000;
         font-size:9px; font-weight:800; padding:1px 5px;
         border-radius:4px; vertical-align:middle; margin-left:4px;
         letter-spacing:0.05em;
@@ -226,7 +257,7 @@ admin.get('/', async (c) => {
       .row-inactive td { opacity:0.45; }
       .row-inactive:hover td { opacity:0.65; }
       .status-dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:5px; vertical-align:middle; }
-      .dot-green { background:var(--bw-success); box-shadow:0 0 6px var(--bw-success); }
+      .dot-green { background:var(--success); box-shadow:0 0 6px var(--success); }
       .dot-grey  { background:#555; }
       .action-group { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
       .badge-blue   { background:rgba(59,130,246,0.15); color:#60a5fa; border:1px solid #3b82f6; }
@@ -236,27 +267,34 @@ admin.get('/', async (c) => {
 
       /* PERMISSIONS TABLE */
       .perm-grid { display:flex; flex-direction:column; gap:0; font-size:12px; }
-      .perm-row { display:grid; grid-template-columns:2fr 1fr 1fr 1fr 1fr 1fr; gap:0; padding:9px 12px; border-bottom:1px solid var(--bw-border); align-items:center; }
+      .perm-row { display:grid; grid-template-columns:2fr 1fr 1fr 1fr 1fr 1fr; gap:0; padding:9px 12px; border-bottom:1px solid var(--navy-border); align-items:center; }
       .perm-row:last-child { border-bottom:none; }
-      .perm-header { font-size:10px; font-weight:600; color:var(--bw-muted); text-transform:uppercase; letter-spacing:0.06em; background:rgba(255,255,255,0.02); border-radius:6px 6px 0 0; }
+      .perm-header { font-size:10px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; background:rgba(255,255,255,0.02); border-radius:6px 6px 0 0; }
       .perm-check { text-align:center; }
-      .tick { color:var(--bw-success); font-size:13px; }
-      .cross { color:var(--bw-border2); font-size:13px; }
+      .tick { color:var(--success); font-size:13px; }
+      .cross { color:var(--navy-border); font-size:13px; }
 
       /* MODAL */
       .modal-overlay {
-        position:fixed; inset:0; background:rgba(0,0,0,0.7);
+        position:fixed; inset:0; background:rgba(0,0,0,0.75);
+        backdrop-filter:blur(4px);
         z-index:500; display:flex; align-items:center; justify-content:center; padding:20px;
       }
       .modal-box {
-        background:var(--bw-card); border:1px solid var(--bw-border2);
+        background:var(--navy-card); border:1px solid var(--navy-border);
         border-radius:14px; padding:28px; width:100%; max-width:520px;
-        box-shadow:0 24px 60px rgba(0,0,0,0.5);
+        box-shadow:0 24px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(201,168,76,0.05);
+        position:relative; overflow:hidden;
+      }
+      .modal-box::before {
+        content:''; display:block; height:2px;
+        background:linear-gradient(90deg,transparent,var(--magenta),var(--orange),var(--gold),var(--cyan),transparent);
+        position:absolute; top:0; left:0; right:0;
       }
       .modal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; }
-      .modal-title { font-size:16px; font-weight:700; color:var(--bw-white); }
-      .modal-close { background:none; border:none; color:var(--bw-muted); font-size:18px; cursor:pointer; padding:4px; transition:color 0.15s; }
-      .modal-close:hover { color:var(--bw-danger); }
+      .modal-title { font-size:16px; font-weight:700; color:var(--white); font-family:'Cinzel',serif; }
+      .modal-close { background:none; border:none; color:var(--muted); font-size:18px; cursor:pointer; padding:4px; transition:color 0.15s; }
+      .modal-close:hover { color:var(--danger); }
     </style>
 
     <script>
@@ -434,5 +472,193 @@ function permRow(label: string, perms: number[]): string {
   ).join('')
   return `<div class="perm-row"><div>${label}</div>${cells}</div>`
 }
+
+// ─── XLSX EXPORT HELPERS ────────────────────────────────────────────────────
+function rowsToSheet(rows: any[], sheetName: string): XLSX.WorkSheet {
+  const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ note: 'No data' }])
+  // Auto-size columns based on header + content lengths (capped at 60)
+  const headers = rows.length ? Object.keys(rows[0]) : ['note']
+  ws['!cols'] = headers.map(h => {
+    const maxLen = rows.reduce((m, r) => Math.max(m, String(r[h] ?? '').length), h.length)
+    return { wch: Math.min(60, Math.max(10, maxLen + 2)) }
+  })
+  return ws
+}
+
+function workbookResponse(wb: XLSX.WorkBook, filename: string): Response {
+  const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer
+  return new Response(buf, {
+    headers: {
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Cache-Control': 'no-store'
+    }
+  })
+}
+
+function dateStamp(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+// ─── EXPORTS ────────────────────────────────────────────────────────────────
+
+admin.get('/export/clients.xlsx', async (c) => {
+  const rs = await c.env.DB.prepare(
+    `SELECT id, name, type, vat_number, reg_number, payment_terms, credit_limit,
+            contact_primary, contact_email, contact_phone, billing_address, notes,
+            active, created_at
+     FROM clients ORDER BY id`
+  ).all<any>()
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, rowsToSheet(rs.results || [], 'Clients'), 'Clients')
+  return workbookResponse(wb, `bw-clients-${dateStamp()}.xlsx`)
+})
+
+admin.get('/export/events.xlsx', async (c) => {
+  const rs = await c.env.DB.prepare(
+    `SELECT e.id, e.name, e.event_date, c.name AS client_name, e.client_id,
+            e.venue, e.venue_city, e.pax, e.status, e.is_sab_event, e.notes,
+            e.created_by, e.created_at, e.updated_at
+     FROM events e
+     LEFT JOIN clients c ON c.id = e.client_id
+     ORDER BY e.event_date DESC, e.id DESC`
+  ).all<any>()
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, rowsToSheet(rs.results || [], 'Events'), 'Events')
+  return workbookResponse(wb, `bw-events-${dateStamp()}.xlsx`)
+})
+
+admin.get('/export/quotes.xlsx', async (c) => {
+  // Quotes summary
+  const quotes = await c.env.DB.prepare(
+    `SELECT q.id, q.quote_number, q.version, q.status,
+            e.name AS event_name, e.event_date, c.name AS client_name,
+            q.event_id, q.load_class, q.fleet_id,
+            q.subtotal, q.disbursement_multiplier, q.disbursement_amount,
+            q.vat_rate, q.vat_amount, q.total,
+            q.internal_cost, q.margin, q.notes, q.terms,
+            q.created_by, q.created_at, q.updated_at
+     FROM quotes q
+     LEFT JOIN events e  ON e.id = q.event_id
+     LEFT JOIN clients c ON c.id = e.client_id
+     ORDER BY q.id DESC`
+  ).all<any>()
+
+  // Line items
+  const lines = await c.env.DB.prepare(
+    `SELECT qli.id, qli.quote_id, q.quote_number,
+            qli.category, qli.description, qli.unit, qli.quantity,
+            qli.unit_rate, qli.line_total,
+            qli.is_setup, qli.is_strike,
+            qli.supplier_id, qli.cost_rate, qli.cost_total,
+            qli.visible_to_client, qli.sort_order,
+            qli.rate_card_id
+     FROM quote_line_items qli
+     LEFT JOIN quotes q ON q.id = qli.quote_id
+     ORDER BY qli.quote_id, qli.sort_order, qli.id`
+  ).all<any>()
+
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, rowsToSheet(quotes.results || [], 'Quotes'), 'Quotes')
+  XLSX.utils.book_append_sheet(wb, rowsToSheet(lines.results || [], 'LineItems'), 'LineItems')
+  return workbookResponse(wb, `bw-quotes-${dateStamp()}.xlsx`)
+})
+
+admin.get('/export/rate-card.xlsx', async (c) => {
+  const rs = await c.env.DB.prepare(
+    `SELECT rc.id, rc.category, rc.line_item, rc.unit,
+            rc.base_rate, rc.discount_pct, rc.effective_rate,
+            rc.supplier_id, s.name AS supplier_name,
+            rc.load_class, rc.notes, rc.active, rc.updated_at
+     FROM rate_card rc
+     LEFT JOIN suppliers s ON s.id = rc.supplier_id
+     ORDER BY rc.category, rc.line_item`
+  ).all<any>()
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, rowsToSheet(rs.results || [], 'RateCard'), 'RateCard')
+  return workbookResponse(wb, `bw-rate-card-${dateStamp()}.xlsx`)
+})
+
+admin.get('/export/fleet.xlsx', async (c) => {
+  const rs = await c.env.DB.prepare(
+    `SELECT id, reg_number, description, model, tonnage, vehicle_type,
+            box_length_m, box_width_m, box_height_m, box_volume_m3,
+            colour, daily_hire_rate, fuel_rate_per_km,
+            experiential, status, notes, active, created_at, updated_at
+     FROM fleet
+     ORDER BY experiential, vehicle_type, reg_number`
+  ).all<any>()
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, rowsToSheet(rs.results || [], 'Fleet'), 'Fleet')
+  return workbookResponse(wb, `bw-fleet-${dateStamp()}.xlsx`)
+})
+
+admin.get('/export/all.xlsx', async (c) => {
+  const [clients, events, quotes, lines, rateCard, fleet] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT id, name, type, vat_number, reg_number, payment_terms, credit_limit,
+              contact_primary, contact_email, contact_phone, billing_address, notes,
+              active, created_at
+       FROM clients ORDER BY id`
+    ).all<any>(),
+    c.env.DB.prepare(
+      `SELECT e.id, e.name, e.event_date, c.name AS client_name, e.client_id,
+              e.venue, e.venue_city, e.pax, e.status, e.is_sab_event, e.notes,
+              e.created_by, e.created_at, e.updated_at
+       FROM events e LEFT JOIN clients c ON c.id = e.client_id
+       ORDER BY e.event_date DESC, e.id DESC`
+    ).all<any>(),
+    c.env.DB.prepare(
+      `SELECT q.id, q.quote_number, q.version, q.status,
+              e.name AS event_name, e.event_date, c.name AS client_name,
+              q.event_id, q.load_class, q.fleet_id,
+              q.subtotal, q.disbursement_multiplier, q.disbursement_amount,
+              q.vat_rate, q.vat_amount, q.total,
+              q.internal_cost, q.margin, q.notes, q.terms,
+              q.created_by, q.created_at, q.updated_at
+       FROM quotes q
+       LEFT JOIN events e  ON e.id = q.event_id
+       LEFT JOIN clients c ON c.id = e.client_id
+       ORDER BY q.id DESC`
+    ).all<any>(),
+    c.env.DB.prepare(
+      `SELECT qli.id, qli.quote_id, q.quote_number,
+              qli.category, qli.description, qli.unit, qli.quantity,
+              qli.unit_rate, qli.line_total,
+              qli.is_setup, qli.is_strike,
+              qli.supplier_id, qli.cost_rate, qli.cost_total,
+              qli.visible_to_client, qli.sort_order, qli.rate_card_id
+       FROM quote_line_items qli
+       LEFT JOIN quotes q ON q.id = qli.quote_id
+       ORDER BY qli.quote_id, qli.sort_order, qli.id`
+    ).all<any>(),
+    c.env.DB.prepare(
+      `SELECT rc.id, rc.category, rc.line_item, rc.unit,
+              rc.base_rate, rc.discount_pct, rc.effective_rate,
+              rc.supplier_id, s.name AS supplier_name,
+              rc.load_class, rc.notes, rc.active, rc.updated_at
+       FROM rate_card rc
+       LEFT JOIN suppliers s ON s.id = rc.supplier_id
+       ORDER BY rc.category, rc.line_item`
+    ).all<any>(),
+    c.env.DB.prepare(
+      `SELECT id, reg_number, description, model, tonnage, vehicle_type,
+              box_length_m, box_width_m, box_height_m, box_volume_m3,
+              colour, daily_hire_rate, fuel_rate_per_km,
+              experiential, status, notes, active, created_at, updated_at
+       FROM fleet
+       ORDER BY experiential, vehicle_type, reg_number`
+    ).all<any>(),
+  ])
+
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, rowsToSheet(clients.results  || [], 'Clients'),   'Clients')
+  XLSX.utils.book_append_sheet(wb, rowsToSheet(events.results   || [], 'Events'),    'Events')
+  XLSX.utils.book_append_sheet(wb, rowsToSheet(quotes.results   || [], 'Quotes'),    'Quotes')
+  XLSX.utils.book_append_sheet(wb, rowsToSheet(lines.results    || [], 'LineItems'), 'LineItems')
+  XLSX.utils.book_append_sheet(wb, rowsToSheet(rateCard.results || [], 'RateCard'),  'RateCard')
+  XLSX.utils.book_append_sheet(wb, rowsToSheet(fleet.results    || [], 'Fleet'),     'Fleet')
+  return workbookResponse(wb, `bw-full-export-${dateStamp()}.xlsx`)
+})
 
 export default admin

@@ -9,49 +9,26 @@ import { ROLE_LABELS } from './auth.js'
 // Flame rainbow: magenta #CC18E8 → red #FF4A1C → orange #FF7A00 → yellow #FFD400 → green #7CFF2B → cyan #18D9FF → blue #1D6BFF
 // "PRODUCTIONS" text: bronze-gold gradient #B67A3A → #D39A52 → #8A5A2B
 
-const FLAME_RING_SVG = `
-<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;overflow:visible">
-  <defs>
-    <radialGradient id="bgGlow" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#2a0050" stop-opacity="0.4"/>
-      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
-    </radialGradient>
-    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="3" result="blur"/>
-      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%"   stop-color="#CC18E8"/>
-      <stop offset="16%"  stop-color="#FF4A1C"/>
-      <stop offset="33%"  stop-color="#FF7A00"/>
-      <stop offset="50%"  stop-color="#FFD400"/>
-      <stop offset="66%"  stop-color="#7CFF2B"/>
-      <stop offset="83%"  stop-color="#18D9FF"/>
-      <stop offset="100%" stop-color="#CC18E8"/>
-    </linearGradient>
-  </defs>
-  <!-- outer glow blob -->
-  <circle cx="60" cy="60" r="50" fill="url(#bgGlow)"/>
-  <!-- flame ring -->
-  <circle cx="60" cy="60" r="46" fill="none" stroke="url(#ringGrad)" stroke-width="6" filter="url(#glow)" opacity="0.9"/>
-  <circle cx="60" cy="60" r="38" fill="none" stroke="url(#ringGrad)" stroke-width="3" opacity="0.5"/>
-  <!-- BW monogram -->
-  <text x="60" y="70" text-anchor="middle" font-family="Georgia,serif" font-size="28" font-weight="900"
-    fill="#0d1117" stroke="#0d1117" stroke-width="4">BW</text>
-  <text x="60" y="70" text-anchor="middle" font-family="Georgia,serif" font-size="28" font-weight="900"
-    fill="white" filter="url(#glow)">BW</text>
-</svg>`
+const FLAME_RING_SVG = `<img src="/static/bw-logo.png" alt="BW Productions" style="width:100%;height:100%;object-fit:contain;display:block">`
 
 export function layout(title: string, body: string, user: AuthUser, activeNav?: string): string {
   const nav = [
-    { href: '/',          icon: 'fa-gauge-high',    label: 'Dashboard',  key: 'dashboard',  roles: ['founder','ops_director','finance_director','account_director','crew'] },
-    { href: '/events',    icon: 'fa-calendar-days', label: 'Events',     key: 'events',     roles: ['founder','ops_director','finance_director','account_director'] },
-    { href: '/quotes',    icon: 'fa-file-invoice',  label: 'Quotes',     key: 'quotes',     roles: ['founder','ops_director','finance_director','account_director'] },
-    { href: '/fleet',     icon: 'fa-truck',         label: 'Fleet',      key: 'fleet',      roles: ['founder','ops_director'] },
-    { href: '/suppliers', icon: 'fa-handshake',     label: 'Suppliers',  key: 'suppliers',  roles: ['founder','ops_director','finance_director'] },
-    { href: '/rate-card', icon: 'fa-tags',          label: 'Rate Card',  key: 'rate-card',  roles: ['founder','ops_director','finance_director'] },
-    { href: '/clients',   icon: 'fa-building',      label: 'Clients',    key: 'clients',    roles: ['founder','ops_director','finance_director','account_director'] },
-    { href: '/admin',     icon: 'fa-gear',          label: 'Admin',      key: 'admin',      roles: ['founder'] },
+    { href: '/',                          icon: 'fa-gauge-high',       label: 'Dashboard',      key: 'dashboard',      roles: ['founder','ops_director','finance_director','account_director','crew'] },
+    { href: '/events',                    icon: 'fa-calendar-days',    label: 'Events',         key: 'events',         roles: ['founder','ops_director','finance_director','account_director'] },
+    { href: '/quotes',                    icon: 'fa-file-invoice',     label: 'Quotes',         key: 'quotes',         roles: ['founder','ops_director','finance_director','account_director'] },
+    { href: '/fleet',                     icon: 'fa-truck',            label: 'Fleet',          key: 'fleet',          roles: ['founder','ops_director'] },
+    { href: '/suppliers',                 icon: 'fa-handshake',        label: 'Suppliers',      key: 'suppliers',      roles: ['founder','ops_director','finance_director'] },
+    { href: '/rate-card',                 icon: 'fa-tags',             label: 'Rate Card',      key: 'rate-card',      roles: ['founder','ops_director','finance_director'] },
+    { href: '/clients',                   icon: 'fa-building',         label: 'Clients',        key: 'clients',        roles: ['founder','ops_director','finance_director','account_director'] },
+    { href: '/question-sheet',            icon: 'fa-clipboard-list',   label: 'Question Sheet', key: 'question-sheet', roles: ['founder','ops_director','account_director'] },
+    { href: '/print-sheets/rate-card-print', icon: 'fa-print',        label: 'Print Sheets',   key: 'handbook',       roles: ['founder','ops_director','finance_director'] },
+    { href: '/field',                      icon: 'fa-clipboard-check', label: 'Field Ops',      key: 'field',          roles: ['founder','ops_director','account_director','crew'] },
+    { href: '/field/admin',               icon: 'fa-inbox',            label: 'Field Admin',    key: 'field-admin',    roles: ['founder','ops_director'] },
+    { href: '/field/admin/planner-extractor', icon: 'fa-calendar-week', label: 'Planner Extractor', key: 'planner-extractor', roles: ['founder','ops_director','finance_director','account_director','crew'] },
+    { href: '/field/admin/damages',       icon: 'fa-triangle-exclamation', label: 'Vehicle Damages', key: 'damages',     roles: ['founder','ops_director','finance_director','account_director','crew'] },
+    { href: '/field/admin/products',      icon: 'fa-boxes-stacked',    label: 'Master Products',key: 'products',       roles: ['founder','ops_director','finance_director','account_director','crew'] },
+    { href: '/admin',                     icon: 'fa-gear',             label: 'Admin',          key: 'admin',          roles: ['founder'] },
+    { href: '/account',                   icon: 'fa-circle-user',      label: 'My Account',     key: 'account',        roles: ['founder','ops_director','finance_director','account_director','crew'] },
   ]
 
   const visibleNav = nav.filter(n => (n.roles as string[]).includes(user.role))
@@ -68,6 +45,13 @@ export function layout(title: string, body: string, user: AuthUser, activeNav?: 
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title} — BW Productions</title>
+  <!-- ── BW Productions branding (favicon + touch icons) ── -->
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/favicon-192.png">
+  <link rel="shortcut icon" href="/static/favicon.ico">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+  <meta name="theme-color" content="#0A0A0A">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;900&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
@@ -143,10 +127,11 @@ export function layout(title: string, body: string, user: AuthUser, activeNav?: 
     }
 
     .brand-ring {
-      width: 44px;
-      height: 44px;
+      width: 80px;
+      height: 80px;
       flex-shrink: 0;
       position: relative;
+      filter: drop-shadow(0 0 12px rgba(201,168,76,0.35));
     }
 
     .brand-text-wrap { display: flex; flex-direction: column; }
@@ -664,10 +649,10 @@ export function layout(title: string, body: string, user: AuthUser, activeNav?: 
 <body>
   <!-- SIDEBAR -->
   <nav class="sidebar" id="sidebar">
-    <a class="sidebar-brand" href="/">
+    <a class="sidebar-brand" href="/" style="flex-direction:column;align-items:center;text-align:center;padding:20px 12px 16px;gap:6px;">
       <div class="brand-ring">${FLAME_RING_SVG}</div>
-      <div class="brand-text-wrap">
-        <div class="brand-name">BW Productions</div>
+      <div class="brand-text-wrap" style="text-align:center;">
+        <div class="brand-name" style="font-size:11px;letter-spacing:0.05em;">BW PRODUCTIONS</div>
         <div class="brand-sub">Ops Platform v2</div>
       </div>
     </a>
@@ -726,6 +711,13 @@ export function loginPage(error?: string): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sign In — BW Productions</title>
+  <!-- ── BW Productions branding (favicon + touch icons) ── -->
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/favicon-192.png">
+  <link rel="shortcut icon" href="/static/favicon.ico">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+  <meta name="theme-color" content="#0A0A0A">
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
   <style>
@@ -775,32 +767,31 @@ export function loginPage(error?: string): string {
     }
 
     .logo-ring {
-      width: 100px;
-      height: 100px;
-      margin: 0 auto 16px;
+      width: 280px;
+      height: 280px;
+      margin: 0 auto 12px;
       position: relative;
-      filter: drop-shadow(0 0 20px rgba(201,168,76,0.3));
+      filter: drop-shadow(0 0 48px rgba(201,168,76,0.45));
     }
-
-    .logo-ring svg { width: 100%; height: 100%; overflow: visible; }
 
     .logo-title {
       font-family: 'Cinzel', serif;
-      font-size: 22px;
+      font-size: 30px;
       font-weight: 900;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.08em;
       background: linear-gradient(135deg, #B67A3A 0%, #F0D080 40%, #D39A52 60%, #8A5A2B 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
+      line-height: 1.2;
     }
 
     .logo-sub {
-      font-size: 10px;
+      font-size: 11px;
       color: #6b7589;
-      letter-spacing: 0.18em;
+      letter-spacing: 0.22em;
       text-transform: uppercase;
-      margin-top: 4px;
+      margin-top: 8px;
     }
 
     /* Card */
@@ -913,40 +904,7 @@ export function loginPage(error?: string): string {
   <div class="login-wrap">
     <div class="login-logo">
       <div class="logo-ring">
-        <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" overflow="visible">
-          <defs>
-            <radialGradient id="lgBg" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stop-color="#2a0050" stop-opacity="0.5"/>
-              <stop offset="100%" stop-color="#000" stop-opacity="0"/>
-            </radialGradient>
-            <filter id="lgGlow" x="-40%" y="-40%" width="180%" height="180%">
-              <feGaussianBlur stdDeviation="4" result="blur"/>
-              <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-            </filter>
-            <linearGradient id="lgRing" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%"   stop-color="#CC18E8"/>
-              <stop offset="16%"  stop-color="#FF4A1C"/>
-              <stop offset="33%"  stop-color="#FF7A00"/>
-              <stop offset="50%"  stop-color="#FFD400"/>
-              <stop offset="66%"  stop-color="#7CFF2B"/>
-              <stop offset="83%"  stop-color="#18D9FF"/>
-              <stop offset="100%" stop-color="#CC18E8"/>
-            </linearGradient>
-            <linearGradient id="lgGold" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%"   stop-color="#B67A3A"/>
-              <stop offset="40%"  stop-color="#F0D080"/>
-              <stop offset="70%"  stop-color="#D39A52"/>
-              <stop offset="100%" stop-color="#8A5A2B"/>
-            </linearGradient>
-          </defs>
-          <circle cx="60" cy="60" r="52" fill="url(#lgBg)"/>
-          <circle cx="60" cy="60" r="50" fill="none" stroke="url(#lgRing)" stroke-width="7" filter="url(#lgGlow)" opacity="0.95"/>
-          <circle cx="60" cy="60" r="41" fill="none" stroke="url(#lgRing)" stroke-width="2.5" opacity="0.45"/>
-          <text x="60" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="30" font-weight="900"
-            fill="#0d1117" stroke="#0d1117" stroke-width="5">BW</text>
-          <text x="60" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="30" font-weight="900"
-            fill="url(#lgGold)" filter="url(#lgGlow)">BW</text>
-        </svg>
+        <img src="/static/bw-logo.png" alt="BW Productions" style="width:100%;height:100%;object-fit:contain;display:block">
       </div>
       <div class="logo-title">BW PRODUCTIONS</div>
       <div class="logo-sub">Internal Operations Platform</div>
