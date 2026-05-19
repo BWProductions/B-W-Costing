@@ -18,12 +18,12 @@ const app = new Hono<Env>()
 const FORM_LABELS: Record<string, string> = {
   delivery: 'Delivery Note', collection: 'Collection Note',
   repair: 'Repair Note', inspection: 'Vehicle Inspection', shortlist: 'Shortlist',
-  musicbus_inspection: 'Music Bus Inspection', dj_inspection: 'DJ Drivers Inspection'
+  musicbus_inspection: 'Music Bus Inspection'
 }
 const FORM_COLORS: Record<string, string> = {
   delivery: 'success', collection: 'warn', repair: 'danger',
   inspection: 'info', shortlist: '#8b5cf6',
-  musicbus_inspection: '#22d3ee', dj_inspection: '#a78bfa'
+  musicbus_inspection: '#22d3ee'
 }
 
 function esc(s: any): string {
@@ -412,14 +412,6 @@ app.get('/', requireAuth, async (c) => {
       <a href="/field/admin/musicbus-vehicles" class="btn btn-sm btn-secondary"><i class="fas fa-truck"></i> Vehicles</a>
       <a href="/field/admin/musicbus-drivers" class="btn btn-sm btn-secondary"><i class="fas fa-users"></i> Drivers</a>
       <a href="/field/admin/musicbus-damages" class="btn btn-sm btn-secondary"><i class="fas fa-exclamation-triangle"></i> Damages</a>
-    </div>
-
-    <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;padding:12px;background:rgba(167,139,250,0.06);border:1px solid rgba(167,139,250,0.25);border-radius:10px">
-      <div style="font-size:11px;font-weight:700;color:#a78bfa;text-transform:uppercase;letter-spacing:0.06em;align-self:center;margin-right:6px">🎧 DJ Drivers</div>
-      <a href="/djdrivers" target="_blank" class="btn btn-sm btn-secondary"><i class="fas fa-external-link-alt"></i> Public App</a>
-      <a href="/field/admin/djdrivers-vehicles" class="btn btn-sm btn-secondary"><i class="fas fa-truck"></i> Vehicles</a>
-      <a href="/field/admin/djdrivers-drivers" class="btn btn-sm btn-secondary"><i class="fas fa-users"></i> Drivers</a>
-      <a href="/field/admin/djdrivers-damages" class="btn btn-sm btn-secondary"><i class="fas fa-exclamation-triangle"></i> Damages</a>
     </div>
 
     ${pendingSuggested > 0 ? `
@@ -2944,11 +2936,7 @@ const MUSICBUS_ADMIN: FleetAdminCfg = {
   vehicleTable: 'music_bus_vehicles', driverTable: 'music_bus_drivers',
   formType: 'musicbus_inspection', publicPath: '/musicbus'
 }
-const DJDRIVERS_ADMIN: FleetAdminCfg = {
-  slug: 'djdrivers', label: 'DJ Drivers',
-  vehicleTable: 'dj_vehicles', driverTable: 'dj_drivers',
-  formType: 'dj_inspection', publicPath: '/djdrivers'
-}
+
 
 // The 31-point inspection items list — duplicated here to keep field-admin
 // independent of field.ts (the master copy lives at field.ts line 129).
@@ -3401,6 +3389,5 @@ function registerFleetAdminRoutes(cfg: FleetAdminCfg) {
 }
 
 registerFleetAdminRoutes(MUSICBUS_ADMIN)
-registerFleetAdminRoutes(DJDRIVERS_ADMIN)
 
 export default app

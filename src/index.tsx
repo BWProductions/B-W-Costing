@@ -16,7 +16,7 @@ import { publicLanding } from './routes/public.js'
 import account from './routes/account.js'
 import questionSheet from './routes/question-sheet.js'
 import printSheets from './routes/print-sheets.js'
-import field, { musicbusApp, djdriversApp } from './routes/field.js'
+import field, { musicbusApp } from './routes/field.js'
 import fieldAdmin from './routes/field-admin.js'
 import plannerExtractor from './routes/planner-extractor.js'
 import productsAdmin from './routes/products-admin.js'
@@ -50,9 +50,8 @@ app.route('/field/admin', fieldAdmin)
 // ── Field Operations App (public — no login required) — MUST be before dashboard /
 app.route('/field', field)
 
-// ── Music Bus + DJ Drivers fleet apps (public — no login) — separate from B&W
+// ── Music Bus fleet app (public — no login) — separate from B&W field ops
 app.route('/musicbus', musicbusApp)
-app.route('/djdrivers', djdriversApp)
 
 // ── Protected app routes
 app.route('/account', account)

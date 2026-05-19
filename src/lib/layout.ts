@@ -12,7 +12,11 @@ import { ROLE_LABELS } from './auth.js'
 const FLAME_RING_SVG = `<img src="/static/bw-logo.png" alt="BW Productions" style="width:100%;height:100%;object-fit:contain;display:block">`
 
 export function layout(title: string, body: string, user: AuthUser, activeNav?: string): string {
-  const nav = [
+  type NavLeaf = { href: string; icon: string; label: string; key: string; roles: string[] }
+  type NavGroup = { groupKey: string; groupLabel: string; groupIcon: string; roles: string[]; children: NavLeaf[] }
+  type NavItem = NavLeaf | NavGroup
+
+  const nav: NavItem[] = [
     { href: '/',                          icon: 'fa-gauge-high',       label: 'Dashboard',      key: 'dashboard',      roles: ['founder','ops_director','finance_director','account_director','crew'] },
     { href: '/events',                    icon: 'fa-calendar-days',    label: 'Events',         key: 'events',         roles: ['founder','ops_director','finance_director','account_director'] },
     { href: '/quotes',                    icon: 'fa-file-invoice',     label: 'Quotes',         key: 'quotes',         roles: ['founder','ops_director','finance_director','account_director'] },
@@ -27,17 +31,52 @@ export function layout(title: string, body: string, user: AuthUser, activeNav?: 
     { href: '/field/admin/planner-extractor', icon: 'fa-calendar-week', label: 'Planner Extractor', key: 'planner-extractor', roles: ['founder','ops_director','finance_director','account_director','crew'] },
     { href: '/field/admin/damages',       icon: 'fa-triangle-exclamation', label: 'Vehicle Damages', key: 'damages',     roles: ['founder','ops_director','finance_director','account_director','crew'] },
     { href: '/field/admin/products',      icon: 'fa-boxes-stacked',    label: 'Master Products',key: 'products',       roles: ['founder','ops_director','finance_director','account_director','crew'] },
+    // ── Music Bus group (collapsible) ─────────────────────────────────────────────
+    {
+      groupKey: 'musicbus', groupLabel: 'Music Bus', groupIcon: 'fa-music',
+      roles: ['founder','ops_director'],
+      children: [
+        { href: '/musicbus',                          icon: 'fa-mobile-screen',         label: 'Driver App',        key: 'musicbus-app',      roles: ['founder','ops_director'] },
+        { href: '/field/admin/musicbus-drivers',      icon: 'fa-users',                 label: 'Drivers',           key: 'musicbus-drivers',  roles: ['founder','ops_director'] },
+        { href: '/field/admin/musicbus-vehicles',     icon: 'fa-bus',                   label: 'Vehicles',          key: 'musicbus-vehicles', roles: ['founder','ops_director'] },
+        { href: '/field/admin/musicbus-damages',      icon: 'fa-triangle-exclamation',  label: 'Damages',           key: 'musicbus-damages',  roles: ['founder','ops_director'] },
+      ]
+    },
     { href: '/admin',                     icon: 'fa-gear',             label: 'Admin',          key: 'admin',          roles: ['founder'] },
     { href: '/account',                   icon: 'fa-circle-user',      label: 'My Account',     key: 'account',        roles: ['founder','ops_director','finance_director','account_director','crew'] },
   ]
 
-  const visibleNav = nav.filter(n => (n.roles as string[]).includes(user.role))
+  // Type guard
+  const isGroup = (n: NavItem): n is NavGroup => (n as NavGroup).children !== undefined
 
-  const navLinks = visibleNav.map(n => `
-    <a href="${n.href}" class="nav-link${activeNav === n.key ? ' active' : ''}">
+  const renderLeaf = (n: NavLeaf, indent = false) => `
+    <a href="${n.href}" class="nav-link${activeNav === n.key ? ' active' : ''}${indent ? ' nav-sub' : ''}">
       <span class="nav-icon"><i class="fas ${n.icon}"></i></span>
       <span class="nav-label">${n.label}</span>
-    </a>`).join('')
+    </a>`
+
+  const navLinks = nav
+    .filter(n => (n.roles as string[]).includes(user.role))
+    .map(n => {
+      if (!isGroup(n)) return renderLeaf(n)
+      // Group: filter children by role, hide entire group if no children visible
+      const visibleChildren = n.children.filter(c => c.roles.includes(user.role))
+      if (visibleChildren.length === 0) return ''
+      // Is any child of this group the active page? (auto-open)
+      const groupActive = visibleChildren.some(c => c.key === activeNav)
+      return `
+      <div class="nav-group${groupActive ? ' open' : ''}" data-group="${n.groupKey}">
+        <button type="button" class="nav-link nav-group-toggle" onclick="this.parentElement.classList.toggle('open')">
+          <span class="nav-icon"><i class="fas ${n.groupIcon}"></i></span>
+          <span class="nav-label">${n.groupLabel}</span>
+          <span class="nav-chev"><i class="fas fa-chevron-down"></i></span>
+        </button>
+        <div class="nav-group-children">
+          ${visibleChildren.map(c => renderLeaf(c, true)).join('')}
+        </div>
+      </div>`
+    })
+    .join('')
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -216,6 +255,40 @@ export function layout(title: string, body: string, user: AuthUser, activeNav?: 
     }
 
     .nav-link.active .nav-icon { opacity: 1; }
+
+    /* ── Nested nav groups (Music Bus) ── */
+    .nav-group { display: flex; flex-direction: column; gap: 2px; }
+    .nav-group-toggle {
+      width: 100%;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      font-family: inherit;
+      text-align: left;
+      gap: 10px;
+    }
+    .nav-group-toggle .nav-chev {
+      margin-left: auto;
+      font-size: 9px;
+      opacity: 0.5;
+      transition: transform 0.2s;
+    }
+    .nav-group.open .nav-group-toggle .nav-chev { transform: rotate(180deg); opacity: 0.9; }
+    .nav-group-children {
+      display: none;
+      flex-direction: column;
+      gap: 2px;
+      padding-left: 6px;
+      margin: 2px 0 4px;
+      border-left: 2px solid rgba(255,255,255,0.06);
+      margin-left: 14px;
+    }
+    .nav-group.open .nav-group-children { display: flex; }
+    .nav-link.nav-sub {
+      padding: 7px 10px 7px 14px;
+      font-size: 12.5px;
+    }
+    .nav-link.nav-sub .nav-icon { font-size: 12px; opacity: 0.65; }
 
     .sidebar-user {
       padding: 14px 16px;

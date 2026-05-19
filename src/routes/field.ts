@@ -22,7 +22,6 @@ const app = new Hono<Env>()
 // (INSPECTION_ITEMS, formHeader, signatureScript, etc.) defined further down
 // in this file, which is why they live here rather than in a sibling module.
 const musicbusApp = new Hono<Env>()
-const djdriversApp = new Hono<Env>()
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -167,6 +166,56 @@ const VEHICLES = [
 
 function todayStr(): string {
   return new Date().toISOString().slice(0, 10)
+}
+
+// ─── VEHICLE SHORT-NAME LOOKUP ───────────────────────────────────────────────
+// Used by the PDF filename builder so that WhatsApp recipients see a human-
+// readable nickname (e.g. "BIG FAW TRUCK NO 4", "BIBI CAR") instead of just a
+// reg plate. Returns '' if nothing matches — the filename builder treats that
+// as "skip the short-name segment" so the file still gets a sensible name.
+//
+//  inspection / repair  → fleet.description (B&W fleet, the source the user
+//                          sees on /fleet)
+//  musicbus_inspection  → music_bus_vehicles.description (the Music Bus list)
+async function getVehicleShortName(
+  db: D1Database,
+  formType: string,
+  vehicleReg: string
+): Promise<string> {
+  if (!vehicleReg) return ''
+  // Historic submissions stored regs with spaces / mixed case (e.g. "LS 43 NL GP ").
+  // The fleet/music_bus_vehicles tables use the canonical spaceless uppercase form
+  // (e.g. "LS43NLGP"). Normalize both sides before comparing so the lookup hits.
+  const normalize = (r: string) => (r || '').replace(/\s+/g, '').toUpperCase()
+  const needle = normalize(vehicleReg)
+  if (!needle) return ''
+  try {
+    if (formType === 'musicbus_inspection') {
+      const row = await db.prepare(
+        "SELECT description FROM music_bus_vehicles WHERE UPPER(REPLACE(reg_number, ' ', '')) = ? AND active = 1"
+      ).bind(needle).first<{ description: string }>()
+      return (row?.description || '').trim()
+    }
+    if (formType === 'inspection' || formType === 'repair') {
+      const row = await db.prepare(
+        "SELECT description FROM fleet WHERE UPPER(REPLACE(reg_number, ' ', '')) = ? AND active = 1"
+      ).bind(needle).first<{ description: string }>()
+      if (row?.description) return row.description.trim()
+      // Fallback 1: legacy field_vehicles table
+      const legacy = await db.prepare(
+        "SELECT description FROM field_vehicles WHERE UPPER(REPLACE(reg_number, ' ', '')) = ? AND active = 1"
+      ).bind(needle).first<{ description: string }>()
+      if (legacy?.description) return legacy.description.trim()
+      // Fallback 2: music_bus_vehicles (covers the case where a music bus
+      // got inspected via the B&W flow by mistake — at least the filename
+      // still gets a human-readable nickname).
+      const mb = await db.prepare(
+        "SELECT description FROM music_bus_vehicles WHERE UPPER(REPLACE(reg_number, ' ', '')) = ? AND active = 1"
+      ).bind(needle).first<{ description: string }>()
+      return (mb?.description || '').trim()
+    }
+  } catch { /* best-effort — filename must never break a request */ }
+  return ''
 }
 
 function formatDate(d: string): string {
@@ -3111,14 +3160,34 @@ app.post('/submit', async (c) => {
     // is logged to field_renderer_log so we can prove Urlbox is stable enough
     // to drop PDFShift entirely.
     const pageUrl = `https://bwprodsystem.co.za/field/success/${submissionId}`
-    // Vehicle-centric forms get the vehicle reg in the filename instead of event/venue.
-    const vehicleCentric = ['inspection','repair','musicbus_inspection','dj_inspection'].includes(form_type)
-    const sourceLabel = vehicleCentric
-      ? (finalVehicleReg || 'VEH')
-      : (event_name || venue || 'BW')
-    const safeEvent = sourceLabel.replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '_').slice(0, 40)
-    const safeDate  = (delivery_date || collection_date || '').replace(/-/g, '')
-    const pdfFilename = [form_number, safeEvent, safeDate].filter(Boolean).join('_') + '.pdf'
+    // Vehicle-centric forms get a human-readable filename so the WhatsApp
+    // recipient instantly knows what they're looking at:
+    //   inspection / repair   → [form_number]_[short_name]_[reg]_[date].pdf
+    //   musicbus_inspection   → [form_number]_[driver]_[short_name]_[reg]_[date].pdf
+    // Non-vehicle forms (delivery/collection) keep the event/venue label.
+    const vehicleCentric = ['inspection','repair','musicbus_inspection'].includes(form_type)
+    const sanitize = (s: string, max = 40) =>
+      (s || '').replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '_').slice(0, max)
+    const safeDate = (delivery_date || collection_date || '').replace(/-/g, '')
+    let pdfFilename: string
+    if (vehicleCentric) {
+      const shortName = await getVehicleShortName(c.env.DB, form_type, finalVehicleReg || '')
+      // Normalize the reg shown in the filename — strip spaces, uppercase —
+      // so "LS 43 NL GP " comes out as "LS43NLGP" instead of "LS_43_NL_GP_".
+      const cleanReg = (finalVehicleReg || '').replace(/\s+/g, '').toUpperCase()
+      const parts: string[] = [form_number]
+      if (form_type === 'musicbus_inspection') {
+        const driverLabel = finalDriver || finalPreparedBy || ''
+        if (driverLabel) parts.push(sanitize(driverLabel, 24))
+      }
+      if (shortName) parts.push(sanitize(shortName, 40))
+      if (cleanReg) parts.push(sanitize(cleanReg, 12))
+      if (safeDate) parts.push(safeDate)
+      pdfFilename = parts.filter(Boolean).join('_') + '.pdf'
+    } else {
+      const safeEvent = sanitize(event_name || venue || 'BW', 40)
+      pdfFilename = [form_number, safeEvent, safeDate].filter(Boolean).join('_') + '.pdf'
+    }
     let pdfUrl = ''
     let pdfBuffer: ArrayBuffer | null = null
     let pdfRenderer: 'urlbox' | 'pdfshift' | null = null
@@ -3228,24 +3297,41 @@ app.post('/submit', async (c) => {
 app.get('/pdf/:id', async (c) => {
   const id = c.req.param('id')
   const sub = await c.env.DB.prepare(
-    'SELECT form_number, form_type, event_name, venue, vehicle_reg, delivery_date, collection_date FROM field_submissions WHERE id=?'
+    'SELECT form_number, form_type, event_name, venue, vehicle_reg, driver, prepared_by, delivery_date, collection_date FROM field_submissions WHERE id=?'
   ).bind(id).first<any>()
   if (!sub) return c.text('Not found', 404)
   const key = `pdfs/${sub.form_number}-${id}.pdf`
   const obj = await c.env.PDF_BUCKET.get(key)
   if (!obj) return c.text('PDF not yet generated', 404)
 
-  // Build the same descriptive filename used at generation time.
-  // For vehicle-centric forms (inspection, repair, music-bus, DJ) we use the
-  // VEHICLE REG instead of event/venue so the WhatsApp file is recognisable
-  // at a glance — e.g. MBI26-0001_JF64SDGP_2026-05-19.pdf
-  const vehicleCentric = ['inspection','repair','musicbus_inspection','dj_inspection'].includes(sub.form_type)
-  const sourceLabel = vehicleCentric
-    ? (sub.vehicle_reg || 'VEH')
-    : (sub.event_name || sub.venue || 'BW')
-  const safeEvent = (sourceLabel as string).replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '_').slice(0, 40)
-  const safeDate  = ((sub.delivery_date || sub.collection_date || '') as string).replace(/-/g, '')
-  const filename  = [sub.form_number, safeEvent, safeDate].filter(Boolean).join('_') + '.pdf'
+  // Build the same descriptive filename used at generation time so what the
+  // user sees in WhatsApp matches what they see when they download.
+  //   inspection / repair   → [form_number]_[short_name]_[reg]_[date].pdf
+  //   musicbus_inspection   → [form_number]_[driver]_[short_name]_[reg]_[date].pdf
+  //   delivery / collection → [form_number]_[event_or_venue]_[date].pdf
+  const vehicleCentric = ['inspection','repair','musicbus_inspection'].includes(sub.form_type)
+  const sanitize = (s: string, max = 40) =>
+    (s || '').replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '_').slice(0, max)
+  const safeDate = ((sub.delivery_date || sub.collection_date || '') as string).replace(/-/g, '')
+  let filename: string
+  if (vehicleCentric) {
+    const shortName = await getVehicleShortName(c.env.DB, sub.form_type, sub.vehicle_reg || '')
+    // Normalize reg (strip spaces, uppercase) so historic submissions with
+    // "LS 43 NL GP " come out clean as "LS43NLGP".
+    const cleanReg = ((sub.vehicle_reg || '') as string).replace(/\s+/g, '').toUpperCase()
+    const parts: string[] = [sub.form_number]
+    if (sub.form_type === 'musicbus_inspection') {
+      const driverLabel = (sub.driver || sub.prepared_by || '') as string
+      if (driverLabel) parts.push(sanitize(driverLabel, 24))
+    }
+    if (shortName) parts.push(sanitize(shortName, 40))
+    if (cleanReg) parts.push(sanitize(cleanReg, 12))
+    if (safeDate) parts.push(safeDate)
+    filename = parts.filter(Boolean).join('_') + '.pdf'
+  } else {
+    const safeEvent = sanitize((sub.event_name || sub.venue || 'BW') as string, 40)
+    filename = [sub.form_number, safeEvent, safeDate].filter(Boolean).join('_') + '.pdf'
+  }
 
   // inline — opens in browser; use attachment to force download
   const download = c.req.query('download') === '1'
@@ -3282,8 +3368,7 @@ const FORM_LABEL_FOR_SHARE: Record<string, string> = {
   repair: 'Repair Note',
   inspection: 'Vehicle Inspection',
   shortlist: 'Shortlist',
-  musicbus_inspection: 'Music Bus Inspection',
-  dj_inspection: 'DJ Drivers Inspection'
+  musicbus_inspection: 'Music Bus Inspection'
 }
 const FORM_EMOJI_FOR_SHARE: Record<string, string> = {
   delivery: '📦',
@@ -3291,8 +3376,7 @@ const FORM_EMOJI_FOR_SHARE: Record<string, string> = {
   repair: '🔧',
   inspection: '🚐',
   shortlist: '📋',
-  musicbus_inspection: '🎵',
-  dj_inspection: '🎧'
+  musicbus_inspection: '🎵'
 }
 
 function escHtml(s: any): string {
@@ -5229,7 +5313,7 @@ async function nextFormNumber(db: D1Database, type: string): Promise<string> {
     await db.prepare('UPDATE field_counters SET last_number = last_number + 1 WHERE form_type = ?').bind(type).run()
     const row = await db.prepare('SELECT last_number FROM field_counters WHERE form_type = ?').bind(type).first<any>()
     const n = row?.last_number || 1
-    const prefix: Record<string,string> = { delivery:'DN', collection:'CN', repair:'RN', inspection:'VI', shortlist:'SL', musicbus_inspection:'MBI', dj_inspection:'DJI' }
+    const prefix: Record<string,string> = { delivery:'DN', collection:'CN', repair:'RN', inspection:'VI', shortlist:'SL', musicbus_inspection:'MBI' }
     const year = new Date().getFullYear().toString().slice(2)
     return `${prefix[type] || 'BW'}${year}-${String(n).padStart(4,'0')}`
   } catch {
@@ -6357,18 +6441,6 @@ const MUSICBUS_CONFIG: FleetConfig = {
   accentColor: '#22d3ee'
 }
 
-const DJDRIVERS_CONFIG: FleetConfig = {
-  basePath: '/djdrivers',
-  formType: 'dj_inspection',
-  vehicleTable: 'dj_vehicles',
-  driverTable: 'dj_drivers',
-  brandTitle: 'DJ Drivers',
-  brandSubtitle: 'Outlet 360 · DJ Fleet Inspection',
-  brandLogo: '/static/outlet360-logo.png',
-  pageTitle: 'DJ Drivers Inspection',
-  accentColor: '#a78bfa'
-}
-
 function fleetPage(title: string, body: string, cfg: FleetConfig): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -6456,7 +6528,9 @@ function fleetSubmitScript(cfg: FleetConfig): string {
     const modal = document.getElementById('successModal')
     if (!modal) { window.location.href = '${cfg.basePath}'; return }
     document.getElementById('successFormNum').textContent = formNum
-    document.getElementById('successViewLink').href = '/field/view/' + subId
+    // Keep the user inside the Music Bus app — view PDF via the fleet-scoped
+    // success page (does NOT bounce to /field).
+    document.getElementById('successViewLink').href = '${cfg.basePath}/success/' + subId
     modal.style.display = 'flex'
   }
   function setInsp(i, val) {
@@ -6512,22 +6586,16 @@ function registerFleetRoutes(fleetApp: Hono<Env>, cfg: FleetConfig) {
   fleetApp.get('/', async (c) => {
     const drivers = await c.env.DB.prepare(
       `SELECT id, name, region, default_vehicle_id FROM ${cfg.driverTable}
-       WHERE active=1 ORDER BY region, name`
+       WHERE active=1 ORDER BY name COLLATE NOCASE`
     ).all<any>()
     const list = drivers.results || []
 
-    // Group by region for the dropdown
-    const byRegion: Record<string, any[]> = {}
-    for (const d of list) {
-      const r = d.region || 'Other'
-      if (!byRegion[r]) byRegion[r] = []
-      byRegion[r].push(d)
-    }
-    const regionOrder = Object.keys(byRegion).sort()
-    const driverOpts = regionOrder.map(r => `
-      <optgroup label="${escHtml(r)}">
-        ${byRegion[r].map(d => `<option value="${d.id}">${escHtml(d.name)}</option>`).join('')}
-      </optgroup>`).join('')
+    // Flat A-Z list — one entry per driver. Region (if known) shown as a quiet
+    // hint after the name so it doesn't dictate the picking flow.
+    const driverOpts = list.map(d => {
+      const hint = d.region ? ` · ${escHtml(d.region)}` : ''
+      return `<option value="${d.id}">${escHtml(d.name)}${hint}</option>`
+    }).join('')
 
     const isEmpty = list.length === 0
     const body = `
@@ -6569,19 +6637,23 @@ function registerFleetRoutes(fleetApp: Hono<Env>, cfg: FleetConfig) {
     ).bind(driverId).first<any>()
     if (!driver) return c.redirect(cfg.basePath)
 
-    // Find this driver's available vehicles: their default + any same-region active vehicles
+    // Any driver can pick ANY active vehicle. Drivers swap vehicles around
+    // (especially in Durban) so we don't lock OR pre-select — just a flat A-Z
+    // reg list with a star next to their historic default as a soft hint.
     const vehicles = await c.env.DB.prepare(
       `SELECT id, reg_number, description, region, home_location FROM ${cfg.vehicleTable}
-       WHERE active=1 AND (id=? OR region=?)
-       ORDER BY (id=?) DESC, reg_number`
-    ).bind(driver.default_vehicle_id || -1, driver.region || '', driver.default_vehicle_id || -1).all<any>()
+       WHERE active=1
+       ORDER BY reg_number COLLATE NOCASE`
+    ).all<any>()
     const vehList = vehicles.results || []
 
     const num = await nextFormNumber(c.env.DB, cfg.formType)
 
-    const vehicleOpts = vehList.map(v => {
-      const isDefault = v.id === driver.default_vehicle_id
-      return `<option value="${escHtml(v.reg_number)}" ${isDefault ? 'selected' : ''}>${escHtml(v.reg_number)} — ${escHtml(v.description || '')}${isDefault ? ' ⭐' : ''}</option>`
+    // No pre-selected vehicle — driver must consciously pick. Star marks their
+    // historic assignment (if any) as a hint only.
+    const vehicleOpts = '<option value="">— Select vehicle —</option>' + vehList.map(v => {
+      const star = v.id === driver.default_vehicle_id ? ' ⭐' : ''
+      return `<option value="${escHtml(v.reg_number)}">${escHtml(v.reg_number)} — ${escHtml(v.description || '')}${star}</option>`
     }).join('')
 
     const inspItems = INSPECTION_ITEMS.map((item, i) => `
@@ -6708,7 +6780,7 @@ function registerFleetRoutes(fleetApp: Hono<Env>, cfg: FleetConfig) {
     }
   })
 
-  // ── DRIVER → VEHICLES JSON (used for any future client-side filter UX) ─────
+  // ── DRIVER → VEHICLES JSON (every active vehicle is available) ───────────
   fleetApp.get('/driver/:id/vehicles', async (c) => {
     const id = parseInt(c.req.param('id'))
     if (!id) return c.json({ vehicles: [] })
@@ -6718,14 +6790,90 @@ function registerFleetRoutes(fleetApp: Hono<Env>, cfg: FleetConfig) {
     if (!d) return c.json({ vehicles: [] })
     const vs = await c.env.DB.prepare(
       `SELECT id, reg_number, description FROM ${cfg.vehicleTable}
-       WHERE active=1 AND (id=? OR region=?) ORDER BY (id=?) DESC, reg_number`
-    ).bind(d.default_vehicle_id || -1, d.region || '', d.default_vehicle_id || -1).all<any>()
+       WHERE active=1 ORDER BY reg_number COLLATE NOCASE`
+    ).all<any>()
     return c.json({ vehicles: vs.results || [], default_vehicle_id: d.default_vehicle_id })
+  })
+
+  // ── SUCCESS PAGE ────────────────────────────────────────────────────────
+  // After submit, drivers tap "View PDF" → land here, stay inside /musicbus.
+  // We show the submission summary inline (driver, vehicle, date, fails count)
+  // and offer the PDF via the existing /field/pdf/:id endpoint (the PDF itself
+  // is generated by the same Urlbox pipeline, no need to duplicate).
+  fleetApp.get('/success/:id', async (c) => {
+    const id = parseInt(c.req.param('id'))
+    if (!id) return c.redirect(cfg.basePath)
+    const sub = await c.env.DB.prepare(
+      `SELECT id, form_number, prepared_by, vehicle_reg, venue as region, delivery_date,
+              created_at, notes, form_data, pdf_url
+       FROM field_submissions WHERE id=? AND form_type=?`
+    ).bind(id, cfg.formType).first<any>()
+    if (!sub) return c.redirect(cfg.basePath)
+
+    let fd: any = {}; try { fd = JSON.parse(sub.form_data || '{}') } catch {}
+    const insp = fd.inspection || {}
+    let passes = 0, fails = 0, unanswered = 0
+    for (let i = 0; i < INSPECTION_ITEMS.length; i++) {
+      const v = insp['insp_' + i]
+      if (v === 'pass') passes++
+      else if (v === 'fail') fails++
+      else unanswered++
+    }
+
+    const failedItems: string[] = []
+    for (let i = 0; i < INSPECTION_ITEMS.length; i++) {
+      if (insp['insp_' + i] === 'fail') {
+        const note = (fd['insp_note_' + i] || '').toString().trim()
+        failedItems.push(`<li><strong>❌ ${INSPECTION_ITEMS[i]}</strong>${note ? ` — <span style="color:#fca5a5">${escHtml(note)}</span>` : ''}</li>`)
+      }
+    }
+
+    const body = `
+    <div class="field-wrap" style="max-width:560px">
+      ${fleetHeader(cfg, sub.form_number)}
+
+      <div style="text-align:center;padding:20px 0 28px">
+        <div style="font-size:54px;margin-bottom:10px">✅</div>
+        <h2 style="font-size:20px;font-weight:800;color:#fff;margin-bottom:6px">Inspection on file</h2>
+        <p style="color:var(--muted);font-size:13px">Recorded ${escHtml(sub.delivery_date || sub.created_at || '')}</p>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Summary</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px 18px">
+          <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em">Driver</div><div style="font-size:14px;font-weight:700;color:#fff">${escHtml(sub.prepared_by || '—')}</div></div>
+          <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em">Vehicle</div><div style="font-size:14px;font-weight:700;color:${cfg.accentColor};font-family:monospace">${escHtml(sub.vehicle_reg || '—')}</div></div>
+          <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em">Passed</div><div style="font-size:14px;font-weight:700;color:#86efac">${passes} / ${INSPECTION_ITEMS.length}</div></div>
+          <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em">Failed</div><div style="font-size:14px;font-weight:700;color:${fails > 0 ? '#fca5a5' : '#cbd5e1'}">${fails}${unanswered ? ` · ${unanswered} skipped` : ''}</div></div>
+        </div>
+      </div>
+
+      ${failedItems.length ? `
+        <div class="section" style="background:rgba(239,68,68,0.06);border-color:rgba(239,68,68,0.25)">
+          <div class="section-title" style="color:#fca5a5">Issues flagged</div>
+          <ul style="padding:8px 18px 16px 32px;color:#e5e7eb;font-size:13px;line-height:1.7">${failedItems.join('')}</ul>
+        </div>` : ''}
+
+      ${sub.notes ? `
+        <div class="section">
+          <div class="section-title">Driver notes</div>
+          <div style="padding:6px 18px 16px;color:#e5e7eb;font-size:13px;line-height:1.6;white-space:pre-wrap">${escHtml(sub.notes)}</div>
+        </div>` : ''}
+
+      <div style="display:flex;gap:10px;justify-content:center;padding:14px 0 24px;flex-wrap:wrap">
+        <a href="/field/pdf/${sub.id}" target="_blank" class="btn-submit no-print" style="background:${cfg.accentColor};color:#000;font-weight:800;text-decoration:none;display:inline-flex;align-items:center;gap:8px;padding:12px 24px">
+          📄 View PDF
+        </a>
+        <a href="${cfg.basePath}" class="btn-submit no-print" style="background:rgba(255,255,255,0.08);color:#fff;text-decoration:none;display:inline-flex;align-items:center;gap:8px;padding:12px 24px;border:1px solid var(--border)">
+          ← New inspection
+        </a>
+      </div>
+    </div>`
+    return c.html(fleetPage('Submitted', body, cfg))
   })
 }
 
 registerFleetRoutes(musicbusApp, MUSICBUS_CONFIG)
-registerFleetRoutes(djdriversApp, DJDRIVERS_CONFIG)
 
-export { musicbusApp, djdriversApp }
+export { musicbusApp }
 export default app
