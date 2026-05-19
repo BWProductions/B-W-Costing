@@ -218,6 +218,137 @@ async function getVehicleShortName(
   return ''
 }
 
+// ─── PDF FILENAME BUILDER ────────────────────────────────────────────────────────────────
+// Single source of truth for the WhatsApp / download filename. Both the
+// submit-time renderer and the serve-time /pdf/:id endpoint call this so the
+// name stays in sync.
+async function buildPdfFilename(args: {
+  db: D1Database
+  formNumber: string
+  formType: string
+  vehicleReg: string
+  driver: string
+  preparedBy: string
+  eventName: string
+  venue: string
+  date: string
+}): Promise<string> {
+  const sanitize = (s: string, max = 40) =>
+    (s || '').replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '_').slice(0, max)
+  const safeDate = (args.date || '').replace(/-/g, '')
+  const vehicleCentric = ['inspection','repair','musicbus_inspection'].includes(args.formType)
+  if (vehicleCentric) {
+    const shortName = await getVehicleShortName(args.db, args.formType, args.vehicleReg || '')
+    const cleanReg = (args.vehicleReg || '').replace(/\s+/g, '').toUpperCase()
+    const parts: string[] = [args.formNumber]
+    if (args.formType === 'musicbus_inspection') {
+      const driverLabel = args.driver || args.preparedBy || ''
+      if (driverLabel) parts.push(sanitize(driverLabel, 24))
+    }
+    if (shortName) parts.push(sanitize(shortName, 40))
+    if (cleanReg) parts.push(sanitize(cleanReg, 12))
+    if (safeDate) parts.push(safeDate)
+    return parts.filter(Boolean).join('_') + '.pdf'
+  }
+  const safeEvent = sanitize(args.eventName || args.venue || 'BW', 40)
+  return [args.formNumber, safeEvent, safeDate].filter(Boolean).join('_') + '.pdf'
+}
+
+// ─── PDF RENDER + R2 STORE ───────────────────────────────────────────────────────────────
+// Renders the success page to PDF via Urlbox (primary) / PDFShift (fallback),
+// stores it in R2 under pdfs/{form_number}-{id}.pdf, and updates the
+// field_submissions.pdf_url column. Returns the public pdf_url (or '' if
+// rendering failed). Never throws — caller's flow must not break on render
+// failure.
+async function renderAndStorePdf(
+  env: any,
+  submissionId: number,
+  formNumber: string,
+  pageUrl: string,
+  pdfFilename: string
+): Promise<string> {
+  let pdfBuffer: ArrayBuffer | null = null
+  let pdfRenderer: 'urlbox' | 'pdfshift' | null = null
+  const logRender = async (renderer: string, ok: boolean, ms: number, bytes: number, error?: string) => {
+    try {
+      await env.DB.prepare(`
+        INSERT INTO field_renderer_log (submission_id, form_number, renderer, format, ms, bytes, ok, error, trigger)
+        VALUES (?, ?, ?, 'pdf', ?, ?, ?, ?, 'submission')
+      `).bind(submissionId, formNumber, renderer, ms, bytes, ok ? 1 : 0, error?.slice(0, 300) || null).run()
+    } catch { /* telemetry is best-effort */ }
+  }
+  // Urlbox primary
+  if (env.URLBOX_SECRET_KEY) {
+    const t0 = Date.now()
+    try {
+      const { renderToBuffer, deliveryNotePdfOptions } = await import('../lib/urlbox.js')
+      const result = await renderToBuffer(env, deliveryNotePdfOptions(pageUrl, pdfFilename))
+      pdfBuffer = result.buffer
+      pdfRenderer = 'urlbox'
+      await logRender('urlbox', true, Date.now() - t0, result.buffer.byteLength)
+    } catch (err: any) {
+      console.error('Urlbox PDF failed, trying PDFShift:', err)
+      await logRender('urlbox_failed', false, Date.now() - t0, 0, err?.message)
+    }
+  }
+  // PDFShift fallback
+  if (!pdfBuffer && env.PDFSHIFT_API_KEY) {
+    const t0 = Date.now()
+    try {
+      const pdfRes = await fetch('https://api.pdfshift.io/v3/convert/pdf', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Basic ' + btoa('api:' + env.PDFSHIFT_API_KEY),
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          source: pageUrl, landscape: false, use_print: true, format: 'A4',
+          margin: { top: '8mm', right: '10mm', bottom: '8mm', left: '10mm' },
+          zoom: 0.85, filename: pdfFilename
+        })
+      })
+      if (pdfRes.ok) {
+        const ct = pdfRes.headers.get('content-type') || ''
+        if (ct.includes('application/json')) {
+          const json: any = await pdfRes.json()
+          const s3Url = json?.url
+          if (s3Url) {
+            const s3Res = await fetch(s3Url)
+            if (s3Res.ok) { pdfBuffer = await s3Res.arrayBuffer(); pdfRenderer = 'pdfshift' }
+          }
+        } else {
+          pdfBuffer = await pdfRes.arrayBuffer(); pdfRenderer = 'pdfshift'
+        }
+      }
+      if (pdfRenderer === 'pdfshift' && pdfBuffer) {
+        await logRender('pdfshift', true, Date.now() - t0, pdfBuffer.byteLength)
+      } else {
+        await logRender('pdfshift_failed', false, Date.now() - t0, 0, `status ${pdfRes.status}`)
+      }
+    } catch (err: any) {
+      console.error('PDFShift fallback failed:', err)
+      await logRender('pdfshift_failed', false, Date.now() - t0, 0, err?.message)
+    }
+  }
+  if (!pdfBuffer) { await logRender('both_failed', false, 0, 0, 'no renderer produced output'); return '' }
+  // Store in R2
+  if (env.PDF_BUCKET) {
+    try {
+      const pdfKey = `pdfs/${formNumber}-${submissionId}.pdf`
+      await env.PDF_BUCKET.put(pdfKey, pdfBuffer, {
+        httpMetadata: { contentType: 'application/pdf' },
+        customMetadata: { renderer: pdfRenderer || 'unknown' }
+      })
+      const pdfUrl = `https://bwprodsystem.co.za/field/pdf/${submissionId}`
+      await env.DB.prepare('UPDATE field_submissions SET pdf_url=? WHERE id=?').bind(pdfUrl, submissionId).run()
+      return pdfUrl
+    } catch (err) {
+      console.error('PDF R2 storage failed:', err)
+    }
+  }
+  return ''
+}
+
 function formatDate(d: string): string {
   if (!d) return ''
   const dt = new Date(d)
@@ -3154,137 +3285,23 @@ app.post('/submit', async (c) => {
     const drSlug = slugifyPost(finalDriver || finalPreparedBy)
     const slug = `${form_number}-${vSlug}-${dSlug}-${drSlug}`
 
-    // ── Generate PDF (Urlbox primary, PDFShift fallback) and store in R2 ──────
-    // Strategy: try Urlbox first (newer, cheaper). If it fails for any reason,
-    // fall back to PDFShift so the submission still gets a PDF. Every attempt
-    // is logged to field_renderer_log so we can prove Urlbox is stable enough
-    // to drop PDFShift entirely.
+    // ── Generate PDF + store in R2 via the shared helpers ────────────────────
+    // buildPdfFilename + renderAndStorePdf live at the top of this file so the
+    // music bus flow can call the same primitives. Keeps WhatsApp filenames
+    // and R2 keys in lockstep across all form types.
     const pageUrl = `https://bwprodsystem.co.za/field/success/${submissionId}`
-    // Vehicle-centric forms get a human-readable filename so the WhatsApp
-    // recipient instantly knows what they're looking at:
-    //   inspection / repair   → [form_number]_[short_name]_[reg]_[date].pdf
-    //   musicbus_inspection   → [form_number]_[driver]_[short_name]_[reg]_[date].pdf
-    // Non-vehicle forms (delivery/collection) keep the event/venue label.
-    const vehicleCentric = ['inspection','repair','musicbus_inspection'].includes(form_type)
-    const sanitize = (s: string, max = 40) =>
-      (s || '').replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '_').slice(0, max)
-    const safeDate = (delivery_date || collection_date || '').replace(/-/g, '')
-    let pdfFilename: string
-    if (vehicleCentric) {
-      const shortName = await getVehicleShortName(c.env.DB, form_type, finalVehicleReg || '')
-      // Normalize the reg shown in the filename — strip spaces, uppercase —
-      // so "LS 43 NL GP " comes out as "LS43NLGP" instead of "LS_43_NL_GP_".
-      const cleanReg = (finalVehicleReg || '').replace(/\s+/g, '').toUpperCase()
-      const parts: string[] = [form_number]
-      if (form_type === 'musicbus_inspection') {
-        const driverLabel = finalDriver || finalPreparedBy || ''
-        if (driverLabel) parts.push(sanitize(driverLabel, 24))
-      }
-      if (shortName) parts.push(sanitize(shortName, 40))
-      if (cleanReg) parts.push(sanitize(cleanReg, 12))
-      if (safeDate) parts.push(safeDate)
-      pdfFilename = parts.filter(Boolean).join('_') + '.pdf'
-    } else {
-      const safeEvent = sanitize(event_name || venue || 'BW', 40)
-      pdfFilename = [form_number, safeEvent, safeDate].filter(Boolean).join('_') + '.pdf'
-    }
-    let pdfUrl = ''
-    let pdfBuffer: ArrayBuffer | null = null
-    let pdfRenderer: 'urlbox' | 'pdfshift' | null = null
-
-    // Tiny helper to log without ever throwing — telemetry must NEVER break a submission.
-    const logRender = async (renderer: string, ok: boolean, ms: number, bytes: number, error?: string) => {
-      try {
-        await c.env.DB.prepare(`
-          INSERT INTO field_renderer_log (submission_id, form_number, renderer, format, ms, bytes, ok, error, trigger)
-          VALUES (?, ?, ?, 'pdf', ?, ?, ?, ?, 'submission')
-        `).bind(submissionId, form_number, renderer, ms, bytes, ok ? 1 : 0, error?.slice(0, 300) || null).run()
-      } catch { /* telemetry is best-effort */ }
-    }
-
-    // ── Attempt 1: Urlbox ─────────────────────────────────────────────────────
-    if (c.env.URLBOX_SECRET_KEY) {
-      const t0 = Date.now()
-      try {
-        const { renderToBuffer, deliveryNotePdfOptions } = await import('../lib/urlbox.js')
-        const result = await renderToBuffer(c.env, deliveryNotePdfOptions(pageUrl, pdfFilename))
-        pdfBuffer = result.buffer
-        pdfRenderer = 'urlbox'
-        await logRender('urlbox', true, Date.now() - t0, result.buffer.byteLength)
-      } catch (urlboxErr: any) {
-        console.error('Urlbox PDF generation failed, falling back to PDFShift:', urlboxErr)
-        await logRender('urlbox_failed', false, Date.now() - t0, 0, urlboxErr?.message)
-      }
-    }
-
-    // ── Attempt 2: PDFShift (fallback only) ───────────────────────────────────
-    if (!pdfBuffer && c.env.PDFSHIFT_API_KEY) {
-      const t0 = Date.now()
-      try {
-        const pdfRes = await fetch('https://api.pdfshift.io/v3/convert/pdf', {
-          method: 'POST',
-          headers: {
-            'Authorization': 'Basic ' + btoa('api:' + c.env.PDFSHIFT_API_KEY),
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            source: pageUrl,
-            landscape: false,
-            use_print: true,
-            format: 'A4',
-            margin: { top: '8mm', right: '10mm', bottom: '8mm', left: '10mm' },
-            zoom: 0.85,
-            filename: pdfFilename
-          })
-        })
-        if (pdfRes.ok) {
-          const contentType = pdfRes.headers.get('content-type') || ''
-          if (contentType.includes('application/json')) {
-            const json: any = await pdfRes.json()
-            const s3Url = json?.url
-            if (s3Url) {
-              const s3Res = await fetch(s3Url)
-              if (s3Res.ok) {
-                pdfBuffer = await s3Res.arrayBuffer()
-                pdfRenderer = 'pdfshift'
-              }
-            }
-          } else {
-            pdfBuffer = await pdfRes.arrayBuffer()
-            pdfRenderer = 'pdfshift'
-          }
-        }
-        if (pdfRenderer === 'pdfshift' && pdfBuffer) {
-          await logRender('pdfshift', true, Date.now() - t0, pdfBuffer.byteLength)
-        } else {
-          await logRender('pdfshift_failed', false, Date.now() - t0, 0, `status ${pdfRes.status}`)
-        }
-      } catch (pdfShiftErr: any) {
-        console.error('PDFShift fallback also failed:', pdfShiftErr)
-        await logRender('pdfshift_failed', false, Date.now() - t0, 0, pdfShiftErr?.message)
-      }
-    }
-
-    // Final state log: if BOTH failed, mark it so the admin page can flag it.
-    if (!pdfBuffer) {
-      await logRender('both_failed', false, 0, 0, 'no renderer produced output')
-    }
-
-    // ── Store the PDF (whichever renderer succeeded) ──────────────────────────
-    if (pdfBuffer && c.env.PDF_BUCKET) {
-      try {
-        const pdfKey = `pdfs/${form_number}-${submissionId}.pdf`
-        await c.env.PDF_BUCKET.put(pdfKey, pdfBuffer, {
-          httpMetadata: { contentType: 'application/pdf' },
-          customMetadata: { renderer: pdfRenderer || 'unknown' }
-        })
-        pdfUrl = `https://bwprodsystem.co.za/field/pdf/${submissionId}`
-        await c.env.DB.prepare('UPDATE field_submissions SET pdf_url=? WHERE id=?')
-          .bind(pdfUrl, submissionId).run()
-      } catch (storeErr) {
-        console.error('PDF R2 storage failed:', storeErr)
-      }
-    }
+    const pdfFilename = await buildPdfFilename({
+      db: c.env.DB,
+      formNumber: form_number,
+      formType: form_type,
+      vehicleReg: finalVehicleReg || '',
+      driver: finalDriver || '',
+      preparedBy: finalPreparedBy || '',
+      eventName: event_name || '',
+      venue: venue || '',
+      date: delivery_date || collection_date || ''
+    })
+    const pdfUrl = await renderAndStorePdf(c.env, submissionId, form_number, pageUrl, pdfFilename)
 
     return c.json({ success: true, submission_id: submissionId, form_number: draft_id ? form_number : form_number, slug, pdf_url: pdfUrl })
   } catch (err: any) {
@@ -3304,34 +3321,20 @@ app.get('/pdf/:id', async (c) => {
   const obj = await c.env.PDF_BUCKET.get(key)
   if (!obj) return c.text('PDF not yet generated', 404)
 
-  // Build the same descriptive filename used at generation time so what the
-  // user sees in WhatsApp matches what they see when they download.
-  //   inspection / repair   → [form_number]_[short_name]_[reg]_[date].pdf
-  //   musicbus_inspection   → [form_number]_[driver]_[short_name]_[reg]_[date].pdf
-  //   delivery / collection → [form_number]_[event_or_venue]_[date].pdf
-  const vehicleCentric = ['inspection','repair','musicbus_inspection'].includes(sub.form_type)
-  const sanitize = (s: string, max = 40) =>
-    (s || '').replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '_').slice(0, max)
-  const safeDate = ((sub.delivery_date || sub.collection_date || '') as string).replace(/-/g, '')
-  let filename: string
-  if (vehicleCentric) {
-    const shortName = await getVehicleShortName(c.env.DB, sub.form_type, sub.vehicle_reg || '')
-    // Normalize reg (strip spaces, uppercase) so historic submissions with
-    // "LS 43 NL GP " come out clean as "LS43NLGP".
-    const cleanReg = ((sub.vehicle_reg || '') as string).replace(/\s+/g, '').toUpperCase()
-    const parts: string[] = [sub.form_number]
-    if (sub.form_type === 'musicbus_inspection') {
-      const driverLabel = (sub.driver || sub.prepared_by || '') as string
-      if (driverLabel) parts.push(sanitize(driverLabel, 24))
-    }
-    if (shortName) parts.push(sanitize(shortName, 40))
-    if (cleanReg) parts.push(sanitize(cleanReg, 12))
-    if (safeDate) parts.push(safeDate)
-    filename = parts.filter(Boolean).join('_') + '.pdf'
-  } else {
-    const safeEvent = sanitize((sub.event_name || sub.venue || 'BW') as string, 40)
-    filename = [sub.form_number, safeEvent, safeDate].filter(Boolean).join('_') + '.pdf'
-  }
+  // Build the same descriptive filename used at generation time so the WhatsApp
+  // unfurl name matches what the recipient downloads. Shared helper keeps build-
+  // time and serve-time in lockstep.
+  const filename = await buildPdfFilename({
+    db: c.env.DB,
+    formNumber: sub.form_number,
+    formType: sub.form_type,
+    vehicleReg: (sub.vehicle_reg || '') as string,
+    driver: (sub.driver || '') as string,
+    preparedBy: (sub.prepared_by || '') as string,
+    eventName: (sub.event_name || '') as string,
+    venue: (sub.venue || '') as string,
+    date: (sub.delivery_date || sub.collection_date || '') as string
+  })
 
   // inline — opens in browser; use attachment to force download
   const download = c.req.query('download') === '1'
@@ -4960,7 +4963,8 @@ app.get('/success/:id', async (c) => {
   const isSAB = sub.letterhead === 'sab'
   const formTypeLabel: Record<string,string> = {
     delivery:'Delivery Note', collection:'Collection Note', repair:'Repair Note',
-    inspection:'Vehicle Inspection', shortlist:'Shortlist for Events'
+    inspection:'Vehicle Inspection', shortlist:'Shortlist for Events',
+    musicbus_inspection:'Music Bus Inspection'
   }
   const label = formTypeLabel[sub.form_type] || sub.form_type
 
@@ -6460,7 +6464,11 @@ function fleetPage(title: string, body: string, cfg: FleetConfig): string {
   <style>${FIELD_CSS}</style>
   <style>
     .fleet-header { text-align:center; padding:24px 18px 18px; border-bottom:1px solid var(--border); margin-bottom:18px; }
-    .fleet-logo { max-width:240px; width:80%; height:auto; margin:0 auto 12px; display:block; filter:brightness(1.05); }
+    /* Outlet360 logo is dark grey on transparent — on a black page the wordmark
+     * disappears. Lift it with a soft light backplate + invert + brightness so
+     * it pops on the dark UI without needing a redrawn asset. */
+    .fleet-logo-wrap { display:inline-block; padding:14px 22px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.12); border-radius:14px; margin-bottom:14px; }
+    .fleet-logo { max-width:240px; width:80%; height:auto; margin:0 auto; display:block; filter:invert(1) brightness(1.05) contrast(1.1); }
     .fleet-brand { font-size:20px; font-weight:800; letter-spacing:0.04em; color:#fff; margin-bottom:4px; }
     .fleet-sub { font-size:12px; color:var(--muted); letter-spacing:0.05em; text-transform:uppercase; margin-bottom:14px; }
     .fleet-formtitle { font-size:17px; font-weight:700; color:${cfg.accentColor}; margin-top:8px; }
@@ -6477,7 +6485,9 @@ function fleetHeader(cfg: FleetConfig, formNum: string): string {
   return `
   <div class="field-header fleet-header">
     <a href="${cfg.basePath}" style="display:inline-block;text-decoration:none" title="Back">
-      <img src="${cfg.brandLogo}" alt="${cfg.brandTitle}" class="fleet-logo" style="cursor:pointer;transition:opacity 0.15s" onmouseover="this.style.opacity='0.75'" onmouseout="this.style.opacity='1'">
+      <span class="fleet-logo-wrap" style="cursor:pointer;transition:opacity 0.15s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+        <img src="${cfg.brandLogo}" alt="${cfg.brandTitle}" class="fleet-logo">
+      </span>
     </a>
     <div class="fleet-brand">${cfg.brandTitle.toUpperCase()}</div>
     <div class="fleet-sub">${cfg.brandSubtitle}</div>
@@ -6556,9 +6566,16 @@ function fleetSubmitScript(cfg: FleetConfig): string {
     if (unanswered > 0) {
       if (!confirm(unanswered + ' items not checked yet. Continue anyway?')) return
     }
-    document.getElementById('sigSection').style.display = 'block'
+    const sigSection = document.getElementById('sigSection')
+    sigSection.style.display = 'block'
     document.getElementById('submitBtn').style.display = 'block'
-    document.getElementById('sigSection').scrollIntoView({ behavior:'smooth' })
+    // Canvas has zero dimensions while hidden — must initialise AFTER it's
+    // visible so it gets real width/height. Without this, the pad shows but
+    // mousedown/touchstart listeners are never attached and drivers can't sign.
+    setTimeout(() => {
+      if (typeof initCanvas === 'function') initCanvas()
+      sigSection.scrollIntoView({ behavior:'smooth' })
+    }, 80)
   }
   </script>`
 }
@@ -6773,8 +6790,26 @@ function registerFleetRoutes(fleetApp: Hono<Env>, cfg: FleetConfig) {
         cfg.formType === 'musicbus_inspection' ? 'outlet360' : 'outlet360',
         notes || '', JSON.stringify(formData), signature_data || ''
       ).run()
+      const submissionId = result.meta.last_row_id as number
 
-      return c.json({ success:true, submission_id: result.meta.last_row_id, form_number })
+      // ─── Generate PDF + store in R2 (Urlbox primary, PDFShift fallback) ────
+      // Mirrors the B&W /field/submit flow so Music Bus submissions also land
+      // with a downloadable, WhatsApp-shareable PDF.
+      const pageUrl = `https://bwprodsystem.co.za/field/success/${submissionId}`
+      const pdfFilename = await buildPdfFilename({
+        db: c.env.DB,
+        formNumber: form_number,
+        formType: cfg.formType,
+        vehicleReg: vehicle_reg || '',
+        driver: prepared_by || '',
+        preparedBy: prepared_by || '',
+        eventName: `${cfg.brandTitle} Inspection`,
+        venue: region || '',
+        date: delivery_date || todayStr()
+      })
+      const pdfUrl = await renderAndStorePdf(c.env, submissionId, form_number, pageUrl, pdfFilename)
+
+      return c.json({ success:true, submission_id: submissionId, form_number, pdf_url: pdfUrl })
     } catch (err: any) {
       return c.json({ success:false, error: err.message }, 500)
     }
