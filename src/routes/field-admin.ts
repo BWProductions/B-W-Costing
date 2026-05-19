@@ -3174,8 +3174,12 @@ function registerFleetAdminRoutes(cfg: FleetAdminCfg) {
     return c.redirect(`/field/admin/${cfg.slug}-drivers?saved=1`)
   })
 
-  // ── DAMAGES REPORT ─────────────────────────────────────────────────────────
-  // Mirrors /field/admin/damages but filtered to this fleet's form_type.
+  // ── INSPECTIONS ARCHIVE (formerly Damages Report) ──────────────────────────
+  // The full PDF archive for this fleet. Defaults to ALL inspections (so admins
+  // can pull up any PDF), with a status toggle to filter to just damaged or
+  // just clean inspections. Each row links to the inspection PDF. Two CSV
+  // exports: damages-detail (one row per failed item) and inspections-summary
+  // (one row per submission with pass/fail counts and the PDF URL).
   app.get(`/${cfg.slug}-damages`, requireAuth, async (c) => {
     const user = c.get('user' as any) as any
     const url = new URL(c.req.url)
@@ -3183,11 +3187,12 @@ function registerFleetAdminRoutes(cfg: FleetAdminCfg) {
     const regionFilter = (url.searchParams.get('region') || '').trim()
     const fromDate = (url.searchParams.get('from') || '').trim()
     const toDate = (url.searchParams.get('to') || '').trim()
+    const status = (url.searchParams.get('status') || 'all').trim()  // all | damaged | clean
 
-    let query = `SELECT id, form_number, prepared_by, vehicle_reg, venue as region, delivery_date,
-                        created_at, notes, form_data
+    let query = `SELECT id, form_number, prepared_by, driver, vehicle_reg, venue as region, delivery_date,
+                        created_at, notes, form_data, pdf_url
                  FROM field_submissions
-                 WHERE form_type=?`
+                 WHERE form_type=? AND is_draft=0`
     const params: any[] = [cfg.formType]
     if (vehicleFilter) { query += ' AND UPPER(vehicle_reg) LIKE ?'; params.push('%' + vehicleFilter + '%') }
     if (regionFilter)  { query += ' AND venue=?';                   params.push(regionFilter) }
@@ -3196,41 +3201,73 @@ function registerFleetAdminRoutes(cfg: FleetAdminCfg) {
     query += ' ORDER BY delivery_date DESC, created_at DESC'
 
     const result = await c.env.DB.prepare(query).bind(...params).all<any>()
-    const subs = result.results || []
+    const allSubs = result.results || []
 
-    type Row = { sub_id:number, form_number:string, vehicle_reg:string, driver:string, region:string, date:string, item:string, note:string }
-    const damages: Row[] = []
-    const cleanCount = { n: 0 }
-    for (const s of subs) {
+    // ── Score every submission: pass/fail counts + collected fail items ────
+    type InspRow = {
+      id: number, form_number: string, vehicle_reg: string, driver: string,
+      region: string, date: string, created_at: string, notes: string,
+      pdf_url: string, passes: number, fails: number, unanswered: number,
+      failItems: Array<{ item: string, note: string }>
+    }
+    const inspections: InspRow[] = []
+    for (const s of allSubs) {
       let fd: any = {}; try { fd = JSON.parse(s.form_data || '{}') } catch {}
       const insp = fd.inspection || {}
-      let fails = 0
+      let passes = 0, fails = 0, unanswered = 0
+      const failItems: Array<{ item: string, note: string }> = []
       for (let i = 0; i < FLEET_INSPECTION_ITEMS.length; i++) {
-        if (insp['insp_' + i] === 'fail') {
+        const v = insp['insp_' + i]
+        if (v === 'pass') passes++
+        else if (v === 'fail') {
           fails++
-          damages.push({
-            sub_id: s.id, form_number: s.form_number,
-            vehicle_reg: s.vehicle_reg || '—',
-            driver: s.prepared_by || '—',
-            region: s.region || fd.region || '—',
-            date: s.delivery_date || (s.created_at || '').substring(0, 10),
+          failItems.push({
             item: FLEET_INSPECTION_ITEMS[i],
             note: (fd['insp_note_' + i] || '').toString().trim()
           })
-        }
+        } else unanswered++
       }
-      if (fails === 0) cleanCount.n++
+      inspections.push({
+        id: s.id, form_number: s.form_number,
+        vehicle_reg: s.vehicle_reg || '—',
+        driver: s.driver || s.prepared_by || '—',
+        region: s.region || fd.region || '—',
+        date: s.delivery_date || (s.created_at || '').substring(0, 10),
+        created_at: s.created_at || '',
+        notes: (s.notes || '').toString().trim(),
+        pdf_url: s.pdf_url || '',
+        passes, fails, unanswered, failItems
+      })
     }
 
+    // ── Status filter (applied after scoring) ──────────────────────────────
+    const damagedOnly = inspections.filter(r => r.fails > 0)
+    const cleanOnly = inspections.filter(r => r.fails === 0)
+    const visible =
+      status === 'damaged' ? damagedOnly :
+      status === 'clean'   ? cleanOnly   :
+      inspections
+
+    // Flat damage rows for the detail table + CSV
+    const damages: Array<{ inspection: InspRow, item: string, note: string }> = []
+    for (const r of visible) {
+      for (const f of r.failItems) damages.push({ inspection: r, item: f.item, note: f.note })
+    }
+
+    // ── Per-vehicle damage rollup (over visible set when filter is damaged,
+    // otherwise over the full damaged set so the rollup stays informative). ─
+    const rollupSource = status === 'clean' ? [] : (status === 'damaged' ? damagedOnly : damagedOnly)
     const byVehicle: Record<string, { reg:string, total:number, items:Record<string,number> }> = {}
-    for (const d of damages) {
-      if (!byVehicle[d.vehicle_reg]) byVehicle[d.vehicle_reg] = { reg: d.vehicle_reg, total: 0, items: {} }
-      byVehicle[d.vehicle_reg].total++
-      byVehicle[d.vehicle_reg].items[d.item] = (byVehicle[d.vehicle_reg].items[d.item] || 0) + 1
+    for (const r of rollupSource) {
+      for (const f of r.failItems) {
+        if (!byVehicle[r.vehicle_reg]) byVehicle[r.vehicle_reg] = { reg: r.vehicle_reg, total: 0, items: {} }
+        byVehicle[r.vehicle_reg].total++
+        byVehicle[r.vehicle_reg].items[f.item] = (byVehicle[r.vehicle_reg].items[f.item] || 0) + 1
+      }
     }
     const vehicleSummary = Object.values(byVehicle).sort((a,b) => b.total - a.total)
 
-    // Pull region list for filter dropdown
+    // Region list for filter dropdown
     const regions = await c.env.DB.prepare(
       `SELECT DISTINCT region FROM ${cfg.vehicleTable} WHERE region IS NOT NULL AND region!='' ORDER BY region`
     ).all<any>()
@@ -3242,24 +3279,52 @@ function registerFleetAdminRoutes(cfg: FleetAdminCfg) {
       if (regionFilter) p.set('region', regionFilter)
       if (fromDate) p.set('from', fromDate)
       if (toDate) p.set('to', toDate)
+      if (status && status !== 'all') p.set('status', status)
       for (const [k,v] of Object.entries(extra)) p.set(k,v)
       return p.toString()
     }
+    // Helper: build status-tab URL preserving other filters
+    const tabUrl = (s: string) => {
+      const p = new URLSearchParams()
+      if (vehicleFilter) p.set('vehicle', vehicleFilter)
+      if (regionFilter) p.set('region', regionFilter)
+      if (fromDate) p.set('from', fromDate)
+      if (toDate) p.set('to', toDate)
+      if (s !== 'all') p.set('status', s)
+      const qstr = p.toString()
+      return `/field/admin/${cfg.slug}-damages${qstr ? '?' + qstr : ''}`
+    }
+    const tabStyle = (active: boolean, color: string) =>
+      `padding:8px 16px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700;` +
+      (active
+        ? `background:${color};color:#000;`
+        : `background:rgba(255,255,255,0.04);color:#cbd5e1;border:1px solid var(--border);`)
 
     const body = `
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <h1 style="font-size:22px;font-weight:800;color:#fff;margin:0">🚨 ${cfg.label} · Damages Report</h1>
-        <div style="display:flex;gap:8px">
-          <a href="/field/admin/${cfg.slug}-vehicles" class="btn btn-sm btn-secondary"><i class="fas fa-truck"></i> Vehicles</a>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:10px">
+        <h1 style="font-size:22px;font-weight:800;color:#fff;margin:0">📋 ${cfg.label} · Inspections</h1>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <a href="/field/admin/${cfg.slug}-vehicles" class="btn btn-sm btn-secondary"><i class="fas fa-bus"></i> Vehicles</a>
           <a href="/field/admin/${cfg.slug}-drivers" class="btn btn-sm btn-secondary"><i class="fas fa-users"></i> Drivers</a>
           <a href="/field/admin" class="btn btn-sm btn-secondary">← Back to Admin</a>
         </div>
       </div>
-      <p style="color:var(--muted);font-size:13px;margin:0 0 18px">
-        Every ❌ Fail flagged on a ${cfg.label} inspection, with the driver's note. ${subs.length} inspection${subs.length === 1 ? '' : 's'} · ${damages.length} fail flag${damages.length === 1 ? '' : 's'} · ${cleanCount.n} clean.
+      <p style="color:var(--muted);font-size:13px;margin:0 0 16px">
+        Full inspection archive — every submitted PDF is here.
+        <strong style="color:#86efac">${cleanOnly.length}</strong> clean ·
+        <strong style="color:#fca5a5">${damagedOnly.length}</strong> with damages ·
+        <strong>${inspections.length}</strong> total.
       </p>
 
+      <!-- Status tabs -->
+      <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+        <a href="${tabUrl('all')}"      style="${tabStyle(status==='all',      '#60a5fa')}">All Inspections <span style="opacity:0.7">(${inspections.length})</span></a>
+        <a href="${tabUrl('damaged')}" style="${tabStyle(status==='damaged', '#fca5a5')}">⚠️ With Damages <span style="opacity:0.7">(${damagedOnly.length})</span></a>
+        <a href="${tabUrl('clean')}"   style="${tabStyle(status==='clean',   '#86efac')}">✅ Clean Only <span style="opacity:0.7">(${cleanOnly.length})</span></a>
+      </div>
+
       <form method="get" style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:18px;padding:14px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px">
+        ${status && status !== 'all' ? `<input type="hidden" name="status" value="${esc(status)}">` : ''}
         <div style="display:flex;flex-direction:column;gap:4px">
           <label style="font-size:11px;color:var(--muted);text-transform:uppercase">Vehicle</label>
           <input type="text" name="vehicle" value="${esc(vehicleFilter)}" placeholder="e.g. BL28ZLZN" style="padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:rgba(0,0,0,0.3);color:#fff;width:160px;text-transform:uppercase">
@@ -3281,11 +3346,15 @@ function registerFleetAdminRoutes(cfg: FleetAdminCfg) {
         </div>
         <button type="submit" class="btn btn-secondary">Filter</button>
         <a href="/field/admin/${cfg.slug}-damages" class="btn btn-sm btn-secondary" style="text-decoration:none">Clear</a>
-        <a href="/field/admin/${cfg.slug}-damages.csv?${qs({})}" class="btn btn-sm" style="background:rgba(34,197,94,0.15);color:#86efac;border:1px solid rgba(34,197,94,0.5);font-weight:700;text-decoration:none;margin-left:auto">⬇️ Download CSV</a>
+        <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+          <a href="/field/admin/${cfg.slug}-inspections.csv?${qs({})}" class="btn btn-sm" style="background:rgba(96,165,250,0.15);color:#93c5fd;border:1px solid rgba(96,165,250,0.5);font-weight:700;text-decoration:none">⬇️ Inspections CSV</a>
+          <a href="/field/admin/${cfg.slug}-damages.csv?${qs({})}" class="btn btn-sm" style="background:rgba(239,68,68,0.15);color:#fca5a5;border:1px solid rgba(239,68,68,0.5);font-weight:700;text-decoration:none">⬇️ Damages CSV</a>
+        </div>
       </form>
 
-      ${vehicleSummary.length ? `
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:20px">
+      ${status !== 'clean' && vehicleSummary.length ? `
+        <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px">Damage rollup by vehicle</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:24px">
           ${vehicleSummary.map(v => `
             <div style="padding:14px;border:1px solid rgba(239,68,68,0.3);border-radius:10px;background:rgba(239,68,68,0.06)">
               <div style="font-size:13px;font-weight:800;color:#fff;letter-spacing:0.04em">${esc(v.reg)}</div>
@@ -3298,7 +3367,59 @@ function registerFleetAdminRoutes(cfg: FleetAdminCfg) {
         </div>
       ` : ''}
 
-      ${damages.length ? `
+      <!-- INSPECTIONS TABLE — one row per submission with the PDF link -->
+      <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px">
+        Inspection archive ${status === 'damaged' ? '(with damages)' : status === 'clean' ? '(clean only)' : ''}
+        — ${visible.length} ${visible.length === 1 ? 'inspection' : 'inspections'}
+      </div>
+      ${visible.length ? `
+        <div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;margin-bottom:24px">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead style="background:rgba(255,255,255,0.04)">
+              <tr>
+                <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted)">Date</th>
+                <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted)">Form #</th>
+                <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted)">Vehicle</th>
+                <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted)">Driver</th>
+                <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted)">Region</th>
+                <th style="padding:10px 12px;text-align:center;font-size:11px;text-transform:uppercase;color:var(--muted)">Status</th>
+                <th style="padding:10px 12px;text-align:right;font-size:11px;text-transform:uppercase;color:var(--muted)">PDF</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${visible.map(r => {
+                const isClean = r.fails === 0
+                const statusBadge = isClean
+                  ? `<span style="display:inline-block;padding:3px 10px;border-radius:999px;background:rgba(34,197,94,0.15);color:#86efac;font-size:11px;font-weight:700">✅ Clean ${r.passes}/${FLEET_INSPECTION_ITEMS.length}</span>`
+                  : `<span style="display:inline-block;padding:3px 10px;border-radius:999px;background:rgba(239,68,68,0.15);color:#fca5a5;font-size:11px;font-weight:700">❌ ${r.fails} fail${r.fails===1?'':'s'}</span>`
+                return `
+                <tr style="border-top:1px solid var(--border)">
+                  <td style="padding:10px 12px;color:#e5e7eb;white-space:nowrap">${esc(r.date)}</td>
+                  <td style="padding:10px 12px;color:#93c5fd;font-family:monospace;font-weight:700"><a href="/field/success/${r.id}" target="_blank" style="color:inherit;text-decoration:none">${esc(r.form_number)}</a></td>
+                  <td style="padding:10px 12px;color:#fff;font-weight:700;font-family:monospace">${esc(r.vehicle_reg)}</td>
+                  <td style="padding:10px 12px;color:#cbd5e1">${esc(r.driver)}</td>
+                  <td style="padding:10px 12px;color:#cbd5e1">${esc(r.region)}</td>
+                  <td style="padding:10px 12px;text-align:center">${statusBadge}</td>
+                  <td style="padding:10px 12px;text-align:right;white-space:nowrap">
+                    ${r.pdf_url
+                      ? `<a href="/field/pdf/${r.id}" target="_blank" style="color:#86efac;text-decoration:none;font-weight:700;font-size:12px;margin-right:8px">📄 View</a>
+                         <a href="/field/pdf/${r.id}?download=1" style="color:#fcd34d;text-decoration:none;font-weight:700;font-size:12px">⬇️ Download</a>`
+                      : `<span style="color:#6b7280;font-size:11px;font-style:italic">PDF pending</span>`}
+                  </td>
+                </tr>`
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : `
+        <div style="padding:40px;text-align:center;border:1px dashed var(--border);border-radius:10px;color:var(--muted);margin-bottom:24px">
+          No inspections${vehicleFilter || regionFilter || fromDate || toDate ? ' for the selected filters' : status === 'damaged' ? ' with damages' : status === 'clean' ? ' clean' : ''} yet.
+        </div>
+      `}
+
+      <!-- DAMAGES DETAIL TABLE — one row per failed item (only when relevant) -->
+      ${status !== 'clean' && damages.length ? `
+        <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px">Damage detail — each failed item</div>
         <div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px">
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead style="background:rgba(255,255,255,0.04)">
@@ -3307,42 +3428,44 @@ function registerFleetAdminRoutes(cfg: FleetAdminCfg) {
                 <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted)">Vehicle</th>
                 <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted)">Driver</th>
                 <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted)">Region</th>
-                <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted)">Item</th>
-                <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted)">Note</th>
+                <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted)">Failed Item</th>
+                <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted)">Driver Note</th>
                 <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted)">Form #</th>
               </tr>
             </thead>
             <tbody>
               ${damages.map(d => `
                 <tr style="border-top:1px solid var(--border)">
-                  <td style="padding:10px 12px;color:#e5e7eb;white-space:nowrap">${esc(d.date)}</td>
-                  <td style="padding:10px 12px;color:#fff;font-weight:700">${esc(d.vehicle_reg)}</td>
-                  <td style="padding:10px 12px;color:#cbd5e1">${esc(d.driver)}</td>
-                  <td style="padding:10px 12px;color:#cbd5e1">${esc(d.region)}</td>
+                  <td style="padding:10px 12px;color:#e5e7eb;white-space:nowrap">${esc(d.inspection.date)}</td>
+                  <td style="padding:10px 12px;color:#fff;font-weight:700;font-family:monospace">${esc(d.inspection.vehicle_reg)}</td>
+                  <td style="padding:10px 12px;color:#cbd5e1">${esc(d.inspection.driver)}</td>
+                  <td style="padding:10px 12px;color:#cbd5e1">${esc(d.inspection.region)}</td>
                   <td style="padding:10px 12px;color:#fca5a5;font-weight:600">❌ ${esc(d.item)}</td>
                   <td style="padding:10px 12px;color:#e5e7eb;font-style:italic">${d.note ? esc(d.note) : '<span style="color:#6b7280">—</span>'}</td>
-                  <td style="padding:10px 12px"><a href="/field/view/${d.sub_id}" style="color:#93c5fd;text-decoration:none;font-weight:600">${esc(d.form_number)}</a></td>
+                  <td style="padding:10px 12px"><a href="/field/pdf/${d.inspection.id}" target="_blank" style="color:#93c5fd;text-decoration:none;font-weight:600">${esc(d.inspection.form_number)}</a></td>
                 </tr>`).join('')}
             </tbody>
           </table>
         </div>
-      ` : `
-        <div style="padding:40px;text-align:center;border:1px dashed var(--border);border-radius:10px;color:var(--muted)">
-          No failed inspection items found${vehicleFilter || regionFilter || fromDate || toDate ? ' for the selected filters' : ' yet'}.
-        </div>
-      `}`
-    return c.html(layout(`${cfg.label} · Damages`, body, user, 'field-admin'))
+      ` : ''}`
+    return c.html(layout(`${cfg.label} · Inspections`, body, user, 'field-admin'))
   })
 
-  app.get(`/${cfg.slug}-damages.csv`, requireAuth, async (c) => {
+  // ── INSPECTIONS-SUMMARY CSV (one row per submission, with PDF URL) ────────
+  // Spreadsheet-friendly archive: every inspection on its own row, including
+  // pass/fail counts and the direct PDF URL so Bibi can keep a copy in Excel
+  // and click straight through to any PDF.
+  app.get(`/${cfg.slug}-inspections.csv`, requireAuth, async (c) => {
     const url = new URL(c.req.url)
     const vehicleFilter = (url.searchParams.get('vehicle') || '').trim().toUpperCase()
     const regionFilter = (url.searchParams.get('region') || '').trim()
     const fromDate = (url.searchParams.get('from') || '').trim()
     const toDate = (url.searchParams.get('to') || '').trim()
+    const status = (url.searchParams.get('status') || 'all').trim()
 
-    let query = `SELECT id, form_number, prepared_by, vehicle_reg, venue as region, delivery_date,
-                        created_at, notes, form_data FROM field_submissions WHERE form_type=?`
+    let query = `SELECT id, form_number, prepared_by, driver, vehicle_reg, venue as region, delivery_date,
+                        created_at, notes, form_data, pdf_url
+                 FROM field_submissions WHERE form_type=? AND is_draft=0`
     const params: any[] = [cfg.formType]
     if (vehicleFilter) { query += ' AND UPPER(vehicle_reg) LIKE ?'; params.push('%' + vehicleFilter + '%') }
     if (regionFilter)  { query += ' AND venue=?';                   params.push(regionFilter) }
@@ -3358,7 +3481,78 @@ function registerFleetAdminRoutes(cfg: FleetAdminCfg) {
       return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
     }
     const lines: string[] = []
-    lines.push(['Date','Vehicle Reg','Driver','Region','Item Failed','Driver Note','Form Number','Submission ID','Extra Notes'].join(','))
+    lines.push([
+      'Date','Form Number','Vehicle Reg','Driver','Region',
+      'Passed','Failed','Unanswered','Total Items','Status',
+      'Failed Items','Driver Notes','PDF URL','Submission ID'
+    ].join(','))
+    for (const s of subs) {
+      let fd:any = {}; try { fd = JSON.parse(s.form_data || '{}') } catch {}
+      const insp = fd.inspection || {}
+      let passes = 0, fails = 0, unanswered = 0
+      const failItems: string[] = []
+      for (let i = 0; i < FLEET_INSPECTION_ITEMS.length; i++) {
+        const v = insp['insp_' + i]
+        if (v === 'pass') passes++
+        else if (v === 'fail') {
+          fails++
+          const note = (fd['insp_note_' + i] || '').toString().trim()
+          failItems.push(note ? `${FLEET_INSPECTION_ITEMS[i]} (${note})` : FLEET_INSPECTION_ITEMS[i])
+        } else unanswered++
+      }
+      // Apply status filter
+      if (status === 'damaged' && fails === 0) continue
+      if (status === 'clean'   && fails > 0)   continue
+      const pdfUrl = s.pdf_url || (s.id ? `https://bwprodsystem.co.za/field/pdf/${s.id}` : '')
+      lines.push([
+        s.delivery_date || (s.created_at || '').substring(0, 10),
+        s.form_number || '',
+        s.vehicle_reg || '',
+        s.driver || s.prepared_by || '',
+        s.region || fd.region || '',
+        String(passes), String(fails), String(unanswered), String(FLEET_INSPECTION_ITEMS.length),
+        fails === 0 ? 'CLEAN' : 'DAMAGED',
+        failItems.join('; '),
+        (s.notes || '').toString().trim(),
+        pdfUrl,
+        String(s.id)
+      ].map(csvEscape).join(','))
+    }
+    const today = new Date().toISOString().substring(0, 10)
+    return new Response(lines.join('\n'), {
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${cfg.slug}-inspections-${today}.csv"`
+      }
+    })
+  })
+
+  app.get(`/${cfg.slug}-damages.csv`, requireAuth, async (c) => {
+    const url = new URL(c.req.url)
+    const vehicleFilter = (url.searchParams.get('vehicle') || '').trim().toUpperCase()
+    const regionFilter = (url.searchParams.get('region') || '').trim()
+    const fromDate = (url.searchParams.get('from') || '').trim()
+    const toDate = (url.searchParams.get('to') || '').trim()
+    // status filter ignored here — damages CSV is by definition only fails.
+
+    let query = `SELECT id, form_number, prepared_by, driver, vehicle_reg, venue as region, delivery_date,
+                        created_at, notes, form_data, pdf_url FROM field_submissions WHERE form_type=? AND is_draft=0`
+    const params: any[] = [cfg.formType]
+    if (vehicleFilter) { query += ' AND UPPER(vehicle_reg) LIKE ?'; params.push('%' + vehicleFilter + '%') }
+    if (regionFilter)  { query += ' AND venue=?';                   params.push(regionFilter) }
+    if (fromDate)      { query += ' AND date(delivery_date) >= date(?)'; params.push(fromDate) }
+    if (toDate)        { query += ' AND date(delivery_date) <= date(?)'; params.push(toDate) }
+    query += ' ORDER BY delivery_date DESC, created_at DESC'
+
+    const result = await c.env.DB.prepare(query).bind(...params).all<any>()
+    const subs = result.results || []
+
+    const csvEscape = (v: string) => {
+      const s = (v == null ? '' : String(v))
+      return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
+    }
+    const lines: string[] = []
+    lines.push(['Date','Vehicle Reg','Driver','Region','Item Failed','Driver Note','Form Number','Submission ID','PDF URL','Extra Notes'].join(','))
     for (const s of subs) {
       let fd:any = {}; try { fd = JSON.parse(s.form_data || '{}') } catch {}
       const insp = fd.inspection || {}
@@ -3367,12 +3561,13 @@ function registerFleetAdminRoutes(cfg: FleetAdminCfg) {
           lines.push([
             s.delivery_date || (s.created_at || '').substring(0, 10),
             s.vehicle_reg || '',
-            s.prepared_by || '',
+            s.driver || s.prepared_by || '',
             s.region || fd.region || '',
             FLEET_INSPECTION_ITEMS[i],
             (fd['insp_note_' + i] || '').toString().trim(),
             s.form_number || '',
             String(s.id),
+            s.pdf_url || '',
             (s.notes || '').toString().trim()
           ].map(csvEscape).join(','))
         }

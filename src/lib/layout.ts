@@ -39,7 +39,7 @@ export function layout(title: string, body: string, user: AuthUser, activeNav?: 
         { href: '/musicbus',                          icon: 'fa-mobile-screen',         label: 'Driver App',        key: 'musicbus-app',      roles: ['founder','ops_director'] },
         { href: '/field/admin/musicbus-drivers',      icon: 'fa-users',                 label: 'Drivers',           key: 'musicbus-drivers',  roles: ['founder','ops_director'] },
         { href: '/field/admin/musicbus-vehicles',     icon: 'fa-bus',                   label: 'Vehicles',          key: 'musicbus-vehicles', roles: ['founder','ops_director'] },
-        { href: '/field/admin/musicbus-damages',      icon: 'fa-triangle-exclamation',  label: 'Damages',           key: 'musicbus-damages',  roles: ['founder','ops_director'] },
+        { href: '/field/admin/musicbus-damages',      icon: 'fa-clipboard-list',        label: 'Inspections',       key: 'musicbus-damages',  roles: ['founder','ops_director'] },
       ]
     },
     { href: '/admin',                     icon: 'fa-gear',             label: 'Admin',          key: 'admin',          roles: ['founder'] },
