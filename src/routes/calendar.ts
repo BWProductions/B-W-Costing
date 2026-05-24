@@ -59,6 +59,152 @@ function statusPill(status: string): string {
   return `<span style="display:inline-block;padding:3px 10px;border-radius:11px;font-size:11px;font-weight:700;color:${m.fg};background:${m.bg};letter-spacing:0.3px">${m.label.toUpperCase()}</span>`
 }
 
+// ── Inline-editable field helpers ─────────────────────────────────────────
+// Renders a click-to-edit wrapper. Backed by PATCH /calendar/api/event/:id
+function editableField(opts: {
+  eventId: number;
+  field: string;            // DB column name
+  value: string | null;
+  label?: string;            // optional caption above (uppercase chip)
+  multiline?: boolean;
+  placeholder?: string;
+  display?: string;          // optional override for displayed text (when value is shorthand)
+  emptyText?: string;        // shown when value is empty
+}): string {
+  const v = opts.value ?? ''
+  const shown = opts.display ?? v
+  const isEmpty = !v.trim()
+  const labelHTML = opts.label
+    ? `<div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">${escapeHtml(opts.label)}</div>`
+    : ''
+  // Data attributes are read by the client-side JS to wire up the editor.
+  return `
+    ${labelHTML}
+    <div class="inline-edit"
+         data-event="${opts.eventId}"
+         data-field="${escapeHtml(opts.field)}"
+         data-multiline="${opts.multiline ? '1' : '0'}"
+         data-placeholder="${escapeHtml(opts.placeholder || '')}"
+         data-raw="${escapeHtml(v)}"
+         tabindex="0"
+         title="Click to edit">
+      <span class="inline-edit-view" style="${isEmpty ? 'color:#6b7280;font-style:italic' : 'color:#fff'};${opts.multiline ? 'white-space:pre-wrap;' : ''}cursor:text;display:inline-block;min-width:60px;padding:2px 6px;border-radius:4px;border:1px dashed transparent">${isEmpty ? escapeHtml(opts.emptyText || 'click to add') : escapeHtml(shown)}</span>
+    </div>
+  `
+}
+
+// JS + CSS to wire up all .inline-edit blocks on the page
+function inlineEditScript(): string {
+  return `
+  <style>
+    .inline-edit:hover .inline-edit-view { border-color: #21262d; background: #161b22 }
+    .inline-edit-input {
+      width: 100%; min-width: 200px; padding: 6px 8px;
+      background: #161b22; border: 1px solid #F0D080; border-radius: 4px;
+      color: #fff; font-size: inherit; font-family: inherit; outline: none;
+      box-sizing: border-box;
+    }
+    .inline-edit textarea.inline-edit-input { min-height: 80px; resize: vertical }
+    .inline-edit.saving .inline-edit-view { background: rgba(240,208,128,0.15); border-color: rgba(240,208,128,0.4) }
+    .inline-edit.saved .inline-edit-view { background: rgba(124,255,43,0.15); border-color: rgba(124,255,43,0.4); transition: all 0.3s }
+    .inline-edit.error .inline-edit-view { background: rgba(255,74,28,0.15); border-color: rgba(255,74,28,0.6); transition: all 0.3s }
+    .inline-edit-hint {
+      display: block; font-size: 10px; color: #6b7280; margin-top: 3px;
+    }
+  </style>
+  <script>
+  (function() {
+    function activate(block) {
+      if (block.querySelector('.inline-edit-input')) return // already editing
+      var view = block.querySelector('.inline-edit-view')
+      var raw = block.getAttribute('data-raw') || ''
+      var multiline = block.getAttribute('data-multiline') === '1'
+      var placeholder = block.getAttribute('data-placeholder') || ''
+      var input = document.createElement(multiline ? 'textarea' : 'input')
+      input.className = 'inline-edit-input'
+      if (!multiline) input.type = 'text'
+      input.value = raw
+      input.placeholder = placeholder
+      view.style.display = 'none'
+      block.appendChild(input)
+      var hint = document.createElement('span')
+      hint.className = 'inline-edit-hint'
+      hint.textContent = multiline ? 'Ctrl+Enter / Cmd+Enter to save · Esc to cancel' : 'Enter to save · Esc to cancel'
+      block.appendChild(hint)
+      input.focus()
+      if (!multiline) input.select()
+
+      var settled = false
+      function finish(saveIt) {
+        if (settled) return
+        settled = true
+        var newVal = input.value
+        block.removeChild(input)
+        block.removeChild(hint)
+        view.style.display = ''
+        if (saveIt && newVal !== raw) save(block, view, newVal)
+      }
+
+      input.addEventListener('keydown', function(ev) {
+        if (ev.key === 'Escape') { ev.preventDefault(); finish(false) }
+        else if (ev.key === 'Enter' && !multiline) { ev.preventDefault(); finish(true) }
+        else if (ev.key === 'Enter' && multiline && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); finish(true) }
+      })
+      input.addEventListener('blur', function() { finish(true) })
+    }
+
+    function save(block, view, newVal) {
+      var eventId = block.getAttribute('data-event')
+      var field = block.getAttribute('data-field')
+      block.classList.add('saving')
+      var body = {}; body[field] = newVal
+      fetch('/calendar/api/event/' + eventId, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        credentials: 'same-origin'
+      }).then(function(r) {
+        return r.json().then(function(j) { return { ok: r.ok, data: j } })
+      }).then(function(res) {
+        block.classList.remove('saving')
+        if (res.ok && res.data && res.data.ok) {
+          block.classList.add('saved')
+          block.setAttribute('data-raw', newVal)
+          var isEmpty = !newVal.trim()
+          view.textContent = isEmpty ? 'click to add' : newVal
+          view.style.color = isEmpty ? '#6b7280' : '#fff'
+          view.style.fontStyle = isEmpty ? 'italic' : 'normal'
+          setTimeout(function() { block.classList.remove('saved') }, 1200)
+        } else {
+          block.classList.add('error')
+          console.error('Inline save failed', res)
+          setTimeout(function() { block.classList.remove('error') }, 2200)
+        }
+      }).catch(function(err) {
+        block.classList.remove('saving')
+        block.classList.add('error')
+        console.error('Inline save error', err)
+        setTimeout(function() { block.classList.remove('error') }, 2200)
+      })
+    }
+
+    document.addEventListener('click', function(ev) {
+      var block = ev.target.closest && ev.target.closest('.inline-edit')
+      if (!block) return
+      if (ev.target.classList.contains('inline-edit-input')) return
+      activate(block)
+    })
+    document.addEventListener('keydown', function(ev) {
+      if (ev.key !== 'Enter') return
+      var block = ev.target.closest && ev.target.closest && ev.target.closest('.inline-edit')
+      if (!block || block !== document.activeElement) return
+      activate(block)
+    })
+  })();
+  </script>
+  `
+}
+
 function substageBadge(sub: string | null): string {
   if (!sub) return ''
   const m = SUBSTAGE_META[sub]
@@ -533,14 +679,52 @@ calendar.get('/event/:id', async (c) => {
     </div>
     <div style="background:#0d1117;border:1px solid #21262d;border-left:4px solid ${STATUS_META[e.status]?.dot || '#F0D080'};border-radius:10px;padding:24px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap">
-        <div>
+        <div style="flex:1;min-width:0">
           <div style="color:#9ca3af;font-size:13px">${dayLabel}, ${dDate.toLocaleDateString('en-ZA', {day:'numeric',month:'long',year:'numeric'})}</div>
-          <h1 style="margin:6px 0 0 0;color:#F0D080;font-size:26px">${escapeHtml(e.event_name)}</h1>
+          <h1 style="margin:6px 0 0 0;color:#F0D080;font-size:26px">
+            <div class="inline-edit"
+                 data-event="${e.id}"
+                 data-field="event_name"
+                 data-multiline="0"
+                 data-placeholder="Event name"
+                 data-raw="${escapeHtml(e.event_name || '')}"
+                 tabindex="0"
+                 title="Click to edit event name"
+                 style="display:inline-block">
+              <span class="inline-edit-view" style="cursor:text;display:inline-block;min-width:60px;padding:2px 6px;border-radius:4px;border:1px dashed transparent;color:#F0D080">${escapeHtml(e.event_name || 'Untitled event')}</span>
+            </div>
+          </h1>
           <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
             ${statusPill(e.status)}
             ${substageBadge(e.substage)}
-            ${e.brand ? `<span style="font-size:11px;padding:2px 9px;border-radius:8px;background:rgba(240,208,128,0.10);color:#F0D080;border:1px solid rgba(240,208,128,0.25)">${escapeHtml(e.brand)}</span>` : ''}
-            ${e.region ? `<span style="font-size:11px;padding:2px 9px;border-radius:8px;background:rgba(255,122,0,0.10);color:#ffb066;border:1px solid rgba(255,122,0,0.25)">${escapeHtml(e.region)}</span>` : ''}
+            <span style="font-size:11px;padding:2px 9px;border-radius:8px;background:rgba(240,208,128,0.10);color:#F0D080;border:1px solid rgba(240,208,128,0.25);display:inline-flex;align-items:center;gap:4px">
+              <span style="font-size:9px;color:#6b7280">brand:</span>
+              <span class="inline-edit"
+                    data-event="${e.id}"
+                    data-field="brand"
+                    data-multiline="0"
+                    data-placeholder="brand"
+                    data-raw="${escapeHtml(e.brand || '')}"
+                    tabindex="0"
+                    title="Click to edit brand"
+                    style="display:inline-block">
+                <span class="inline-edit-view" style="cursor:text;padding:0 4px;border-radius:3px;border:1px dashed transparent">${e.brand ? escapeHtml(e.brand) : '—'}</span>
+              </span>
+            </span>
+            <span style="font-size:11px;padding:2px 9px;border-radius:8px;background:rgba(255,122,0,0.10);color:#ffb066;border:1px solid rgba(255,122,0,0.25);display:inline-flex;align-items:center;gap:4px">
+              <span style="font-size:9px;color:#6b7280">region:</span>
+              <span class="inline-edit"
+                    data-event="${e.id}"
+                    data-field="region"
+                    data-multiline="0"
+                    data-placeholder="region"
+                    data-raw="${escapeHtml(e.region || '')}"
+                    tabindex="0"
+                    title="Click to edit region"
+                    style="display:inline-block">
+                <span class="inline-edit-view" style="cursor:text;padding:0 4px;border-radius:3px;border:1px dashed transparent">${e.region ? escapeHtml(e.region) : '—'}</span>
+              </span>
+            </span>
           </div>
         </div>
         <form method="POST" action="/calendar/event/${e.id}/status" style="display:flex;gap:6px;align-items:center">
@@ -561,28 +745,28 @@ calendar.get('/event/:id', async (c) => {
       </div>
 
       <div style="margin-top:24px;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px">
-        ${e.address ? `<div><div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px">Address</div><div style="color:#fff;margin-top:4px">${escapeHtml(e.address)}</div></div>` : ''}
-        ${e.time_text ? `<div><div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px">Time</div><div style="color:#fff;margin-top:4px">${escapeHtml(e.time_text)}</div></div>` : ''}
+        <div>
+          ${editableField({ eventId: e.id, field: 'address', value: e.address, label: 'Address', placeholder: 'Venue / address', emptyText: 'click to add address' })}
+        </div>
+        <div>
+          ${editableField({ eventId: e.id, field: 'time_text', value: e.time_text, label: 'Time', placeholder: 'e.g. 14:00 or 08h00-17h00', emptyText: 'click to add time' })}
+        </div>
         ${e.client_name ? `<div><div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px">Client</div><div style="color:#fff;margin-top:4px">${escapeHtml(e.client_name)}</div></div>` : ''}
       </div>
 
-      ${e.team_text || crewRows.results?.length ? `
       <div style="margin-top:20px">
-        <div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Crew</div>
-        ${e.team_text ? `<div style="color:#fff;font-size:13px">${escapeHtml(e.team_text)}</div>` : ''}
-        ${crewRows.results?.length ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:5px">
+        ${editableField({ eventId: e.id, field: 'team_text', value: e.team_text, label: 'Crew', multiline: true, placeholder: 'e.g. Sipho, Daniel, Solly', emptyText: 'click to add crew' })}
+        ${crewRows.results?.length ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px">
           ${crewRows.results.map((r:any) => `<span style="font-size:11px;padding:2px 9px;border-radius:8px;background:rgba(124,255,43,0.12);color:#a8ff7a;border:1px solid rgba(124,255,43,0.25)" title="matched from: ${escapeHtml(r.matched_from)}">${escapeHtml(r.name)}</span>`).join('')}
         </div>` : ''}
-      </div>` : ''}
+      </div>
 
-      ${e.vehicle_text || vehRows.results?.length ? `
       <div style="margin-top:20px">
-        <div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Vehicle</div>
-        ${e.vehicle_text ? `<div style="color:#fff;font-size:13px">${escapeHtml(e.vehicle_text)}</div>` : ''}
-        ${vehRows.results?.length ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:5px">
+        ${editableField({ eventId: e.id, field: 'vehicle_text', value: e.vehicle_text, label: 'Vehicle', placeholder: 'e.g. Snowy + Bakkie', emptyText: 'click to add vehicle' })}
+        ${vehRows.results?.length ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px">
           ${vehRows.results.map((r:any) => `<span style="font-size:11px;padding:2px 9px;border-radius:8px;background:rgba(24,217,255,0.12);color:#8ee9ff;border:1px solid rgba(24,217,255,0.25)" title="matched from: ${escapeHtml(r.matched_from)}">${escapeHtml(r.description)} <span style="opacity:.6">${escapeHtml(r.reg_number)}</span></span>`).join('')}
         </div>` : ''}
-      </div>` : ''}
+      </div>
 
       ${(() => {
         const subs = subRows.results || []
@@ -664,21 +848,81 @@ calendar.get('/event/:id', async (c) => {
           </div>`
       })()}
 
-      ${e.notes ? `
       <div style="margin-top:20px">
-        <div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Notes</div>
-        <div style="color:#fff;white-space:pre-wrap">${escapeHtml(e.notes)}</div>
-      </div>` : ''}
+        ${editableField({ eventId: e.id, field: 'notes', value: e.notes, label: 'Notes', multiline: true, placeholder: 'Notes about this event…', emptyText: 'click to add notes' })}
+      </div>
 
       <div style="margin-top:24px;padding-top:14px;border-top:1px solid #21262d;color:#6b7280;font-size:11px;display:flex;gap:14px;flex-wrap:wrap">
         <span>Source: ${escapeHtml(e.source)}</span>
         ${e.source_ref ? `<span>Ref: ${escapeHtml(e.source_ref)}</span>` : ''}
         <span>Created: ${new Date(e.created_at).toLocaleString('en-ZA')}</span>
-        <span>Updated: ${new Date(e.updated_at).toLocaleString('en-ZA')}</span>
+        <span>Updated: <span id="updatedAt">${new Date(e.updated_at).toLocaleString('en-ZA')}</span></span>
       </div>
     </div>
+    ${inlineEditScript()}
   `
   return c.html(layout(e.event_name, body, user, 'calendar'))
+})
+
+// ── PATCH /calendar/api/event/:id — inline edit JSON endpoint ─────────────
+// Accepts any subset of editable fields. Returns { ok, updated_at } on success.
+calendar.patch('/api/event/:id', async (c) => {
+  const db = c.env.DB
+  const id = parseInt(c.req.param('id'))
+  if (!id) return c.json({ ok: false, error: 'bad id' }, 400)
+
+  let body: any
+  try { body = await c.req.json() }
+  catch { return c.json({ ok: false, error: 'invalid json' }, 400) }
+
+  // Allowed editable fields (with optional max lengths for sanity)
+  const FIELD_LIMITS: Record<string, number> = {
+    event_name: 200,
+    address: 500,
+    time_text: 100,
+    team_text: 1000,
+    vehicle_text: 300,
+    brand: 100,
+    region: 100,
+    notes: 5000,
+  }
+
+  // Whitelist + trim + length check
+  const updates: Record<string, string | null> = {}
+  for (const [k, v] of Object.entries(body)) {
+    if (!(k in FIELD_LIMITS)) continue // silently drop unknown fields
+    const max = FIELD_LIMITS[k]
+    let val = v == null ? '' : String(v)
+    val = val.trim()
+    if (val.length > max) {
+      return c.json({ ok: false, error: `${k} too long (max ${max})` }, 400)
+    }
+    updates[k] = val === '' ? null : val
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return c.json({ ok: false, error: 'no editable fields supplied' }, 400)
+  }
+
+  // Special-case: event_name can't be empty
+  if ('event_name' in updates && !updates.event_name) {
+    return c.json({ ok: false, error: 'event name cannot be empty' }, 400)
+  }
+
+  // Build dynamic UPDATE
+  const cols = Object.keys(updates)
+  const sets = cols.map(c => `${c}=?`).join(', ')
+  const vals = cols.map(c => updates[c])
+  vals.push(id)
+  await db.prepare(
+    `UPDATE calendar_events SET ${sets}, updated_at=CURRENT_TIMESTAMP WHERE id=?`
+  ).bind(...vals).run()
+
+  const row = await db.prepare(
+    `SELECT updated_at FROM calendar_events WHERE id=?`
+  ).bind(id).first<any>()
+
+  return c.json({ ok: true, updated_at: row?.updated_at, fields: cols })
 })
 
 // ── POST /calendar/event/:id/status — inline edit handler ─────────────────
