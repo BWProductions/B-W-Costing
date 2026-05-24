@@ -1206,6 +1206,82 @@ function fieldPage(title: string, body: string, extraHead = ''): string {
 </head>
 <body>
 ${body}
+<!-- ── NAV-GUARD: stops accidental back/refresh while a form is in progress ── -->
+<script>
+(function () {
+  // Only arm on pages that contain a real input form (not landing tiles, not success pages).
+  function hasEditableForm() {
+    var forms = document.querySelectorAll('form')
+    if (!forms.length) return false
+    for (var i = 0; i < forms.length; i++) {
+      // Ignore search/filter forms — they have GET method and no submit-style buttons
+      if ((forms[i].method || 'get').toLowerCase() !== 'post') continue
+      var inputs = forms[i].querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]), textarea, select, canvas')
+      if (inputs.length) return true
+    }
+    return false
+  }
+  if (!hasEditableForm()) return
+
+  var dirty = false
+  var submitting = false
+  var msg = 'Are you sure you want to leave? Your form is not saved yet.'
+
+  function markDirty() { dirty = true }
+
+  // Wait for DOM ready so dynamic inputs are caught too
+  function arm() {
+    // Watch every editable element
+    document.querySelectorAll('input, textarea, select').forEach(function (el) {
+      el.addEventListener('input', markDirty, { passive: true })
+      el.addEventListener('change', markDirty, { passive: true })
+    })
+    // Signature canvases mark dirty on first touch
+    document.querySelectorAll('canvas').forEach(function (c) {
+      c.addEventListener('pointerdown', markDirty, { passive: true })
+      c.addEventListener('touchstart',  markDirty, { passive: true })
+      c.addEventListener('mousedown',   markDirty, { passive: true })
+    })
+    // Submit clears the guard so success page isn't blocked
+    document.querySelectorAll('form').forEach(function (f) {
+      f.addEventListener('submit', function () { submitting = true; dirty = false })
+    })
+    // Push a sentinel history entry so the FIRST back-press hits us
+    try { history.pushState({ navGuard: true }, '', location.href) } catch (e) {}
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', arm)
+  } else {
+    arm()
+  }
+
+  // Refresh / close / typed-URL / link click
+  window.addEventListener('beforeunload', function (e) {
+    if (!dirty || submitting) return
+    e.preventDefault()
+    e.returnValue = msg
+    return msg
+  })
+
+  // Mobile/desktop back-button
+  window.addEventListener('popstate', function () {
+    if (dirty && !submitting) {
+      if (confirm(msg)) {
+        // User chose to leave — let the original back navigation through
+        dirty = false
+        history.back()
+      } else {
+        // User chose to stay — push the sentinel back so the next back-press
+        // also gets caught
+        try { history.pushState({ navGuard: true }, '', location.href) } catch (e) {}
+      }
+    } else {
+      history.back()
+    }
+  })
+})()
+</script>
 </body>
 </html>`
 }
