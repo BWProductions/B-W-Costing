@@ -17,4 +17,8 @@
       "bucket_name": "bw-productions-pdfs"
     }
   ]
+  // Cron triggers for the accounts digest are configured in the Cloudflare
+  // dashboard (Pages → bw-productions → Settings → Functions → Cron Triggers)
+  // because Pages projects don't allow cron declaration in wrangler.jsonc.
+  // Schedules: "0 5 * * *" (07:00 SAST) and "0 10 * * *" (12:00 SAST).
 }

@@ -3,6 +3,7 @@
 import { Hono } from 'hono'
 import { logger } from 'hono/logger'
 import { serveStatic } from 'hono/cloudflare-workers'
+import { runDigest } from './lib/email-digest.js'
 import auth from './routes/auth.js'
 import dashboard from './routes/dashboard.js'
 import fleet from './routes/fleet.js'
@@ -53,6 +54,30 @@ app.route('/field', field)
 // ── Music Bus fleet app (public — no login) — separate from B&W field ops
 app.route('/musicbus', musicbusApp)
 
+// ── Health (must be BEFORE dashboard mount to avoid the requireAuth wildcard)
+app.get('/health', (c) => c.json({
+  status: 'ok',
+  service: 'BW Productions Ops',
+  version: '2.0',
+  ts: new Date().toISOString()
+}))
+
+// ── Token-protected cron endpoint (MUST be before the dashboard mount because
+// the dashboard router has app.use('*', requireAuth) which catches everything
+// on '/'). External scheduler POSTs here twice daily.
+// Token = last 12 chars of RESEND_API_KEY (server-side check).
+app.post('/api/cron/email-digest', async (c) => {
+  const env = c.env as any
+  const auth = c.req.header('authorization') || ''
+  const token = auth.replace(/^Bearer\s+/i, '').trim()
+  const expected = (env.RESEND_API_KEY || '').slice(-12)
+  if (!token || !expected || token !== expected) {
+    return c.json({ ok: false, error: 'unauthorized' }, 401)
+  }
+  const result = await runDigest(env, { reason: 'webhook' })
+  return c.json(result)
+})
+
 // ── Protected app routes
 app.route('/account', account)
 app.route('/', dashboard)
@@ -89,13 +114,7 @@ app.get('/api/load-class', async (c) => {
   return c.json(lc ?? null)
 })
 
-// ── Health
-app.get('/health', (c) => c.json({
-  status: 'ok',
-  service: 'BW Productions Ops',
-  version: '2.0',
-  ts: new Date().toISOString()
-}))
+
 
 // ── 404
 app.notFound((c) => c.html(`<!DOCTYPE html>
@@ -133,5 +152,14 @@ app.notFound((c) => c.html(`<!DOCTYPE html>
   </div>
 </body>
 </html>`, 404))
+
+// ─── SCHEDULER NOTES ────────────────────────────────────────────────────────
+// Cloudflare Pages doesn't support native cron triggers in wrangler.jsonc.
+// The accounts email digest is fired by an EXTERNAL scheduler hitting
+//     POST /api/cron/email-digest
+// twice daily at 05:00 UTC (07:00 SAST) and 10:00 UTC (12:00 SAST).
+// The webhook is bearer-token protected (token = last 12 chars of
+// RESEND_API_KEY). For now Bibi can also fire it manually via the
+// "Send digest now" button at /field/admin/email-digest.
 
 export default app

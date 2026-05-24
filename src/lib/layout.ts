@@ -31,6 +31,7 @@ export function layout(title: string, body: string, user: AuthUser, activeNav?: 
     { href: '/field/admin/planner-extractor', icon: 'fa-calendar-week', label: 'Planner Extractor', key: 'planner-extractor', roles: ['founder','ops_director','finance_director','account_director','crew'] },
     { href: '/field/admin/damages',       icon: 'fa-triangle-exclamation', label: 'Vehicle Damages', key: 'damages',     roles: ['founder','ops_director','finance_director','account_director','crew'] },
     { href: '/field/admin/products',      icon: 'fa-boxes-stacked',    label: 'Master Products',key: 'products',       roles: ['founder','ops_director','finance_director','account_director','crew'] },
+    { href: '/field/admin/email-digest',  icon: 'fa-envelope',         label: 'Accounts Email',  key: 'email-digest',  roles: ['founder','ops_director','finance_director'] },
     // ── Music Bus group (collapsible) ─────────────────────────────────────────────
     {
       groupKey: 'musicbus', groupLabel: 'Music Bus', groupIcon: 'fa-music',

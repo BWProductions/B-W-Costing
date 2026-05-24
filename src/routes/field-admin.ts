@@ -5,6 +5,7 @@ import { Hono } from 'hono'
 import { requireAuth } from '../middleware/auth.js'
 import { layout } from '../lib/layout.js'
 import { zipSync, strToU8 } from 'fflate'
+import { runDigest, ACCOUNTS_RECIPIENTS } from '../lib/email-digest.js'
 
 type Env = { Bindings: {
   DB: D1Database
@@ -3584,5 +3585,115 @@ function registerFleetAdminRoutes(cfg: FleetAdminCfg) {
 }
 
 registerFleetAdminRoutes(MUSICBUS_ADMIN)
+
+// ─── EMAIL DIGEST: manual triggers + log viewer ──────────────────────────────
+
+// Fire the digest now (admin button — useful for testing or after a fix)
+app.post('/email-digest/run-now', requireAuth, async (c) => {
+  const result = await runDigest(c.env as any, { reason: 'manual' })
+  return c.json(result)
+})
+
+// Resend a SPECIFIC delivery (one-off, useful when accounts deletes the email)
+app.post('/email-digest/resend/:id', requireAuth, async (c) => {
+  const id = parseInt(c.req.param('id'))
+  if (!id) return c.json({ ok: false, error: 'bad id' }, 400)
+  // Clear notified_at on this row so the digest picks it up
+  await c.env.DB.prepare(`UPDATE field_submissions SET notified_at=NULL WHERE id=? AND form_type='delivery'`).bind(id).run()
+  const result = await runDigest(c.env as any, { reason: 'manual-resend', forceIds: [id] })
+  return c.json(result)
+})
+
+// Log viewer — see every send attempt with status, recipients, errors
+app.get('/email-digest', requireAuth, async (c) => {
+  const user = c.get('user' as any) as any
+  const logs = await c.env.DB.prepare(
+    `SELECT id, sent_at, recipient, subject, status, provider_id, error, delivery_count, total_size_kb
+     FROM email_log ORDER BY sent_at DESC LIMIT 100`
+  ).all<any>()
+  const pendingRes = await c.env.DB.prepare(
+    `SELECT COUNT(*) as n FROM field_submissions
+     WHERE form_type='delivery' AND is_draft=0
+       AND signature_data IS NOT NULL AND signature_data != ''
+       AND notified_at IS NULL`
+  ).first<any>()
+  const pending = pendingRes?.n || 0
+  const escH = (s:any) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+
+  const rows = (logs.results || []).map((r:any) => {
+    const dot = r.status === 'sent' ? '#86efac' : r.status === 'failed' ? '#fca5a5' : '#fcd34d'
+    return `
+      <tr style="border-top:1px solid var(--border)">
+        <td style="padding:8px 10px;color:#e5e7eb;white-space:nowrap;font-size:12px">${escH(r.sent_at).replace('T',' ').slice(0,19)}</td>
+        <td style="padding:8px 10px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${dot};margin-right:6px"></span><span style="color:#cbd5e1;font-size:12px">${escH(r.status)}</span></td>
+        <td style="padding:8px 10px;color:#cbd5e1;font-size:12px">${escH(r.recipient)}</td>
+        <td style="padding:8px 10px;color:#e5e7eb;font-size:12px">${escH(r.subject)}</td>
+        <td style="padding:8px 10px;text-align:right;color:#cbd5e1;font-size:12px">${r.delivery_count}</td>
+        <td style="padding:8px 10px;text-align:right;color:#cbd5e1;font-size:12px">${r.total_size_kb || 0} KB</td>
+        <td style="padding:8px 10px;color:#fca5a5;font-size:11px;max-width:340px;overflow:hidden;text-overflow:ellipsis">${escH(r.error || '')}</td>
+      </tr>`
+  }).join('')
+
+  const body = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:10px">
+      <h1 style="font-size:22px;font-weight:800;color:#fff;margin:0">📧 Accounts Email Digest</h1>
+      <a href="/field/admin" class="btn btn-sm btn-secondary">← Back to Admin</a>
+    </div>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px">
+      Two scheduled digests per day at <strong>07:00</strong> and <strong>12:00 SAST</strong>.
+      Sent to: <strong>${ACCOUNTS_RECIPIENTS.map(e => escH(e)).join(', ')}</strong>.
+      Reply-to: <strong>bibi@bwproductions.co.za</strong>.
+    </p>
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:18px;flex-wrap:wrap">
+      <div style="padding:12px 16px;border:1px solid var(--border);border-radius:10px;background:rgba(96,165,250,0.06)">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase">Pending now</div>
+        <div style="font-size:22px;font-weight:800;color:#93c5fd">${pending}</div>
+        <div style="font-size:11px;color:#9ca3af">signed deliveries not yet emailed</div>
+      </div>
+      <button onclick="fireDigest()" id="fireBtn" style="padding:10px 18px;border-radius:8px;border:1px solid #86efac;background:rgba(34,197,94,0.15);color:#86efac;font-weight:700;cursor:pointer;font-size:13px">
+        ▶ Send digest now
+      </button>
+      <span id="fireStatus" style="color:var(--muted);font-size:12px"></span>
+    </div>
+    <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px">Recent send log</div>
+    <div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead style="background:rgba(255,255,255,0.04)">
+          <tr>
+            <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted)">When (UTC)</th>
+            <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted)">Status</th>
+            <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted)">To</th>
+            <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted)">Subject</th>
+            <th style="padding:10px 12px;text-align:right;font-size:11px;text-transform:uppercase;color:var(--muted)">#</th>
+            <th style="padding:10px 12px;text-align:right;font-size:11px;text-transform:uppercase;color:var(--muted)">Size</th>
+            <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted)">Error</th>
+          </tr>
+        </thead>
+        <tbody>${rows || '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--muted)">No emails sent yet.</td></tr>'}</tbody>
+      </table>
+    </div>
+    <script>
+      async function fireDigest() {
+        const btn = document.getElementById('fireBtn')
+        const s   = document.getElementById('fireStatus')
+        btn.disabled = true; s.textContent = 'Sending...'
+        try {
+          const r = await fetch('/field/admin/email-digest/run-now', { method:'POST' })
+          const j = await r.json()
+          if (j.ok) {
+            s.textContent = j.skipped ? 'Nothing to send.' : '✅ Sent ' + j.sent + ' deliver' + (j.sent===1?'y':'ies') + '. Refreshing...'
+            setTimeout(() => location.reload(), 1200)
+          } else {
+            s.textContent = '❌ ' + (j.error || 'Failed')
+            btn.disabled = false
+          }
+        } catch (e) {
+          s.textContent = '❌ ' + e.message
+          btn.disabled = false
+        }
+      }
+    </script>`
+  return c.html(layout('Accounts Email Digest', body, user, 'field-admin'))
+})
 
 export default app
