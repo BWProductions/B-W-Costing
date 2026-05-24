@@ -22,6 +22,7 @@ import fieldAdmin from './routes/field-admin.js'
 import plannerExtractor from './routes/planner-extractor.js'
 import productsAdmin from './routes/products-admin.js'
 import calendar from './routes/calendar.js'
+import dispatch from './routes/dispatch.js'
 
 type Env = { Bindings: { DB: D1Database } }
 
@@ -148,6 +149,12 @@ app.get('/calendar/ics/:userId/:tokenFile', async (c) => {
     }
   })
 })
+
+// ── Warehouse Big-Screen Dispatch View (token-protected, no login)
+//    Pattern: /dispatch/:token  →  token comes from system_settings.dispatch_token
+//    MUST be registered before /' (dashboard) mount because dashboard has
+//    app.use('*', requireAuth) which would block the warehouse TV.
+app.route('/dispatch', dispatch)
 
 // ── Token-protected cron endpoint (MUST be before the dashboard mount because
 // the dashboard router has app.use('*', requireAuth) which catches everything
