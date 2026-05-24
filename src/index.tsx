@@ -63,6 +63,92 @@ app.get('/health', (c) => c.json({
   ts: new Date().toISOString()
 }))
 
+// ── Public ICS feed (token-protected, no login) — Google/Apple/Outlook poll this
+//    Pattern: /calendar/ics/:userId/:token.ics  →  token comes from users.ics_token
+//    MUST be registered before /calendar mount because the calendar router has
+//    app.use('*', requireAuth) which would block external pollers.
+app.get('/calendar/ics/:userId/:tokenFile', async (c) => {
+  const { buildICS } = await import('./lib/ics.js')
+  const env = c.env as any
+  const userId = parseInt(c.req.param('userId'))
+  const tokenFile = c.req.param('tokenFile') // expects "{token}.ics"
+  const token = tokenFile.replace(/\.ics$/i, '')
+  if (!userId || !token || token.length < 16) {
+    return c.text('Not found', 404)
+  }
+
+  // Verify token
+  const user = await env.DB.prepare(`SELECT id, ics_token FROM users WHERE id=? AND active=1`).bind(userId).first<any>()
+  if (!user || !user.ics_token || user.ics_token !== token) {
+    return c.text('Not found', 404)
+  }
+
+  // Pull events from 6 months ago through 18 months out
+  const today = new Date()
+  const startD = new Date(today); startD.setUTCMonth(startD.getUTCMonth() - 6)
+  const endD = new Date(today);   endD.setUTCMonth(endD.getUTCMonth() + 18)
+  const startStr = startD.toISOString().slice(0, 10)
+  const endStr = endD.toISOString().slice(0, 10)
+
+  const rows = await env.DB.prepare(
+    `SELECT ce.*, cl.name as client_name FROM calendar_events ce
+     LEFT JOIN clients cl ON cl.id = ce.client_id
+     WHERE event_date BETWEEN ? AND ?
+       AND status != 'cancelled'
+     ORDER BY event_date ASC, id ASC`
+  ).bind(startStr, endStr).all<any>()
+
+  const STATUS_TXT: Record<string, string> = {
+    booking: '🟡 Booking',
+    preloaded: '🟢 Pre-loaded',
+    delivered: '🔵 Delivered',
+    cancelled: '❌ Cancelled'
+  }
+  const SUBSTAGE_TXT: Record<string, string> = {
+    load:'Load', leave:'Leave', setup:'Setup', event:'Event', strike:'Strike', collect:'Collect'
+  }
+
+  const icsEvents = (rows.results || []).map((e: any) => {
+    const parts: string[] = []
+    parts.push(STATUS_TXT[e.status] || e.status)
+    if (e.substage)      parts.push(`• ${SUBSTAGE_TXT[e.substage] || e.substage}`)
+    if (e.brand)         parts.push(`• ${e.brand}`)
+    if (e.client_name)   parts.push(`• ${e.client_name}`)
+    if (e.time_text)     parts.push(`• ${e.time_text}`)
+    if (e.team_text)     parts.push(`\nCrew: ${e.team_text}`)
+    if (e.vehicle_text)  parts.push(`Vehicle: ${e.vehicle_text}`)
+    if (e.notes)         parts.push(`\n${e.notes}`)
+    parts.push(`\nOpen: https://${new URL(c.req.url).host}/calendar/event/${e.id}`)
+
+    const updated = e.updated_at ? new Date(e.updated_at) : new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const lastMod = `${updated.getUTCFullYear()}${pad(updated.getUTCMonth()+1)}${pad(updated.getUTCDate())}T${pad(updated.getUTCHours())}${pad(updated.getUTCMinutes())}${pad(updated.getUTCSeconds())}Z`
+
+    return {
+      uid: `bw-cal-${e.id}@bwproductions`,
+      start: e.event_date,
+      summary: `${STATUS_TXT[e.status]?.replace(/^[^\s]+\s/, '') ?? ''} ${e.event_name}`.trim(),
+      description: parts.join(' '),
+      location: e.address || e.region || undefined,
+      status: e.status === 'cancelled' ? 'CANCELLED' as const :
+              e.status === 'delivered' ? 'CONFIRMED' as const : 'TENTATIVE' as const,
+      categories: [e.brand, e.region, e.status].filter(Boolean),
+      lastModified: lastMod
+    }
+  })
+
+  const ics = buildICS(icsEvents, 'B&W Productions Events')
+
+  return new Response(ics, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/calendar; charset=utf-8',
+      'Cache-Control': 'public, max-age=900', // 15 min — Google/Apple poll on their own schedule anyway
+      'Content-Disposition': 'inline; filename="bw-events.ics"'
+    }
+  })
+})
+
 // ── Token-protected cron endpoint (MUST be before the dashboard mount because
 // the dashboard router has app.use('*', requireAuth) which catches everything
 // on '/'). External scheduler (GitHub Actions + cron-job.org) POSTs here

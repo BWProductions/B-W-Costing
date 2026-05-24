@@ -6,6 +6,7 @@ import { Hono } from 'hono'
 import { requireAuth } from '../middleware/auth.js'
 import { layout } from '../lib/layout.js'
 import type { AuthUser } from '../lib/auth.js'
+import { buildICS, generateIcsToken, type ICSEvent } from '../lib/ics.js'
 
 type Env = { Bindings: { DB: D1Database }; Variables: { user: AuthUser } }
 
@@ -142,6 +143,29 @@ calendar.get('/', async (c) => {
     (byDate[e.event_date] ||= []).push(e)
   }
 
+  // ── Pull field_submissions overlapping this week (load sheets per day)
+  //     Match by delivery_date OR collection_date falling inside the week.
+  const subRows = await db.prepare(
+    `SELECT id, form_type, form_number, event_name, brand, venue, address,
+            delivery_date, collection_date, signature_data IS NOT NULL as is_signed,
+            pdf_url, calendar_event_id, driver, vehicle_reg, created_at
+     FROM field_submissions
+     WHERE status='active' AND is_draft=0
+       AND (
+         (delivery_date BETWEEN ? AND ?) OR
+         (collection_date BETWEEN ? AND ?)
+       )
+     ORDER BY delivery_date ASC, id ASC`
+  ).bind(weekStartStr, weekEndStr, weekStartStr, weekEndStr).all<any>()
+
+  // Group submissions by the relevant day (using delivery_date if set, otherwise collection_date)
+  const subsByDate: Record<string, any[]> = {}
+  for (const s of (subRows.results || [])) {
+    const d = (s.delivery_date && s.delivery_date.slice(0, 10)) ||
+              (s.collection_date && s.collection_date.slice(0, 10))
+    if (d) (subsByDate[d] ||= []).push(s)
+  }
+
   // ── Status counts for filter bar (across this week, unfiltered by status)
   const statusCounts = await db.prepare(
     `SELECT status, COUNT(*) as n FROM calendar_events
@@ -229,6 +253,44 @@ calendar.get('/', async (c) => {
     const emptyState = dayEvents.length === 0 ? `
       <div style="text-align:center;color:#4a4a4a;font-size:11px;padding:24px 8px;font-style:italic">no events</div>` : ''
 
+    // ── Bottom-of-day load sheets: any field_submissions touching this date
+    const daySubs = subsByDate[dateStr] || []
+    const subPills = daySubs.map((s: any) => {
+      const typeMap: Record<string, { label: string; icon: string; color: string }> = {
+        delivery:           { label: 'DN', icon: 'fa-truck-fast',        color: '#7CFF2B' },
+        collection:         { label: 'CN', icon: 'fa-truck-arrow-right', color: '#18D9FF' },
+        preload:            { label: 'PL', icon: 'fa-boxes-packing',     color: '#F0D080' },
+        'pre-load':         { label: 'PL', icon: 'fa-boxes-packing',     color: '#F0D080' },
+        inspection:         { label: 'VI', icon: 'fa-clipboard-check',   color: '#ffb066' },
+        repair:             { label: 'RP', icon: 'fa-wrench',            color: '#FF4A1C' },
+        musicbus_inspection:{ label: 'MB', icon: 'fa-bus',               color: '#CC18E8' },
+        shortlist:          { label: 'SL', icon: 'fa-list-check',        color: '#a4a6f4' },
+      }
+      const meta = typeMap[s.form_type] || { label: '??', icon: 'fa-file', color: '#9ca3af' }
+      const signedTick = s.is_signed
+        ? `<i class="fa-solid fa-circle-check" style="color:${meta.color};font-size:9px;margin-left:3px" title="signed"></i>`
+        : `<i class="fa-regular fa-circle" style="color:#6b7280;font-size:9px;margin-left:3px" title="unsigned"></i>`
+      const href = s.pdf_url
+        ? s.pdf_url
+        : `/field/admin/submission/${s.id}`
+      return `<a href="${href}" target="_blank" rel="noopener" title="${escapeHtml(s.form_number)} — ${escapeHtml(s.event_name || s.venue || '')}${s.is_signed ? ' (signed)' : ' (unsigned)'}"
+        style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:6px;
+        background:${meta.color}1a;color:${meta.color};border:1px solid ${meta.color}44;
+        font-size:10px;font-weight:600;text-decoration:none">
+        <i class="fa-solid ${meta.icon}" style="font-size:9px"></i>
+        ${meta.label}-${escapeHtml(s.form_number.replace(/^[A-Z]+/, ''))}
+        ${signedTick}
+      </a>`
+    }).join(' ')
+
+    const loadSheetSection = daySubs.length ? `
+      <div style="margin-top:10px;padding-top:8px;border-top:1px dashed #21262d">
+        <div style="font-size:9px;color:#6b7280;letter-spacing:1px;text-transform:uppercase;margin-bottom:5px;font-weight:600">
+          <i class="fa-solid fa-clipboard-list" style="font-size:9px"></i> Load sheets (${daySubs.length})
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px">${subPills}</div>
+      </div>` : ''
+
     dayCols.push(`
       <div class="cal-day ${isToday ? 'cal-day-today' : ''}" style="
         background:#0d1117;border:1px solid ${isToday ? '#F0D080' : '#21262d'};
@@ -249,6 +311,7 @@ calendar.get('/', async (c) => {
           cursor:pointer;transition:all .15s">
           <i class="fa-solid fa-plus"></i> Add event
         </button>
+        ${loadSheetSection}
       </div>`)
   }
 
@@ -299,7 +362,7 @@ calendar.get('/', async (c) => {
           ${weekStart.toLocaleDateString('en-ZA', {day:'numeric',month:'short'})} – ${weekEnd.toLocaleDateString('en-ZA', {day:'numeric',month:'short',year:'numeric'})}
         </div>
       </div>
-      <div style="display:flex;gap:8px;align-items:center">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <a href="?week=${prevWeek}" style="padding:8px 14px;background:#161b22;border:1px solid #21262d;border-radius:6px;color:#fff;text-decoration:none">
           <i class="fa-solid fa-chevron-left"></i>
         </a>
@@ -312,6 +375,9 @@ calendar.get('/', async (c) => {
         <input type="week" id="weekPicker" style="
           padding:7px 10px;background:#161b22;border:1px solid #21262d;border-radius:6px;color:#fff;font-size:13px"
           onchange="jumpToWeek(this.value)">
+        <a href="/calendar/ics-setup" style="padding:8px 14px;background:rgba(240,208,128,0.10);border:1px solid rgba(240,208,128,0.3);border-radius:6px;color:#F0D080;text-decoration:none;font-weight:600;font-size:13px" title="Subscribe to feed in Google/Apple Calendar">
+          <i class="fa-solid fa-share-nodes"></i> Subscribe
+        </a>
       </div>
     </div>
 
@@ -442,6 +508,20 @@ calendar.get('/event/:id', async (c) => {
      WHERE cev.event_id = ? ORDER BY f.description`
   ).bind(id).all<any>()
 
+  // ── Load sheets: explicitly pinned via calendar_event_id, OR matching by date
+  const subRows = await db.prepare(
+    `SELECT id, form_type, form_number, event_name, brand, venue, address,
+            delivery_date, collection_date, signature_data IS NOT NULL as is_signed,
+            pdf_url, calendar_event_id, driver, vehicle_reg, prepared_by, created_at
+     FROM field_submissions
+     WHERE status='active' AND is_draft=0
+       AND (
+         calendar_event_id = ?
+         OR (calendar_event_id IS NULL AND (delivery_date = ? OR collection_date = ?))
+       )
+     ORDER BY delivery_date ASC, id ASC`
+  ).bind(id, e.event_date, e.event_date).all<any>()
+
   const dDate = new Date(e.event_date + 'T00:00:00Z')
   const dayLabel = DAY_LABELS_LONG[dDate.getUTCDay()]
 
@@ -504,6 +584,86 @@ calendar.get('/event/:id', async (c) => {
         </div>` : ''}
       </div>` : ''}
 
+      ${(() => {
+        const subs = subRows.results || []
+        if (!subs.length) return `
+          <div style="margin-top:24px;padding:14px;background:rgba(240,208,128,0.04);border:1px dashed #21262d;border-radius:8px;color:#6b7280;font-size:12px;text-align:center">
+            <i class="fa-solid fa-clipboard-list"></i> No load sheets linked yet — Pre-Load / Delivery / Collection notes dated ${e.event_date} will appear here automatically.
+          </div>`
+        const typeMap: Record<string, { label: string; icon: string; color: string }> = {
+          delivery:    { label: 'Delivery Note',   icon: 'fa-truck-fast',        color: '#7CFF2B' },
+          collection:  { label: 'Collection Note', icon: 'fa-truck-arrow-right', color: '#18D9FF' },
+          preload:     { label: 'Pre-Load',        icon: 'fa-boxes-packing',     color: '#F0D080' },
+          'pre-load':  { label: 'Pre-Load',        icon: 'fa-boxes-packing',     color: '#F0D080' },
+          inspection:  { label: 'Vehicle Inspection', icon: 'fa-clipboard-check', color: '#ffb066' },
+          repair:      { label: 'Repair Note',     icon: 'fa-wrench',            color: '#FF4A1C' },
+          musicbus_inspection: { label: 'Music Bus Inspection', icon: 'fa-bus', color: '#CC18E8' },
+          shortlist:   { label: 'Shortlist',       icon: 'fa-list-check',        color: '#a4a6f4' },
+        }
+        const rows = subs.map((s: any) => {
+          const meta = typeMap[s.form_type] || { label: s.form_type, icon: 'fa-file', color: '#9ca3af' }
+          const isPinned = s.calendar_event_id === e.id
+          const signedBadge = s.is_signed
+            ? `<span style="font-size:10px;padding:1px 7px;border-radius:6px;background:rgba(124,255,43,0.15);color:#a8ff7a;border:1px solid rgba(124,255,43,0.3)"><i class="fa-solid fa-check"></i> Signed</span>`
+            : `<span style="font-size:10px;padding:1px 7px;border-radius:6px;background:rgba(156,163,175,0.10);color:#9ca3af;border:1px solid rgba(156,163,175,0.25)">Unsigned</span>`
+          const pinnedBadge = isPinned
+            ? `<span style="font-size:10px;padding:1px 7px;border-radius:6px;background:rgba(240,208,128,0.15);color:#F0D080;border:1px solid rgba(240,208,128,0.3)" title="Explicitly pinned to this event"><i class="fa-solid fa-thumbtack"></i> Pinned</span>`
+            : `<span style="font-size:10px;padding:1px 7px;border-radius:6px;background:rgba(99,102,241,0.10);color:#a4a6f4;border:1px solid rgba(99,102,241,0.25)" title="Auto-matched by date">Date match</span>`
+          const pinAction = isPinned
+            ? `<form method="POST" action="/calendar/event/${e.id}/unpin/${s.id}" style="display:inline">
+                <button type="submit" style="background:none;border:0;color:#9ca3af;font-size:11px;cursor:pointer;text-decoration:underline">unpin</button>
+               </form>`
+            : `<form method="POST" action="/calendar/event/${e.id}/pin/${s.id}" style="display:inline">
+                <button type="submit" style="background:none;border:0;color:#F0D080;font-size:11px;cursor:pointer;text-decoration:underline">pin to event</button>
+               </form>`
+          return `
+            <tr style="border-bottom:1px solid #21262d">
+              <td style="padding:10px 8px;color:${meta.color};font-weight:600">
+                <i class="fa-solid ${meta.icon}" style="margin-right:4px"></i>${meta.label}
+              </td>
+              <td style="padding:10px 8px;color:#fff;font-family:monospace;font-size:12px">${escapeHtml(s.form_number)}</td>
+              <td style="padding:10px 8px;color:#9ca3af;font-size:12px">${escapeHtml(s.event_name || s.venue || '—')}</td>
+              <td style="padding:10px 8px;color:#9ca3af;font-size:12px">${escapeHtml(s.driver || s.prepared_by || '—')}</td>
+              <td style="padding:10px 8px;color:#9ca3af;font-size:12px;font-family:monospace">${escapeHtml(s.vehicle_reg || '—')}</td>
+              <td style="padding:10px 8px">${signedBadge}</td>
+              <td style="padding:10px 8px">${pinnedBadge}</td>
+              <td style="padding:10px 8px;white-space:nowrap">
+                ${s.pdf_url
+                  ? `<a href="${s.pdf_url}" target="_blank" rel="noopener" style="color:#F0D080;font-size:11px;text-decoration:none"><i class="fa-solid fa-file-pdf"></i> PDF</a> &nbsp;`
+                  : ''}
+                <a href="/field/admin/submission/${s.id}" style="color:#9ca3af;font-size:11px;text-decoration:none"><i class="fa-solid fa-eye"></i> view</a>
+                &nbsp; ${pinAction}
+              </td>
+            </tr>`
+        }).join('')
+        return `
+          <div style="margin-top:24px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px">
+                <i class="fa-solid fa-clipboard-list"></i> Load Sheets (${subs.length})
+              </div>
+              <a href="/field" style="font-size:11px;color:#F0D080;text-decoration:none"><i class="fa-solid fa-plus"></i> create field form</a>
+            </div>
+            <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;overflow:hidden">
+              <table style="width:100%;border-collapse:collapse">
+                <thead style="background:#161b22">
+                  <tr>
+                    <th style="text-align:left;padding:8px;color:#9ca3af;font-size:10px;text-transform:uppercase;letter-spacing:1px">Type</th>
+                    <th style="text-align:left;padding:8px;color:#9ca3af;font-size:10px;text-transform:uppercase;letter-spacing:1px">Number</th>
+                    <th style="text-align:left;padding:8px;color:#9ca3af;font-size:10px;text-transform:uppercase;letter-spacing:1px">Event / Venue</th>
+                    <th style="text-align:left;padding:8px;color:#9ca3af;font-size:10px;text-transform:uppercase;letter-spacing:1px">Driver</th>
+                    <th style="text-align:left;padding:8px;color:#9ca3af;font-size:10px;text-transform:uppercase;letter-spacing:1px">Vehicle</th>
+                    <th style="text-align:left;padding:8px;color:#9ca3af;font-size:10px;text-transform:uppercase;letter-spacing:1px">Signed</th>
+                    <th style="text-align:left;padding:8px;color:#9ca3af;font-size:10px;text-transform:uppercase;letter-spacing:1px">Link</th>
+                    <th style="text-align:left;padding:8px;color:#9ca3af;font-size:10px;text-transform:uppercase;letter-spacing:1px">Action</th>
+                  </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>
+          </div>`
+      })()}
+
       ${e.notes ? `
       <div style="margin-top:20px">
         <div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Notes</div>
@@ -537,6 +697,143 @@ calendar.post('/event/:id/status', async (c) => {
     `UPDATE calendar_events SET status=?, substage=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`
   ).bind(status, substage || null, id).run()
   return c.redirect(`/calendar/event/${id}`)
+})
+
+// ── POST /calendar/event/:eventId/pin/:subId — hard-link a field submission
+calendar.post('/event/:eventId/pin/:subId', async (c) => {
+  const db = c.env.DB
+  const eventId = parseInt(c.req.param('eventId'))
+  const subId = parseInt(c.req.param('subId'))
+  if (!eventId || !subId) return c.text('Bad ids', 400)
+  await db.prepare(`UPDATE field_submissions SET calendar_event_id=? WHERE id=?`).bind(eventId, subId).run()
+  return c.redirect(`/calendar/event/${eventId}`)
+})
+
+calendar.post('/event/:eventId/unpin/:subId', async (c) => {
+  const db = c.env.DB
+  const eventId = parseInt(c.req.param('eventId'))
+  const subId = parseInt(c.req.param('subId'))
+  if (!eventId || !subId) return c.text('Bad ids', 400)
+  await db.prepare(`UPDATE field_submissions SET calendar_event_id=NULL WHERE id=? AND calendar_event_id=?`).bind(subId, eventId).run()
+  return c.redirect(`/calendar/event/${eventId}`)
+})
+
+// ── ICS subscribe feed ──────────────────────────────────────────────────────
+// /calendar/ics-setup       — auth-protected; shows the user their personal feed URL
+// /calendar/ics/:userId/:token.ics — PUBLIC (token-protected); Google/Apple/Outlook
+//                                    poll this URL to keep the calendar in sync
+
+calendar.get('/ics-setup', async (c) => {
+  const user = c.get('user')
+  const db = c.env.DB
+
+  // Look up or generate a token for this user
+  const row = await db.prepare(`SELECT ics_token FROM users WHERE id=?`).bind(user.id).first<any>()
+  let token = row?.ics_token
+  if (!token) {
+    token = await generateIcsToken()
+    await db.prepare(`UPDATE users SET ics_token=? WHERE id=?`).bind(token, user.id).run()
+  }
+
+  const url = new URL(c.req.url)
+  const feedUrl = `${url.protocol}//${url.host}/calendar/ics/${user.id}/${token}.ics`
+  // Google Calendar's "Add by URL" page (deep link)
+  const googleAddUrl = `https://calendar.google.com/calendar/r/settings/addbyurl?cid=${encodeURIComponent(feedUrl)}`
+
+  const body = `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
+      <a href="/calendar" style="color:#9ca3af;text-decoration:none">
+        <i class="fa-solid fa-chevron-left"></i> Back to calendar
+      </a>
+    </div>
+    <h1 style="color:#F0D080"><i class="fa-solid fa-share-nodes"></i> Subscribe in Google Calendar</h1>
+    <p style="color:#9ca3af">
+      This pipes <strong>your B&W events</strong> into Google Calendar, Apple Calendar, or Outlook —
+      live, read-only, auto-syncing. The URL is private to you; don't share it.
+    </p>
+
+    <div style="background:#0d1117;border:1px solid #21262d;border-radius:10px;padding:20px;margin-top:18px">
+      <div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Your private feed URL</div>
+      <div style="display:flex;gap:8px;align-items:stretch;flex-wrap:wrap">
+        <input id="feedUrl" type="text" readonly value="${escapeHtml(feedUrl)}"
+          style="flex:1;min-width:280px;padding:10px 12px;background:#161b22;border:1px solid #21262d;border-radius:6px;color:#fff;font-family:monospace;font-size:12px"
+          onclick="this.select()">
+        <button onclick="copyFeed()" style="padding:10px 18px;background:#F0D080;color:#1a1004;border:0;border-radius:6px;font-weight:600;cursor:pointer">
+          <i class="fa-solid fa-copy"></i> Copy
+        </button>
+      </div>
+    </div>
+
+    <div style="margin-top:18px;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px">
+      <a href="${googleAddUrl}" target="_blank" rel="noopener" style="
+        display:block;padding:18px;background:#0d1117;border:1px solid #21262d;border-radius:10px;
+        color:#fff;text-decoration:none;transition:all .15s">
+        <div style="font-size:24px;color:#4285F4;margin-bottom:6px"><i class="fa-brands fa-google"></i></div>
+        <div style="font-weight:600">Add to Google Calendar</div>
+        <div style="font-size:12px;color:#9ca3af;margin-top:4px">One-click — opens Google's add-by-URL page</div>
+      </a>
+      <a href="webcal://${url.host}/calendar/ics/${user.id}/${token}.ics" style="
+        display:block;padding:18px;background:#0d1117;border:1px solid #21262d;border-radius:10px;
+        color:#fff;text-decoration:none;transition:all .15s">
+        <div style="font-size:24px;color:#fff;margin-bottom:6px"><i class="fa-brands fa-apple"></i></div>
+        <div style="font-weight:600">Add to Apple Calendar</div>
+        <div style="font-size:12px;color:#9ca3af;margin-top:4px">Opens in Calendar.app (macOS / iOS)</div>
+      </a>
+      <a href="${feedUrl}" download="bw-events.ics" style="
+        display:block;padding:18px;background:#0d1117;border:1px solid #21262d;border-radius:10px;
+        color:#fff;text-decoration:none;transition:all .15s">
+        <div style="font-size:24px;color:#9ca3af;margin-bottom:6px"><i class="fa-solid fa-download"></i></div>
+        <div style="font-weight:600">Download .ics file</div>
+        <div style="font-size:12px;color:#9ca3af;margin-top:4px">For Outlook / one-off import</div>
+      </a>
+    </div>
+
+    <div style="margin-top:24px;padding:14px 18px;background:rgba(240,208,128,0.04);border-left:3px solid #F0D080;border-radius:6px">
+      <div style="color:#F0D080;font-weight:600;margin-bottom:6px"><i class="fa-solid fa-info-circle"></i> How sync works</div>
+      <div style="color:#9ca3af;font-size:13px;line-height:1.6">
+        Google polls the feed roughly every 4–8 hours (it's their schedule, not ours). So new events
+        you add in B&W will show up in your Google Calendar within hours, not instantly.
+        For instant updates, the calendar inside B&W stays your live source of truth.
+      </div>
+    </div>
+
+    <details style="margin-top:18px">
+      <summary style="cursor:pointer;color:#9ca3af;font-size:13px">
+        <i class="fa-solid fa-rotate"></i> Reset my feed URL (rotates the token)
+      </summary>
+      <form method="POST" action="/calendar/ics-reset" style="margin-top:10px">
+        <p style="color:#9ca3af;font-size:13px">
+          Click below to generate a new private URL. The old one will stop working immediately.
+          Use this if you ever shared the URL by accident.
+        </p>
+        <button type="submit" style="padding:8px 16px;background:#FF4A1C;color:#fff;border:0;border-radius:6px;font-weight:600;cursor:pointer">
+          Reset token now
+        </button>
+      </form>
+    </details>
+
+    <script>
+      function copyFeed() {
+        const inp = document.getElementById('feedUrl')
+        inp.select()
+        navigator.clipboard.writeText(inp.value).then(() => {
+          const btn = event.target.closest('button')
+          const orig = btn.innerHTML
+          btn.innerHTML = '<i class="fa-solid fa-check"></i> Copied'
+          setTimeout(() => btn.innerHTML = orig, 1500)
+        })
+      }
+    </script>
+  `
+  return c.html(layout('Subscribe in Google Calendar', body, user, 'calendar'))
+})
+
+calendar.post('/ics-reset', async (c) => {
+  const user = c.get('user')
+  const db = c.env.DB
+  const token = await generateIcsToken()
+  await db.prepare(`UPDATE users SET ics_token=? WHERE id=?`).bind(token, user.id).run()
+  return c.redirect('/calendar/ics-setup')
 })
 
 export default calendar
