@@ -149,6 +149,23 @@ app.get('/calendar/ics/:userId/:tokenFile', async (c) => {
   })
 })
 
+// ── DIAG: temporary endpoint to introspect what bindings/secrets the worker
+// can actually see. Never returns secret values, only presence + length.
+// Remove after diagnosis.
+app.get('/api/cron/diag', async (c) => {
+  const env = c.env as any
+  const tok = env.CRON_WEBHOOK_TOKEN
+  return c.json({
+    cron_token_present: !!tok,
+    cron_token_length: typeof tok === 'string' ? tok.length : null,
+    cron_token_type: typeof tok,
+    has_resend: !!env.RESEND_API_KEY,
+    has_db: !!env.DB,
+    has_r2: !!env.PDF_BUCKET,
+    env_keys_sample: Object.keys(env).filter(k => k.length < 40).sort()
+  })
+})
+
 // ── Token-protected cron endpoint (MUST be before the dashboard mount because
 // the dashboard router has app.use('*', requireAuth) which catches everything
 // on '/'). External scheduler (GitHub Actions + cron-job.org) POSTs here
