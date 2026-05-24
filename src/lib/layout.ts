@@ -18,6 +18,7 @@ export function layout(title: string, body: string, user: AuthUser, activeNav?: 
 
   const nav: NavItem[] = [
     { href: '/',                          icon: 'fa-gauge-high',       label: 'Dashboard',      key: 'dashboard',      roles: ['founder','ops_director','finance_director','account_director','crew'] },
+    { href: '/calendar',                  icon: 'fa-calendar-week',    label: 'Calendar',       key: 'calendar',       roles: ['founder','ops_director','finance_director','account_director','crew'] },
     { href: '/events',                    icon: 'fa-calendar-days',    label: 'Events',         key: 'events',         roles: ['founder','ops_director','finance_director','account_director'] },
     { href: '/quotes',                    icon: 'fa-file-invoice',     label: 'Quotes',         key: 'quotes',         roles: ['founder','ops_director','finance_director','account_director'] },
     { href: '/fleet',                     icon: 'fa-truck',            label: 'Fleet',          key: 'fleet',          roles: ['founder','ops_director'] },

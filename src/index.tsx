@@ -21,6 +21,7 @@ import field, { musicbusApp } from './routes/field.js'
 import fieldAdmin from './routes/field-admin.js'
 import plannerExtractor from './routes/planner-extractor.js'
 import productsAdmin from './routes/products-admin.js'
+import calendar from './routes/calendar.js'
 
 type Env = { Bindings: { DB: D1Database } }
 
@@ -91,6 +92,7 @@ app.route('/quotes', quotes)
 app.route('/admin', admin)
 app.route('/question-sheet', questionSheet)
 app.route('/print-sheets', printSheets)
+app.route('/calendar', calendar)
 
 // ── API: Rate card
 app.get('/api/rate-card', async (c) => {
