@@ -1,0 +1,42 @@
+name: Accounts Email Digest
+
+# Fires the B&W deliveries digest twice daily.
+# 05:00 UTC = 07:00 SAST (morning digest)
+# 10:00 UTC = 12:00 SAST (midday digest)
+#
+# Calls POST https://bwprodsystem.co.za/api/cron/email-digest with the
+# bearer token from the CRON_WEBHOOK_TOKEN repo secret.
+on:
+  schedule:
+    - cron: '0 5 * * *'
+    - cron: '0 10 * * *'
+  # Allow manual trigger from the Actions tab too — useful for ad-hoc tests
+  workflow_dispatch:
+
+jobs:
+  fire-digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fire email digest webhook
+        env:
+          TOKEN: ${{ secrets.CRON_WEBHOOK_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::CRON_WEBHOOK_TOKEN secret is not set in the GitHub repo."
+            echo "Add it under: Settings → Secrets and variables → Actions → New repo secret"
+            exit 1
+          fi
+          set -e
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://bwprodsystem.co.za/api/cron/email-digest" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json")
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          STATUS=$(echo "$RESPONSE" | tail -n1)
+          echo "Status: $STATUS"
+          echo "Response: $BODY"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Digest webhook returned $STATUS"
+            exit 1
+          fi
