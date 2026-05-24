@@ -64,13 +64,14 @@ app.get('/health', (c) => c.json({
 
 // ── Token-protected cron endpoint (MUST be before the dashboard mount because
 // the dashboard router has app.use('*', requireAuth) which catches everything
-// on '/'). External scheduler POSTs here twice daily.
-// Token = last 12 chars of RESEND_API_KEY (server-side check).
+// on '/'). External scheduler (GitHub Actions + cron-job.org) POSTs here
+// twice daily at 05:00 UTC and 10:00 UTC.
+// Token is the CRON_WEBHOOK_TOKEN secret in Cloudflare (separate from Resend).
 app.post('/api/cron/email-digest', async (c) => {
   const env = c.env as any
   const auth = c.req.header('authorization') || ''
   const token = auth.replace(/^Bearer\s+/i, '').trim()
-  const expected = (env.RESEND_API_KEY || '').slice(-12)
+  const expected = env.CRON_WEBHOOK_TOKEN || ''
   if (!token || !expected || token !== expected) {
     return c.json({ ok: false, error: 'unauthorized' }, 401)
   }
