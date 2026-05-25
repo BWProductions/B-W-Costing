@@ -18,14 +18,16 @@ export function layout(title: string, body: string, user: AuthUser, activeNav?: 
 
   const nav: NavItem[] = [
     { href: '/',                          icon: 'fa-gauge-high',       label: 'Dashboard',      key: 'dashboard',      roles: ['founder','ops_director','finance_director','account_director','crew'] },
-    { href: '/calendar',                  icon: 'fa-calendar-week',    label: 'Calendar',       key: 'calendar',       roles: ['founder','ops_director','finance_director','account_director','crew'] },
-    { href: '/events',                    icon: 'fa-calendar-days',    label: 'Events',         key: 'events',         roles: ['founder','ops_director','finance_director','account_director'] },
+    { href: '/calendar',                  icon: 'fa-calendar-week',    label: 'Events',         key: 'calendar',       roles: ['founder','ops_director','finance_director','account_director','crew'] },
+    // ── Legacy /events screen hidden 2026-05-25 (0 rows, replaced by /calendar). Route stays alive in case of audit references.
+    // { href: '/events',                    icon: 'fa-calendar-days',    label: 'Events (legacy)', key: 'events',         roles: ['founder'] },
     { href: '/quotes',                    icon: 'fa-file-invoice',     label: 'Quotes',         key: 'quotes',         roles: ['founder','ops_director','finance_director','account_director'] },
     { href: '/fleet',                     icon: 'fa-truck',            label: 'Fleet',          key: 'fleet',          roles: ['founder','ops_director'] },
     { href: '/suppliers',                 icon: 'fa-handshake',        label: 'Suppliers',      key: 'suppliers',      roles: ['founder','ops_director','finance_director'] },
     { href: '/rate-card',                 icon: 'fa-tags',             label: 'Rate Card',      key: 'rate-card',      roles: ['founder','ops_director','finance_director'] },
     { href: '/clients',                   icon: 'fa-building',         label: 'Clients',        key: 'clients',        roles: ['founder','ops_director','finance_director','account_director'] },
-    { href: '/question-sheet',            icon: 'fa-clipboard-list',   label: 'Question Sheet', key: 'question-sheet', roles: ['founder','ops_director','account_director'] },
+    // ── Question Sheet hidden from sidebar 2026-05-25 (purpose unclear). Route stays alive.
+    // { href: '/question-sheet',            icon: 'fa-clipboard-list',   label: 'Question Sheet', key: 'question-sheet', roles: ['founder','ops_director','account_director'] },
     { href: '/print-sheets/rate-card-print', icon: 'fa-print',        label: 'Print Sheets',   key: 'handbook',       roles: ['founder','ops_director','finance_director'] },
     { href: '/field',                      icon: 'fa-clipboard-check', label: 'Field Ops',      key: 'field',          roles: ['founder','ops_director','account_director','crew'] },
     { href: '/field/admin',               icon: 'fa-inbox',            label: 'Field Admin',    key: 'field-admin',    roles: ['founder','ops_director'] },

@@ -1286,8 +1286,26 @@ ${body}
 </html>`
 }
 
-function formHeader(formTitle: string, formNum: string, letterhead: string, preparedBy: string): string {
+function formHeader(
+  formTitle: string,
+  formNum: string,
+  letterhead: string,
+  preparedBy: string,
+  ctx?: { event_name?: string | null; venue?: string | null; address?: string | null; date?: string | null; driver?: string | null }
+): string {
   const isSAB = letterhead === 'sab'
+  // ── EVENT HERO STRIP (the big stuff drivers need to see at a glance).
+  //     Only renders when we have an event name or venue — otherwise we fall
+  //     back to the plain compact header.
+  const hasEvent = !!(ctx?.event_name || ctx?.venue)
+  const hero = hasEvent ? `
+    <div style="background:linear-gradient(135deg,rgba(201,168,76,0.18),rgba(139,105,20,0.08));
+                border:1px solid rgba(201,168,76,0.4);border-radius:14px;padding:18px 20px;margin:12px 0 16px 0">
+      ${ctx?.event_name ? `<div style="font-size:22px;line-height:1.15;font-weight:900;color:#F0D080;letter-spacing:0.01em;margin-bottom:6px">${ctx.event_name}</div>` : ''}
+      ${ctx?.venue ? `<div style="font-size:16px;font-weight:700;color:#f0f4ff;margin-bottom:4px"><i class="fas fa-location-dot" style="opacity:0.6;margin-right:6px"></i>${ctx.venue}</div>` : ''}
+      ${ctx?.address ? `<div style="font-size:12px;color:var(--muted);line-height:1.4;margin-bottom:8px;padding-left:20px">${ctx.address}</div>` : ''}
+      ${ctx?.date ? `<div style="font-size:13px;font-weight:700;color:#f0f4ff"><i class="fas fa-calendar-day" style="opacity:0.6;margin-right:6px"></i>${ctx.date}</div>` : ''}
+    </div>` : ''
   return `
   <div class="field-header">
     <a href="/field" style="display:inline-block;text-decoration:none" title="Back to Forms">
@@ -1299,8 +1317,14 @@ function formHeader(formTitle: string, formNum: string, letterhead: string, prep
       Unit 1, No 19 Kransvalk Road, Highbury, Meyerton 1962<br>
       📞 082 321 6520 &nbsp;·&nbsp; ✉️ bibi@bwproductions.co.za &nbsp;·&nbsp; VAT 4790261301
     </div>
-    <div class="field-form-title" style="margin-top:14px">${formTitle}</div>
-    <div class="form-num">Ref: ${formNum} &nbsp;·&nbsp; Prepared by: <strong>${preparedBy}</strong></div>
+    ${hero}
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:${hasEvent ? '0' : '14px'}">
+      <div class="field-form-title" style="margin:0">${formTitle}</div>
+      <div style="text-align:right;font-size:11px;color:var(--muted);line-height:1.5">
+        <div><strong style="color:#F0D080">${formNum}</strong></div>
+        <div>Driver: <strong>${ctx?.driver || preparedBy}</strong></div>
+      </div>
+    </div>
   </div>`
 }
 
@@ -1575,7 +1599,13 @@ app.get('/delivery/open/:id', async (c) => {
 
   const body = `
   <div class="field-wrap">
-    ${formHeader('Delivery Note', sub.form_number, sub.letterhead || 'sab', sub.prepared_by || 'Shane')}
+    ${formHeader('Delivery Note', sub.form_number, sub.letterhead || 'sab', sub.prepared_by || 'Shane', {
+      event_name: sub.event_name || fd.event_name,
+      venue: sub.venue || fd.venue,
+      address: sub.address || savedVenueAddress,
+      date: sub.delivery_date,
+      driver: fd.driver || sub.driver
+    })}
     <div style="background:rgba(139,92,246,0.1);border:1px solid rgba(139,92,246,0.4);border-radius:12px;padding:12px 16px;margin-bottom:16px">
       <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;color:#c4b5fd;margin-bottom:4px">🗒️ Pre-loaded by Office</div>
       <div style="font-size:13px;color:var(--muted)">Review all details, adjust quantities on-site, fill any missing fields, then sign and submit.</div>
@@ -3847,7 +3877,13 @@ app.get('/collect-from/:id', async (c) => {
 
   const body = `
   <div class="field-wrap">
-    ${formHeader('Collection Note', num, del.letterhead || 'sab', del.prepared_by || 'Shane')}
+    ${formHeader('Collection Note', num, del.letterhead || 'sab', del.prepared_by || 'Shane', {
+      event_name: del.event_name,
+      venue: del.venue,
+      address: del.address || del.venue_address,
+      date: del.collection_date || del.delivery_date,
+      driver: del.driver
+    })}
 
     <!-- Linked delivery banner -->
     <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.35);

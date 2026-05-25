@@ -60,6 +60,58 @@ function statusPill(status: string): string {
   return `<span style="display:inline-block;padding:3px 10px;border-radius:11px;font-size:11px;font-weight:700;color:${m.fg};background:${m.bg};letter-spacing:0.3px">${m.label.toUpperCase()}</span>`
 }
 
+// ── Crew / Vehicle / Equipment chip helpers ───────────────────────────────
+function crewChip(r: any, eventId: number): string {
+  const overridden = !!r.override_reason
+  const bg = overridden ? 'rgba(255,122,0,0.12)' : 'rgba(124,255,43,0.12)'
+  const border = overridden ? 'rgba(255,122,0,0.35)' : 'rgba(124,255,43,0.25)'
+  const color = overridden ? '#ffb066' : '#a8ff7a'
+  const flag = overridden ? `<i class="fa-solid fa-triangle-exclamation" title="Override: ${escapeHtml(r.override_reason)}" style="margin-left:4px"></i>` : ''
+  return `<span class="crew-chip" data-person-id="${r.id}" data-event-id="${eventId}"
+    style="font-size:12px;padding:4px 10px;border-radius:14px;background:${bg};color:${color};border:1px solid ${border};display:inline-flex;align-items:center;gap:6px">
+    <i class="fa-solid fa-user" style="font-size:9px;opacity:.6"></i>
+    ${escapeHtml(r.name)}
+    ${r.role ? `<span style="opacity:.6;font-size:10px">(${escapeHtml(r.role)})</span>` : ''}
+    ${flag}
+    <button type="button" class="chip-remove" title="Remove" style="background:none;border:0;color:inherit;cursor:pointer;padding:0 0 0 2px;opacity:.6;font-size:11px">
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+  </span>`
+}
+
+function vehicleChip(r: any, eventId: number): string {
+  const overridden = !!r.override_reason
+  const bg = overridden ? 'rgba(255,122,0,0.12)' : 'rgba(24,217,255,0.12)'
+  const border = overridden ? 'rgba(255,122,0,0.35)' : 'rgba(24,217,255,0.25)'
+  const color = overridden ? '#ffb066' : '#8ee9ff'
+  const flag = overridden ? `<i class="fa-solid fa-triangle-exclamation" title="Override: ${escapeHtml(r.override_reason)}" style="margin-left:4px"></i>` : ''
+  const xp = r.experiential ? `<span style="font-size:9px;padding:1px 5px;background:rgba(204,24,232,0.20);color:#e8a5f4;border-radius:4px;margin-left:2px">XP</span>` : ''
+  return `<span class="vehicle-chip" data-fleet-id="${r.id}" data-event-id="${eventId}"
+    style="font-size:12px;padding:4px 10px;border-radius:14px;background:${bg};color:${color};border:1px solid ${border};display:inline-flex;align-items:center;gap:6px">
+    <i class="fa-solid fa-truck" style="font-size:9px;opacity:.6"></i>
+    ${escapeHtml(r.description || '')}
+    ${r.reg_number ? `<span style="opacity:.6;font-family:monospace;font-size:10px">${escapeHtml(r.reg_number)}</span>` : ''}
+    ${xp}
+    ${flag}
+    <button type="button" class="chip-remove" title="Remove" style="background:none;border:0;color:inherit;cursor:pointer;padding:0 0 0 2px;opacity:.6;font-size:11px">
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+  </span>`
+}
+
+function equipRow(r: any, eventId: number): string {
+  return `<div class="equip-row" data-equip-id="${r.id}" data-event-id="${eventId}"
+    style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:#161b22;border:1px solid #21262d;border-radius:6px;margin-bottom:4px">
+    <span style="font-family:monospace;color:#F0D080;font-size:13px;min-width:50px;text-align:right">${r.quantity}×</span>
+    <span style="flex:1;color:#fff;font-size:13px">${escapeHtml(r.description)}</span>
+    ${r.notes ? `<span style="color:#9ca3af;font-size:11px;font-style:italic">${escapeHtml(r.notes)}</span>` : ''}
+    ${r.stock_item_id ? `<span style="font-size:9px;padding:1px 5px;background:rgba(124,255,43,0.15);color:#a8ff7a;border-radius:4px">linked</span>` : `<span style="font-size:9px;padding:1px 5px;background:rgba(156,163,175,0.10);color:#6b7280;border-radius:4px">free</span>`}
+    <button type="button" class="equip-remove" title="Remove" style="background:none;border:0;color:#6b7280;cursor:pointer;padding:2px 6px;font-size:12px">
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+  </div>`
+}
+
 // ── Inline-editable field helpers ─────────────────────────────────────────
 // Renders a click-to-edit wrapper. Backed by PATCH /calendar/api/event/:id
 function editableField(opts: {
@@ -645,14 +697,21 @@ calendar.get('/event/:id', async (c) => {
   if (!e) return c.text('Not found', 404)
 
   const crewRows = await db.prepare(
-    `SELECT fp.id, fp.name, cec.matched_from FROM calendar_event_crew cec
+    `SELECT fp.id, fp.name, fp.crew_type, cec.role, cec.override_reason
+     FROM calendar_event_crew cec
      JOIN field_people fp ON fp.id = cec.person_id
      WHERE cec.event_id = ? ORDER BY fp.name`
   ).bind(id).all<any>()
   const vehRows = await db.prepare(
-    `SELECT f.id, f.description, f.reg_number, cev.matched_from
+    `SELECT f.id, f.description, f.reg_number, f.vehicle_type, f.experiential,
+            cev.role, cev.override_reason
      FROM calendar_event_vehicles cev JOIN fleet f ON f.id = cev.fleet_id
      WHERE cev.event_id = ? ORDER BY f.description`
+  ).bind(id).all<any>()
+  const equipRows = await db.prepare(
+    `SELECT id, description, quantity, notes, stock_item_id
+     FROM calendar_event_equipment
+     WHERE event_id = ? ORDER BY id`
   ).bind(id).all<any>()
 
   // ── Load sheets: explicitly pinned via calendar_event_id, OR matching by date
@@ -755,18 +814,89 @@ calendar.get('/event/:id', async (c) => {
         ${e.client_name ? `<div><div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px">Client</div><div style="color:#fff;margin-top:4px">${escapeHtml(e.client_name)}</div></div>` : ''}
       </div>
 
+      <!-- ── TIMELINE ────────────────────────────────────────────────── -->
+      <div style="margin-top:24px;padding:14px;background:#0d1117;border:1px solid #21262d;border-radius:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px">
+            <i class="fa-regular fa-clock"></i> Timeline
+          </div>
+          <span id="timesStatus" style="font-size:11px;color:#6b7280"></span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px">
+          ${['setup_time:Setup','event_start:Event start','event_end:Event end','strike_time:Strike','collection_time:Collection'].map(pair => {
+            const [field, label] = pair.split(':')
+            const v = e[field] || ''
+            return `<div>
+              <label style="display:block;color:#6b7280;font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">${label}</label>
+              <input type="time" class="event-time-input" data-field="${field}" value="${escapeHtml(v)}"
+                style="width:100%;padding:7px 8px;background:#161b22;border:1px solid #21262d;border-radius:6px;color:#fff;font-family:monospace;font-size:13px" />
+            </div>`
+          }).join('')}
+        </div>
+        <div style="margin-top:6px;color:#6b7280;font-size:10px">Free-text Time field: <span style="color:#9ca3af">${escapeHtml(e.time_text || '—')}</span></div>
+      </div>
+
+      <!-- ── CREW ───────────────────────────────────────────────────── -->
       <div style="margin-top:20px">
-        ${editableField({ eventId: e.id, field: 'team_text', value: e.team_text, label: 'Crew', multiline: true, placeholder: 'e.g. Sipho, Daniel, Solly', emptyText: 'click to add crew' })}
-        ${crewRows.results?.length ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px">
-          ${crewRows.results.map((r:any) => `<span style="font-size:11px;padding:2px 9px;border-radius:8px;background:rgba(124,255,43,0.12);color:#a8ff7a;border:1px solid rgba(124,255,43,0.25)" title="matched from: ${escapeHtml(r.matched_from)}">${escapeHtml(r.name)}</span>`).join('')}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px">
+            <i class="fa-solid fa-users"></i> Crew (${crewRows.results?.length || 0})
+          </div>
+          <button type="button" id="openCrewPicker"
+            style="padding:6px 12px;background:#161b22;border:1px solid #F0D080;color:#F0D080;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600">
+            <i class="fa-solid fa-plus"></i> Add crew
+          </button>
+        </div>
+        <div id="crewChips" style="display:flex;flex-wrap:wrap;gap:6px;min-height:30px">
+          ${(crewRows.results || []).map((r:any) => crewChip(r, e.id)).join('') || '<div style="color:#6b7280;font-size:12px;font-style:italic">No crew assigned yet — click "Add crew"</div>'}
+        </div>
+        ${e.team_text ? `<div style="margin-top:10px;padding:8px 10px;background:rgba(99,102,241,0.05);border-left:2px solid #6366f1;border-radius:4px;font-size:11px;color:#9ca3af">
+          <span style="color:#6b7280">Legacy free-text crew: </span>${escapeHtml(e.team_text)}
+          <span style="color:#6b7280;font-style:italic">  ·  use picker above to replace</span>
         </div>` : ''}
       </div>
 
+      <!-- ── VEHICLES ───────────────────────────────────────────────── -->
       <div style="margin-top:20px">
-        ${editableField({ eventId: e.id, field: 'vehicle_text', value: e.vehicle_text, label: 'Vehicle', placeholder: 'e.g. Snowy + Bakkie', emptyText: 'click to add vehicle' })}
-        ${vehRows.results?.length ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px">
-          ${vehRows.results.map((r:any) => `<span style="font-size:11px;padding:2px 9px;border-radius:8px;background:rgba(24,217,255,0.12);color:#8ee9ff;border:1px solid rgba(24,217,255,0.25)" title="matched from: ${escapeHtml(r.matched_from)}">${escapeHtml(r.description)} <span style="opacity:.6">${escapeHtml(r.reg_number)}</span></span>`).join('')}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px">
+            <i class="fa-solid fa-truck"></i> Vehicles (${vehRows.results?.length || 0})
+          </div>
+          <button type="button" id="openVehiclePicker"
+            style="padding:6px 12px;background:#161b22;border:1px solid #18D9FF;color:#18D9FF;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600">
+            <i class="fa-solid fa-plus"></i> Add vehicle
+          </button>
+        </div>
+        <div id="vehicleChips" style="display:flex;flex-wrap:wrap;gap:6px;min-height:30px">
+          ${(vehRows.results || []).map((r:any) => vehicleChip(r, e.id)).join('') || '<div style="color:#6b7280;font-size:12px;font-style:italic">No vehicles assigned yet — click "Add vehicle"</div>'}
+        </div>
+        ${e.vehicle_text ? `<div style="margin-top:10px;padding:8px 10px;background:rgba(99,102,241,0.05);border-left:2px solid #6366f1;border-radius:4px;font-size:11px;color:#9ca3af">
+          <span style="color:#6b7280">Legacy free-text vehicle: </span>${escapeHtml(e.vehicle_text)}
+          <span style="color:#6b7280;font-style:italic">  ·  use picker above to replace</span>
         </div>` : ''}
+      </div>
+
+      <!-- ── EQUIPMENT ─────────────────────────────────────────────── -->
+      <div style="margin-top:20px;padding:14px;background:#0d1117;border:1px solid #21262d;border-radius:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px">
+            <i class="fa-solid fa-boxes-stacked"></i> Equipment (${equipRows.results?.length || 0})
+          </div>
+          <span style="font-size:10px;color:#6b7280;font-style:italic">free-type for now · stock-linked once import lands</span>
+        </div>
+        <div id="equipList">
+          ${(equipRows.results || []).map((r:any) => equipRow(r, e.id)).join('')}
+        </div>
+        <form id="equipAddForm" style="display:flex;gap:6px;margin-top:10px;align-items:stretch;flex-wrap:wrap">
+          <input type="text" id="equipDesc" placeholder="e.g. Castle Lager umbrellas - New" required
+            style="flex:1;min-width:200px;padding:8px 10px;background:#161b22;border:1px solid #21262d;border-radius:6px;color:#fff;font-size:13px" />
+          <input type="number" id="equipQty" placeholder="Qty" min="1" step="1" value="1" required
+            style="width:80px;padding:8px 10px;background:#161b22;border:1px solid #21262d;border-radius:6px;color:#fff;font-size:13px;font-family:monospace" />
+          <button type="submit"
+            style="padding:8px 16px;background:#F0D080;color:#1a1004;border:0;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px">
+            <i class="fa-solid fa-plus"></i> Add
+          </button>
+        </form>
       </div>
 
       ${(() => {
@@ -860,6 +990,271 @@ calendar.get('/event/:id', async (c) => {
         <span>Updated: <span id="updatedAt">${new Date(e.updated_at).toLocaleString('en-ZA')}</span></span>
       </div>
     </div>
+
+    <!-- ── PICKER MODAL ─────────────────────────────────────────── -->
+    <div id="pickerModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;align-items:flex-start;justify-content:center;padding:60px 16px 16px 16px;overflow-y:auto">
+      <div style="background:#0d1117;border:1px solid #21262d;border-radius:10px;max-width:600px;width:100%;max-height:80vh;display:flex;flex-direction:column">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid #21262d">
+          <h3 id="pickerTitle" style="margin:0;color:#F0D080;font-size:16px">Pick</h3>
+          <button type="button" id="pickerClose" style="background:none;border:0;color:#9ca3af;cursor:pointer;font-size:18px">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+        <div style="padding:12px 18px;border-bottom:1px solid #21262d">
+          <input type="text" id="pickerSearch" placeholder="Search…" autocomplete="off"
+            style="width:100%;padding:8px 12px;background:#161b22;border:1px solid #21262d;border-radius:6px;color:#fff;font-size:13px" />
+        </div>
+        <div id="pickerList" style="flex:1;overflow-y:auto;padding:8px 12px"></div>
+      </div>
+    </div>
+
+    <script>
+    (function() {
+      const EVENT_ID = ${e.id};
+
+      // ── Helper: POST JSON ─────────────────────────────────────────
+      async function postJSON(url, body) {
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await r.json().catch(() => ({}));
+        return { status: r.status, data };
+      }
+      async function patchJSON(url, body) {
+        const r = await fetch(url, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await r.json().catch(() => ({}));
+        return { status: r.status, data };
+      }
+      async function deleteJSON(url) {
+        const r = await fetch(url, { method: 'DELETE' });
+        const data = await r.json().catch(() => ({}));
+        return { status: r.status, data };
+      }
+
+      // ── TIMELINE: live save on blur ────────────────────────────────
+      document.querySelectorAll('.event-time-input').forEach(inp => {
+        let lastSaved = inp.value;
+        inp.addEventListener('blur', async () => {
+          if (inp.value === lastSaved) return;
+          const field = inp.dataset.field;
+          const status = document.getElementById('timesStatus');
+          status.textContent = 'Saving…';
+          status.style.color = '#9ca3af';
+          const { status: code, data } = await patchJSON('/calendar/api/event/' + EVENT_ID + '/times', { [field]: inp.value });
+          if (code === 200 && data.ok) {
+            lastSaved = inp.value;
+            status.textContent = 'Saved ✓';
+            status.style.color = '#a8ff7a';
+            setTimeout(() => { status.textContent = ''; }, 1500);
+          } else {
+            status.textContent = data.error || 'Save failed';
+            status.style.color = '#ff7a00';
+          }
+        });
+      });
+
+      // ── PICKER MODAL ────────────────────────────────────────────────
+      const modal = document.getElementById('pickerModal');
+      const titleEl = document.getElementById('pickerTitle');
+      const searchEl = document.getElementById('pickerSearch');
+      const listEl = document.getElementById('pickerList');
+      let pickerMode = null;  // 'crew' or 'vehicle'
+      let pickerItems = [];
+
+      function openModal() {
+        modal.style.display = 'flex';
+        searchEl.value = '';
+        setTimeout(() => searchEl.focus(), 50);
+      }
+      function closeModal() { modal.style.display = 'none'; }
+
+      document.getElementById('pickerClose').addEventListener('click', closeModal);
+      modal.addEventListener('click', (ev) => { if (ev.target === modal) closeModal(); });
+      document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && modal.style.display !== 'none') closeModal(); });
+
+      function renderList(filter) {
+        const q = (filter || '').toLowerCase().trim();
+        const filtered = pickerItems.filter(it => {
+          if (!q) return true;
+          const hay = pickerMode === 'crew'
+            ? it.name.toLowerCase()
+            : ((it.description||'') + ' ' + (it.reg_number||'') + ' ' + (it.vehicle_type||'')).toLowerCase();
+          return hay.includes(q);
+        });
+        if (!filtered.length) {
+          listEl.innerHTML = '<div style="padding:20px;text-align:center;color:#6b7280;font-size:12px">No matches</div>';
+          return;
+        }
+        listEl.innerHTML = filtered.map(it => {
+          const conflicts = it.conflicts || [];
+          const hasConflict = conflicts.length > 0;
+          const conflictNames = conflicts.map(c => c.event_name).join(', ');
+          const id = pickerMode === 'crew' ? it.id : it.id;
+          const label = pickerMode === 'crew'
+            ? it.name + (it.crew_type === 'driver' ? ' <span style=\\"font-size:9px;padding:1px 5px;background:rgba(24,217,255,0.15);color:#8ee9ff;border-radius:4px;margin-left:4px\\">driver</span>' : '')
+            : (it.description||'') + (it.reg_number ? ' <span style=\\"opacity:.6;font-family:monospace;font-size:11px\\">' + it.reg_number + '</span>' : '') + (it.experiential ? ' <span style=\\"font-size:9px;padding:1px 5px;background:rgba(204,24,232,0.20);color:#e8a5f4;border-radius:4px;margin-left:4px\\">XP</span>' : '');
+          const bgColor = it.assigned ? 'rgba(124,255,43,0.06)' : (hasConflict ? 'rgba(255,74,28,0.06)' : '#161b22');
+          const borderColor = it.assigned ? 'rgba(124,255,43,0.3)' : (hasConflict ? 'rgba(255,74,28,0.3)' : '#21262d');
+          const conflictTag = hasConflict ? '<div style="font-size:10px;color:#ff7a00;margin-top:2px"><i class="fa-solid fa-triangle-exclamation"></i> Booked: ' + escapeAttr(conflictNames) + '</div>' : '';
+          const assignedTag = it.assigned ? '<span style="font-size:10px;padding:2px 7px;background:rgba(124,255,43,0.15);color:#a8ff7a;border-radius:4px">on this event</span>' : '';
+          const btnLabel = it.assigned ? 'Remove' : (hasConflict ? 'Override + Add' : 'Add');
+          const btnStyle = it.assigned
+            ? 'background:#1c0a08;color:#ff7a00;border:1px solid rgba(255,122,0,0.35)'
+            : (hasConflict ? 'background:#1c0a08;color:#ff7a00;border:1px solid rgba(255,122,0,0.5);font-weight:600' : 'background:#F0D080;color:#1a1004;border:0;font-weight:600');
+          return '<div class="picker-row" data-id="' + id + '" data-conflict="' + (hasConflict ? '1' : '0') + '" data-assigned="' + (it.assigned ? '1' : '0') + '" style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;margin:4px 0;border:1px solid ' + borderColor + ';border-radius:6px;background:' + bgColor + '">'
+            + '<div style="flex:1;min-width:0"><div style="color:#fff;font-size:13px">' + label + '</div>' + conflictTag + '</div>'
+            + '<div style="display:flex;gap:8px;align-items:center">' + assignedTag
+            + '<button type="button" class="picker-action" style="padding:6px 12px;border-radius:5px;cursor:pointer;font-size:12px;' + btnStyle + '">' + btnLabel + '</button>'
+            + '</div></div>';
+        }).join('');
+
+        listEl.querySelectorAll('.picker-action').forEach(btn => {
+          btn.addEventListener('click', (ev) => {
+            const row = ev.target.closest('.picker-row');
+            const id = parseInt(row.dataset.id);
+            const isAssigned = row.dataset.assigned === '1';
+            const hasConflict = row.dataset.conflict === '1';
+            if (isAssigned) {
+              doRemove(id);
+            } else if (hasConflict) {
+              const reason = prompt('This person/vehicle is already booked on another event that day.\\n\\nFounder override reason (required):');
+              if (reason && reason.trim()) doAssign(id, reason.trim());
+            } else {
+              doAssign(id, null);
+            }
+          });
+        });
+      }
+
+      async function doAssign(id, overrideReason) {
+        const url = pickerMode === 'crew' ? '/calendar/api/event/' + EVENT_ID + '/crew' : '/calendar/api/event/' + EVENT_ID + '/vehicle';
+        const body = pickerMode === 'crew'
+          ? { person_id: id, action: 'assign', override_reason: overrideReason }
+          : { fleet_id: id, action: 'assign', override_reason: overrideReason };
+        const { status, data } = await postJSON(url, body);
+        if (status === 200 && data.ok) {
+          closeModal();
+          location.reload();  // simple: server already has fresh state
+        } else if (status === 409) {
+          alert(data.message || 'Conflict — could not add');
+        } else {
+          alert(data.error || 'Failed to add');
+        }
+      }
+      async function doRemove(id) {
+        const url = pickerMode === 'crew' ? '/calendar/api/event/' + EVENT_ID + '/crew' : '/calendar/api/event/' + EVENT_ID + '/vehicle';
+        const body = pickerMode === 'crew'
+          ? { person_id: id, action: 'remove' }
+          : { fleet_id: id, action: 'remove' };
+        const { status, data } = await postJSON(url, body);
+        if (status === 200 && data.ok) {
+          closeModal();
+          location.reload();
+        } else {
+          alert(data.error || 'Failed to remove');
+        }
+      }
+
+      searchEl.addEventListener('input', () => renderList(searchEl.value));
+
+      function escapeAttr(s) {
+        return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      }
+
+      // ── Open crew picker ─────────────────────────────────────────
+      document.getElementById('openCrewPicker').addEventListener('click', async () => {
+        pickerMode = 'crew';
+        titleEl.innerHTML = '<i class="fa-solid fa-users" style="margin-right:6px"></i>Pick crew';
+        listEl.innerHTML = '<div style="padding:20px;text-align:center;color:#6b7280;font-size:12px">Loading…</div>';
+        openModal();
+        const r = await fetch('/calendar/api/event/' + EVENT_ID + '/crew-picker');
+        const data = await r.json();
+        pickerItems = data.items || [];
+        renderList('');
+      });
+
+      // ── Open vehicle picker ─────────────────────────────────────
+      document.getElementById('openVehiclePicker').addEventListener('click', async () => {
+        pickerMode = 'vehicle';
+        titleEl.innerHTML = '<i class="fa-solid fa-truck" style="margin-right:6px"></i>Pick vehicle';
+        listEl.innerHTML = '<div style="padding:20px;text-align:center;color:#6b7280;font-size:12px">Loading…</div>';
+        openModal();
+        const r = await fetch('/calendar/api/event/' + EVENT_ID + '/vehicle-picker');
+        const data = await r.json();
+        pickerItems = data.items || [];
+        renderList('');
+      });
+
+      // ── Chip remove buttons (delegated) ──────────────────────────
+      document.addEventListener('click', async (ev) => {
+        const btn = ev.target.closest('.chip-remove');
+        if (!btn) return;
+        const chip = btn.closest('.crew-chip, .vehicle-chip');
+        if (!chip) return;
+        if (!confirm('Remove this from the event?')) return;
+        if (chip.classList.contains('crew-chip')) {
+          const personId = parseInt(chip.dataset.personId);
+          const { status, data } = await postJSON('/calendar/api/event/' + EVENT_ID + '/crew', { person_id: personId, action: 'remove' });
+          if (status === 200 && data.ok) chip.remove();
+          else alert(data.error || 'Remove failed');
+        } else {
+          const fleetId = parseInt(chip.dataset.fleetId);
+          const { status, data } = await postJSON('/calendar/api/event/' + EVENT_ID + '/vehicle', { fleet_id: fleetId, action: 'remove' });
+          if (status === 200 && data.ok) chip.remove();
+          else alert(data.error || 'Remove failed');
+        }
+      });
+
+      // ── Equipment add ────────────────────────────────────────────
+      const equipForm = document.getElementById('equipAddForm');
+      const equipDesc = document.getElementById('equipDesc');
+      const equipQty = document.getElementById('equipQty');
+      const equipList = document.getElementById('equipList');
+      equipForm.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const description = equipDesc.value.trim();
+        const quantity = parseFloat(equipQty.value);
+        if (!description || !(quantity > 0)) return;
+        const { status, data } = await postJSON('/calendar/api/event/' + EVENT_ID + '/equipment', { description, quantity });
+        if (status === 200 && data.ok) {
+          // optimistic append
+          const div = document.createElement('div');
+          div.innerHTML = '<div class="equip-row" data-equip-id="' + data.id + '" data-event-id="' + EVENT_ID + '" style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:#161b22;border:1px solid #21262d;border-radius:6px;margin-bottom:4px">'
+            + '<span style="font-family:monospace;color:#F0D080;font-size:13px;min-width:50px;text-align:right">' + escapeAttr(quantity) + '×</span>'
+            + '<span style="flex:1;color:#fff;font-size:13px">' + escapeAttr(description) + '</span>'
+            + '<span style="font-size:9px;padding:1px 5px;background:rgba(156,163,175,0.10);color:#6b7280;border-radius:4px">free</span>'
+            + '<button type="button" class="equip-remove" title="Remove" style="background:none;border:0;color:#6b7280;cursor:pointer;padding:2px 6px;font-size:12px"><i class="fa-solid fa-xmark"></i></button>'
+            + '</div>';
+          equipList.appendChild(div.firstChild);
+          equipDesc.value = '';
+          equipQty.value = '1';
+          equipDesc.focus();
+        } else {
+          alert(data.error || 'Failed to add equipment');
+        }
+      });
+
+      // Equipment remove (delegated)
+      document.addEventListener('click', async (ev) => {
+        const btn = ev.target.closest('.equip-remove');
+        if (!btn) return;
+        const row = btn.closest('.equip-row');
+        if (!row) return;
+        if (!confirm('Remove this equipment line?')) return;
+        const eqId = row.dataset.equipId;
+        const { status, data } = await deleteJSON('/calendar/api/event/' + EVENT_ID + '/equipment/' + eqId);
+        if (status === 200 && data.ok) row.remove();
+        else alert(data.error || 'Remove failed');
+      });
+    })();
+    </script>
+
     ${inlineEditScript()}
   `
   return c.html(layout(e.event_name, body, user, 'calendar'))
@@ -1095,6 +1490,354 @@ calendar.post('/ics-reset', async (c) => {
   const token = await generateIcsToken()
   await db.prepare(`UPDATE users SET ics_token=? WHERE id=?`).bind(token, user.id).run()
   return c.redirect('/calendar/ics-setup')
+})
+
+// ════════════════════════════════════════════════════════════════════════════
+// EVENT OPS — crew, vehicles, equipment, timeline
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── GET /calendar/api/event/:id/crew-picker
+//    Returns all active crew/drivers with a `booked_elsewhere` flag for the event's date.
+calendar.get('/api/event/:id/crew-picker', async (c) => {
+  const db = c.env.DB
+  const eventId = parseInt(c.req.param('id'))
+  if (!eventId) return c.json({ ok: false, error: 'bad id' }, 400)
+
+  const ev = await db.prepare(`SELECT id, event_date FROM calendar_events WHERE id=?`).bind(eventId).first<any>()
+  if (!ev) return c.json({ ok: false, error: 'event not found' }, 404)
+
+  // All eligible people (crew/driver only, exclude office and inactive)
+  const people = await db.prepare(
+    `SELECT id, name, crew_type, deliveries_disabled
+     FROM field_people
+     WHERE active = 1 AND crew_type IN ('crew', 'driver')
+     ORDER BY name`
+  ).all<any>()
+
+  // Who's booked on another event the same date?
+  const conflicts = await db.prepare(
+    `SELECT cec.person_id, ce.id AS event_id, ce.event_name, ce.event_date, ce.status
+     FROM calendar_event_crew cec
+     JOIN calendar_events ce ON ce.id = cec.event_id
+     WHERE ce.event_date = ?
+       AND ce.id != ?
+       AND ce.status != 'cancelled'`
+  ).bind(ev.event_date, eventId).all<any>()
+  const conflictMap = new Map<number, any[]>()
+  for (const row of conflicts.results || []) {
+    if (!conflictMap.has(row.person_id)) conflictMap.set(row.person_id, [])
+    conflictMap.get(row.person_id)!.push(row)
+  }
+
+  // Who's already on THIS event?
+  const onThis = await db.prepare(
+    `SELECT person_id, role, override_reason FROM calendar_event_crew WHERE event_id=?`
+  ).bind(eventId).all<any>()
+  const onThisSet = new Set((onThis.results || []).map((r: any) => r.person_id))
+
+  const items = (people.results || []).map((p: any) => ({
+    id: p.id,
+    name: p.name,
+    crew_type: p.crew_type,
+    deliveries_disabled: !!p.deliveries_disabled,
+    assigned: onThisSet.has(p.id),
+    conflicts: conflictMap.get(p.id) || [],
+  }))
+
+  return c.json({ ok: true, event_date: ev.event_date, items })
+})
+
+// ── GET /calendar/api/event/:id/vehicle-picker
+calendar.get('/api/event/:id/vehicle-picker', async (c) => {
+  const db = c.env.DB
+  const eventId = parseInt(c.req.param('id'))
+  if (!eventId) return c.json({ ok: false, error: 'bad id' }, 400)
+
+  const ev = await db.prepare(`SELECT id, event_date FROM calendar_events WHERE id=?`).bind(eventId).first<any>()
+  if (!ev) return c.json({ ok: false, error: 'event not found' }, 404)
+
+  // Active B&W fleet only (retired vehicles have active=0)
+  const fleet = await db.prepare(
+    `SELECT id, reg_number, description, vehicle_type, experiential
+     FROM fleet
+     WHERE active = 1
+     ORDER BY experiential DESC, vehicle_type, description`
+  ).all<any>()
+
+  const conflicts = await db.prepare(
+    `SELECT cev.fleet_id, ce.id AS event_id, ce.event_name, ce.event_date, ce.status
+     FROM calendar_event_vehicles cev
+     JOIN calendar_events ce ON ce.id = cev.event_id
+     WHERE ce.event_date = ?
+       AND ce.id != ?
+       AND ce.status != 'cancelled'`
+  ).bind(ev.event_date, eventId).all<any>()
+  const conflictMap = new Map<number, any[]>()
+  for (const row of conflicts.results || []) {
+    if (!conflictMap.has(row.fleet_id)) conflictMap.set(row.fleet_id, [])
+    conflictMap.get(row.fleet_id)!.push(row)
+  }
+
+  const onThis = await db.prepare(
+    `SELECT fleet_id FROM calendar_event_vehicles WHERE event_id=?`
+  ).bind(eventId).all<any>()
+  const onThisSet = new Set((onThis.results || []).map((r: any) => r.fleet_id))
+
+  const items = (fleet.results || []).map((f: any) => ({
+    id: f.id,
+    reg_number: f.reg_number,
+    description: f.description,
+    vehicle_type: f.vehicle_type,
+    experiential: !!f.experiential,
+    assigned: onThisSet.has(f.id),
+    conflicts: conflictMap.get(f.id) || [],
+  }))
+
+  return c.json({ ok: true, event_date: ev.event_date, items })
+})
+
+// ── POST /calendar/api/event/:id/crew — assign or unassign a crew member
+//    Body: { person_id: number, action: 'assign'|'remove', override_reason?: string, role?: string }
+calendar.post('/api/event/:id/crew', async (c) => {
+  const user = c.get('user') as any
+  const db = c.env.DB
+  const eventId = parseInt(c.req.param('id'))
+  if (!eventId) return c.json({ ok: false, error: 'bad id' }, 400)
+
+  let body: any
+  try { body = await c.req.json() } catch { return c.json({ ok: false, error: 'invalid json' }, 400) }
+  const personId = parseInt(body.person_id)
+  const action = String(body.action || 'assign')
+  if (!personId) return c.json({ ok: false, error: 'person_id required' }, 400)
+
+  if (action === 'remove') {
+    await db.prepare(`DELETE FROM calendar_event_crew WHERE event_id=? AND person_id=?`).bind(eventId, personId).run()
+    await audit(c, { action: 'delete', entityType: 'event_crew', entityId: eventId, fieldChanges: { person_id: { from: personId, to: null } } })
+    return c.json({ ok: true })
+  }
+
+  // Assign — check for conflicts first
+  const ev = await db.prepare(`SELECT event_date FROM calendar_events WHERE id=?`).bind(eventId).first<any>()
+  if (!ev) return c.json({ ok: false, error: 'event not found' }, 404)
+  const conflict = await db.prepare(
+    `SELECT ce.id, ce.event_name FROM calendar_event_crew cec
+     JOIN calendar_events ce ON ce.id = cec.event_id
+     WHERE cec.person_id = ? AND ce.event_date = ? AND ce.id != ? AND ce.status != 'cancelled'
+     LIMIT 1`
+  ).bind(personId, ev.event_date, eventId).first<any>()
+
+  const overrideReason = body.override_reason ? String(body.override_reason).trim() : null
+  if (conflict && !overrideReason) {
+    return c.json({
+      ok: false,
+      error: 'conflict',
+      message: `Already booked on "${conflict.event_name}" on ${ev.event_date}. Provide override_reason to force.`,
+      conflict_event_id: conflict.id,
+    }, 409)
+  }
+
+  const role = body.role ? String(body.role).trim().slice(0, 50) : null
+  try {
+    await db.prepare(
+      `INSERT INTO calendar_event_crew (event_id, person_id, role, override_reason, created_by)
+       VALUES (?, ?, ?, ?, ?)`
+    ).bind(eventId, personId, role, overrideReason, user?.id ?? null).run()
+  } catch (e: any) {
+    // UNIQUE constraint = already assigned; treat as idempotent success
+    if (!/UNIQUE/i.test(e?.message || '')) throw e
+  }
+
+  await audit(c, {
+    action: overrideReason ? 'override' : 'create',
+    entityType: 'event_crew',
+    entityId: eventId,
+    fieldChanges: { person_id: { from: null, to: personId } },
+    reason: overrideReason,
+  })
+  return c.json({ ok: true, override: !!overrideReason })
+})
+
+// ── POST /calendar/api/event/:id/vehicle — same pattern for vehicles
+calendar.post('/api/event/:id/vehicle', async (c) => {
+  const user = c.get('user') as any
+  const db = c.env.DB
+  const eventId = parseInt(c.req.param('id'))
+  if (!eventId) return c.json({ ok: false, error: 'bad id' }, 400)
+
+  let body: any
+  try { body = await c.req.json() } catch { return c.json({ ok: false, error: 'invalid json' }, 400) }
+  const fleetId = parseInt(body.fleet_id)
+  const action = String(body.action || 'assign')
+  if (!fleetId) return c.json({ ok: false, error: 'fleet_id required' }, 400)
+
+  if (action === 'remove') {
+    await db.prepare(`DELETE FROM calendar_event_vehicles WHERE event_id=? AND fleet_id=?`).bind(eventId, fleetId).run()
+    await audit(c, { action: 'delete', entityType: 'event_vehicle', entityId: eventId, fieldChanges: { fleet_id: { from: fleetId, to: null } } })
+    return c.json({ ok: true })
+  }
+
+  const ev = await db.prepare(`SELECT event_date FROM calendar_events WHERE id=?`).bind(eventId).first<any>()
+  if (!ev) return c.json({ ok: false, error: 'event not found' }, 404)
+  const conflict = await db.prepare(
+    `SELECT ce.id, ce.event_name FROM calendar_event_vehicles cev
+     JOIN calendar_events ce ON ce.id = cev.event_id
+     WHERE cev.fleet_id = ? AND ce.event_date = ? AND ce.id != ? AND ce.status != 'cancelled'
+     LIMIT 1`
+  ).bind(fleetId, ev.event_date, eventId).first<any>()
+
+  const overrideReason = body.override_reason ? String(body.override_reason).trim() : null
+  if (conflict && !overrideReason) {
+    return c.json({
+      ok: false,
+      error: 'conflict',
+      message: `Vehicle already booked on "${conflict.event_name}" on ${ev.event_date}. Provide override_reason to force.`,
+      conflict_event_id: conflict.id,
+    }, 409)
+  }
+
+  const role = body.role ? String(body.role).trim().slice(0, 50) : null
+  try {
+    await db.prepare(
+      `INSERT INTO calendar_event_vehicles (event_id, fleet_id, role, override_reason, created_by)
+       VALUES (?, ?, ?, ?, ?)`
+    ).bind(eventId, fleetId, role, overrideReason, user?.id ?? null).run()
+  } catch (e: any) {
+    if (!/UNIQUE/i.test(e?.message || '')) throw e
+  }
+
+  await audit(c, {
+    action: overrideReason ? 'override' : 'create',
+    entityType: 'event_vehicle',
+    entityId: eventId,
+    fieldChanges: { fleet_id: { from: null, to: fleetId } },
+    reason: overrideReason,
+  })
+  return c.json({ ok: true, override: !!overrideReason })
+})
+
+// ── Equipment list (free-type for now, will be stock-linked later) ─────────
+// POST /calendar/api/event/:id/equipment   Body: { description, quantity, notes? }
+calendar.post('/api/event/:id/equipment', async (c) => {
+  const user = c.get('user') as any
+  const db = c.env.DB
+  const eventId = parseInt(c.req.param('id'))
+  if (!eventId) return c.json({ ok: false, error: 'bad id' }, 400)
+
+  let body: any
+  try { body = await c.req.json() } catch { return c.json({ ok: false, error: 'invalid json' }, 400) }
+  const description = String(body.description || '').trim().slice(0, 300)
+  const quantity = parseFloat(body.quantity) || 1
+  const notes = body.notes ? String(body.notes).trim().slice(0, 500) : null
+  if (!description) return c.json({ ok: false, error: 'description required' }, 400)
+  if (quantity <= 0) return c.json({ ok: false, error: 'quantity must be > 0' }, 400)
+
+  const result = await db.prepare(
+    `INSERT INTO calendar_event_equipment (event_id, description, quantity, notes, created_by)
+     VALUES (?, ?, ?, ?, ?)`
+  ).bind(eventId, description, quantity, notes, user?.id ?? null).run()
+
+  await audit(c, {
+    action: 'create',
+    entityType: 'event_equipment',
+    entityId: eventId,
+    fieldChanges: { description: { from: null, to: description }, quantity: { from: null, to: quantity } },
+  })
+
+  return c.json({ ok: true, id: result.meta.last_row_id, description, quantity, notes })
+})
+
+// DELETE /calendar/api/event/:id/equipment/:eqId
+calendar.delete('/api/event/:id/equipment/:eqId', async (c) => {
+  const db = c.env.DB
+  const eventId = parseInt(c.req.param('id'))
+  const eqId = parseInt(c.req.param('eqId'))
+  if (!eventId || !eqId) return c.json({ ok: false, error: 'bad id' }, 400)
+  const before = await db.prepare(`SELECT description, quantity FROM calendar_event_equipment WHERE id=? AND event_id=?`).bind(eqId, eventId).first<any>()
+  await db.prepare(`DELETE FROM calendar_event_equipment WHERE id=? AND event_id=?`).bind(eqId, eventId).run()
+  await audit(c, {
+    action: 'delete',
+    entityType: 'event_equipment',
+    entityId: eventId,
+    fieldChanges: before ? { description: { from: before.description, to: null }, quantity: { from: before.quantity, to: null } } : null,
+  })
+  return c.json({ ok: true })
+})
+
+// PATCH /calendar/api/event/:id/equipment/:eqId  Body: { description?, quantity?, notes? }
+calendar.patch('/api/event/:id/equipment/:eqId', async (c) => {
+  const db = c.env.DB
+  const eventId = parseInt(c.req.param('id'))
+  const eqId = parseInt(c.req.param('eqId'))
+  if (!eventId || !eqId) return c.json({ ok: false, error: 'bad id' }, 400)
+  let body: any
+  try { body = await c.req.json() } catch { return c.json({ ok: false, error: 'invalid json' }, 400) }
+
+  const updates: Record<string, any> = {}
+  if (body.description != null) {
+    const d = String(body.description).trim().slice(0, 300)
+    if (!d) return c.json({ ok: false, error: 'description cannot be empty' }, 400)
+    updates.description = d
+  }
+  if (body.quantity != null) {
+    const q = parseFloat(body.quantity)
+    if (isNaN(q) || q <= 0) return c.json({ ok: false, error: 'quantity must be > 0' }, 400)
+    updates.quantity = q
+  }
+  if (body.notes !== undefined) {
+    updates.notes = body.notes ? String(body.notes).trim().slice(0, 500) : null
+  }
+  const keys = Object.keys(updates)
+  if (!keys.length) return c.json({ ok: false, error: 'no updates' }, 400)
+
+  const before = await db.prepare(`SELECT ${keys.join(',')} FROM calendar_event_equipment WHERE id=? AND event_id=?`).bind(eqId, eventId).first<any>()
+  const sets = keys.map(k => `${k}=?`).join(', ')
+  const vals = keys.map(k => updates[k])
+  vals.push(eqId, eventId)
+  await db.prepare(`UPDATE calendar_event_equipment SET ${sets} WHERE id=? AND event_id=?`).bind(...vals).run()
+
+  await audit(c, {
+    action: 'update',
+    entityType: 'event_equipment',
+    entityId: eventId,
+    fieldChanges: diff(before || {}, updates, keys),
+  })
+  return c.json({ ok: true })
+})
+
+// ── PATCH /calendar/api/event/:id/times  — bulk update of setup/event/strike/collection
+calendar.patch('/api/event/:id/times', async (c) => {
+  const db = c.env.DB
+  const eventId = parseInt(c.req.param('id'))
+  if (!eventId) return c.json({ ok: false, error: 'bad id' }, 400)
+  let body: any
+  try { body = await c.req.json() } catch { return c.json({ ok: false, error: 'invalid json' }, 400) }
+
+  const TIME_FIELDS = ['setup_time', 'event_start', 'event_end', 'strike_time', 'collection_time']
+  const updates: Record<string, string | null> = {}
+  for (const f of TIME_FIELDS) {
+    if (f in body) {
+      const v = body[f] == null ? '' : String(body[f]).trim()
+      if (v && !/^\d{1,2}:\d{2}$/.test(v)) {
+        return c.json({ ok: false, error: `${f} must be HH:MM` }, 400)
+      }
+      updates[f] = v || null
+    }
+  }
+  const keys = Object.keys(updates)
+  if (!keys.length) return c.json({ ok: false, error: 'no time fields supplied' }, 400)
+
+  const before = await db.prepare(`SELECT ${keys.join(',')} FROM calendar_events WHERE id=?`).bind(eventId).first<any>()
+  const sets = keys.map(k => `${k}=?`).join(', ')
+  const vals = keys.map(k => updates[k])
+  vals.push(eventId)
+  await db.prepare(`UPDATE calendar_events SET ${sets}, updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(...vals).run()
+  await audit(c, {
+    action: 'update',
+    entityType: 'calendar_event',
+    entityId: eventId,
+    fieldChanges: diff(before || {}, updates, keys),
+  })
+  return c.json({ ok: true })
 })
 
 export default calendar
