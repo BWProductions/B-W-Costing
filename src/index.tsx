@@ -4,6 +4,7 @@ import { Hono } from 'hono'
 import { logger } from 'hono/logger'
 import { serveStatic } from 'hono/cloudflare-workers'
 import { runDigest } from './lib/email-digest.js'
+import { runBackup } from './lib/backup.js'
 import auth from './routes/auth.js'
 import dashboard from './routes/dashboard.js'
 import fleet from './routes/fleet.js'
@@ -172,6 +173,23 @@ app.post('/api/cron/email-digest', async (c) => {
     return c.json({ ok: false, error: 'unauthorized' }, 401)
   }
   const result = await runDigest(env, { reason: 'webhook' })
+  return c.json(result)
+})
+
+// ── Token-protected weekly backup cron (D1 → R2 gzipped JSON).
+// Fired by GitHub Actions every Sunday at 00:00 UTC (02:00 SAST).
+// Uses a SEPARATE secret (BACKUP_WEBHOOK_TOKEN) so the backup token
+// can be rotated independently of the digest token.
+app.post('/api/cron/backup', async (c) => {
+  const env = c.env as any
+  const auth = c.req.header('authorization') || ''
+  const token = auth.replace(/^Bearer\s+/i, '').trim()
+  const expected = (env.BACKUP_WEBHOOK_TOKEN || '').trim()
+  if (!token || !expected || token !== expected) {
+    return c.json({ ok: false, error: 'unauthorized' }, 401)
+  }
+  const result = await runBackup(env)
+  if (!result.ok) return c.json(result, 500)
   return c.json(result)
 })
 

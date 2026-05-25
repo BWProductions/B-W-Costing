@@ -1,0 +1,41 @@
+name: Weekly D1 Backup
+
+# Snapshots the full database to R2 every Sunday at 02:00 SAST.
+# 00:00 UTC Sunday = 02:00 SAST Sunday.
+#
+# Calls POST https://bwprodsystem.co.za/api/cron/backup with the
+# bearer token from the BACKUP_WEBHOOK_TOKEN repo secret.
+on:
+  schedule:
+    - cron: '0 0 * * 0'
+  # Allow manual trigger from the Actions tab too — useful for ad-hoc tests
+  workflow_dispatch:
+
+jobs:
+  fire-backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fire backup webhook
+        env:
+          TOKEN: ${{ secrets.BACKUP_WEBHOOK_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::BACKUP_WEBHOOK_TOKEN secret is not set in the GitHub repo."
+            echo "Add it under: Settings → Secrets and variables → Actions → New repo secret"
+            exit 1
+          fi
+          set -e
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://bwprodsystem.co.za/api/cron/backup" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            --max-time 300)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          STATUS=$(echo "$RESPONSE" | tail -n1)
+          echo "Status: $STATUS"
+          echo "Response: $BODY"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Backup webhook returned $STATUS"
+            exit 1
+          fi

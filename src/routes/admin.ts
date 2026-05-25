@@ -158,6 +158,18 @@ admin.get('/', async (c) => {
       </div>
     </div>
 
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title"><i class="fas fa-database" style="color:var(--gold)"></i> &nbsp;Database Backups</span>
+        <a href="/admin/backup" class="btn btn-outline btn-sm">
+          <i class="fas fa-arrow-right"></i> Open backups
+        </a>
+      </div>
+      <div style="padding:14px 4px;color:var(--muted);font-size:13px;line-height:1.6">
+        Weekly automatic snapshots of the full database to R2 (gzipped JSON). Runs Sunday 02:00 SAST. Manual runs allowed from the backups page.
+      </div>
+    </div>
+
     <div class="card card-glow">
       <div class="card-title" style="margin-bottom:12px"><i class="fas fa-shield-halved" style="color:var(--gold)"></i> &nbsp;Role Permissions</div>
       <div class="perm-grid">
@@ -659,6 +671,110 @@ admin.get('/export/all.xlsx', async (c) => {
   XLSX.utils.book_append_sheet(wb, rowsToSheet(rateCard.results || [], 'RateCard'),  'RateCard')
   XLSX.utils.book_append_sheet(wb, rowsToSheet(fleet.results    || [], 'Fleet'),     'Fleet')
   return workbookResponse(wb, `bw-full-export-${dateStamp()}.xlsx`)
+})
+
+// ─── BACKUPS ──────────────────────────────────────────────────────────────
+// Weekly automatic D1 → R2 backup. Also accessible here for ad-hoc runs.
+// Founder-only (already enforced by admin.use('*', …) guard at the top).
+import { runBackup, listBackups } from '../lib/backup.js'
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(2)} MB`
+}
+
+function fmtDate(iso: string): string {
+  try {
+    const d = new Date(iso)
+    return d.toLocaleString('en-ZA', { timeZone: 'Africa/Johannesburg', hour12: false })
+  } catch { return iso }
+}
+
+admin.get('/backup', async (c) => {
+  const user = c.get('user')
+  const msg  = c.req.query('msg') ?? ''
+  const err  = c.req.query('err') ?? ''
+
+  let backups: any[] = []
+  let listErr = ''
+  try {
+    backups = await listBackups(c.env as any, 100)
+  } catch (e: any) {
+    listErr = e?.message || String(e)
+  }
+
+  const rows = backups.length === 0
+    ? `<tr><td colspan="4" style="padding:24px;text-align:center;color:#6b7589">No backups yet. Run one now ↓</td></tr>`
+    : backups.map(b => `
+        <tr>
+          <td style="padding:10px;border-bottom:1px solid #1f2530;font-family:monospace;font-size:12px">${b.key}</td>
+          <td style="padding:10px;border-bottom:1px solid #1f2530">${fmtDate(b.uploaded)}</td>
+          <td style="padding:10px;border-bottom:1px solid #1f2530">${fmtBytes(b.size)}</td>
+          <td style="padding:10px;border-bottom:1px solid #1f2530;font-size:11px;color:#6b7589">
+            ${b.metadata.total_rows ? `${b.metadata.total_rows} rows` : ''}
+            ${b.metadata.table_count ? ` · ${b.metadata.table_count} tables` : ''}
+          </td>
+        </tr>`).join('')
+
+  const body = `
+    <div style="max-width:1100px;margin:0 auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+        <div>
+          <h1 style="font-family:Cinzel,serif;font-size:24px;font-weight:900;background:linear-gradient(135deg,#B67A3A,#F0D080,#D39A52);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin:0">Database Backups</h1>
+          <p style="color:#6b7589;font-size:13px;margin-top:6px">Weekly automatic backup runs Sunday 02:00 SAST. Manual runs allowed below.</p>
+        </div>
+        <a href="/admin" style="color:#C9A84C;text-decoration:none;font-size:13px">← Admin</a>
+      </div>
+
+      ${msg ? `<div style="background:#0d2818;border:1px solid #1e5f3a;color:#4ade80;padding:12px;border-radius:6px;margin-bottom:16px;font-size:13px">${msg}</div>` : ''}
+      ${err ? `<div style="background:#2d0a0a;border:1px solid #7f1d1d;color:#fca5a5;padding:12px;border-radius:6px;margin-bottom:16px;font-size:13px">${err}</div>` : ''}
+      ${listErr ? `<div style="background:#2d0a0a;border:1px solid #7f1d1d;color:#fca5a5;padding:12px;border-radius:6px;margin-bottom:16px;font-size:13px">List error: ${listErr}</div>` : ''}
+
+      <div style="background:#141a23;border:1px solid #1f2530;border-radius:8px;padding:20px;margin-bottom:20px">
+        <h2 style="font-size:15px;font-weight:700;color:#f0f4ff;margin:0 0 6px 0">Run backup now</h2>
+        <p style="color:#6b7589;font-size:13px;margin-bottom:14px">
+          Snapshots all 20 production tables to gzipped JSON, stored in R2 under <code style="background:#0a0d12;padding:2px 6px;border-radius:3px;color:#C9A84C">backups/YYYY-MM-DD/</code>.
+        </p>
+        <form method="POST" action="/admin/backup/run" onsubmit="this.querySelector('button').textContent='Backing up…';this.querySelector('button').disabled=true">
+          <button type="submit" style="background:linear-gradient(135deg,#8B6914,#C9A84C,#F0D080);color:#000;border:none;padding:10px 24px;border-radius:6px;font-weight:700;cursor:pointer;font-size:13px">
+            Run backup now
+          </button>
+        </form>
+      </div>
+
+      <div style="background:#141a23;border:1px solid #1f2530;border-radius:8px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse;color:#f0f4ff;font-size:13px">
+          <thead>
+            <tr style="background:#0d1117">
+              <th style="padding:12px;text-align:left;border-bottom:1px solid #1f2530;font-size:11px;text-transform:uppercase;color:#6b7589;letter-spacing:0.5px">Key</th>
+              <th style="padding:12px;text-align:left;border-bottom:1px solid #1f2530;font-size:11px;text-transform:uppercase;color:#6b7589;letter-spacing:0.5px">Uploaded (SAST)</th>
+              <th style="padding:12px;text-align:left;border-bottom:1px solid #1f2530;font-size:11px;text-transform:uppercase;color:#6b7589;letter-spacing:0.5px">Size</th>
+              <th style="padding:12px;text-align:left;border-bottom:1px solid #1f2530;font-size:11px;text-transform:uppercase;color:#6b7589;letter-spacing:0.5px">Contents</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+
+      <p style="color:#6b7589;font-size:11px;margin-top:16px;line-height:1.6">
+        Backups are kept indefinitely in R2. To restore, download the <code>.json.gz</code>, decompress, and re-import the relevant table(s). Audit log entries are included in every backup.
+      </p>
+    </div>
+  `
+
+  return c.html(layout('Backups', body, user, 'admin'))
+})
+
+admin.post('/backup/run', async (c) => {
+  const result = await runBackup(c.env as any)
+  if (!result.ok) {
+    return c.redirect('/admin/backup?err=' + encodeURIComponent('Backup failed: ' + (result.error || 'unknown error')))
+  }
+  const totalRows = Object.values(result.table_counts || {}).reduce((a, b) => a + Math.max(0, b), 0)
+  return c.redirect('/admin/backup?msg=' + encodeURIComponent(
+    `Backup complete — ${totalRows} rows across ${Object.keys(result.table_counts || {}).length} tables, ${fmtBytes(result.bytes || 0)} stored at ${result.key}`
+  ))
 })
 
 export default admin

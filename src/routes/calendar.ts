@@ -7,6 +7,7 @@ import { requireAuth } from '../middleware/auth.js'
 import { layout } from '../lib/layout.js'
 import type { AuthUser } from '../lib/auth.js'
 import { buildICS, generateIcsToken, type ICSEvent } from '../lib/ics.js'
+import { audit, diff } from '../lib/audit.js'
 
 type Env = { Bindings: { DB: D1Database }; Variables: { user: AuthUser } }
 
@@ -909,8 +910,13 @@ calendar.patch('/api/event/:id', async (c) => {
     return c.json({ ok: false, error: 'event name cannot be empty' }, 400)
   }
 
-  // Build dynamic UPDATE
+  // Snapshot before for audit diff
   const cols = Object.keys(updates)
+  const before = await db.prepare(
+    `SELECT ${cols.join(', ')} FROM calendar_events WHERE id=?`
+  ).bind(id).first<any>()
+
+  // Build dynamic UPDATE
   const sets = cols.map(c => `${c}=?`).join(', ')
   const vals = cols.map(c => updates[c])
   vals.push(id)
@@ -921,6 +927,17 @@ calendar.patch('/api/event/:id', async (c) => {
   const row = await db.prepare(
     `SELECT updated_at FROM calendar_events WHERE id=?`
   ).bind(id).first<any>()
+
+  // Audit log: record the diff (fail-soft, won't block the response)
+  const changes = diff(before || {}, updates, cols)
+  if (Object.keys(changes).length > 0) {
+    await audit(c, {
+      action: 'update',
+      entityType: 'calendar_event',
+      entityId: id,
+      fieldChanges: changes,
+    })
+  }
 
   return c.json({ ok: true, updated_at: row?.updated_at, fields: cols })
 })
