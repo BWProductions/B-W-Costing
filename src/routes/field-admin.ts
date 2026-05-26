@@ -37,6 +37,56 @@ function formatDate(d: string): string {
   catch { return d }
 }
 
+// ─── REPAIR NOTE → WHATSAPP MESSAGE TEMPLATE ──────────────────────────────────
+// Builds a Takka-friendly WhatsApp message from a repair submission.
+// Plain text only — emojis allowed (WhatsApp renders them fine).
+// HTML-escaped because it lands inside a <textarea>.
+function buildRepairWhatsappMessage(sub: any, lines: any[], others: any[], contact: any): string {
+  const greet = contact?.name ? `Hi ${contact.name}` : 'Hi Takka'
+  const ref = sub.form_number || ''
+  const vehicle = sub.vehicle_reg ? sub.vehicle_reg.toUpperCase() : null
+  const location = sub.venue || sub.address || null
+  const reportedBy = sub.attention || sub.prepared_by || null
+  const notes = sub.notes ? String(sub.notes).trim() : null
+
+  // Format line items: "1× Item name (Faulty) — comments"
+  const itemLines: string[] = []
+  for (const li of lines) {
+    if (!li || !li.item_name) continue
+    let line = `• ${li.quantity || 1}× ${li.item_name}`
+    if (li.condition && li.condition !== 'Checked') line += ` (${li.condition})`
+    if (li.comments) line += ` — ${li.comments}`
+    itemLines.push(line)
+  }
+  for (const oi of others) {
+    if (!oi || !oi.item_name) continue
+    itemLines.push(`• ${oi.item_name}${oi.comments ? ` — ${oi.comments}` : ''}`)
+  }
+
+  const parts: string[] = []
+  parts.push(`${greet},`)
+  parts.push('')
+  parts.push(`🔧 *Repair Note ${ref}* — needs your eyes please.`)
+  parts.push('')
+  if (vehicle) parts.push(`🚐 Vehicle: *${vehicle}*`)
+  if (location) parts.push(`📍 Location: ${location}`)
+  if (reportedBy) parts.push(`👤 Reported by: ${reportedBy}`)
+  parts.push('')
+  if (itemLines.length) {
+    parts.push('*Items requiring repair:*')
+    parts.push(...itemLines)
+    parts.push('')
+  }
+  if (notes) {
+    parts.push(`📝 Notes: ${notes}`)
+    parts.push('')
+  }
+  parts.push('Full note + photos:')
+  // The share_url gets appended by the JS — leave a marker so user can see where it goes
+  // (waShare() concatenates message + '\n\n' + share_url)
+  return esc(parts.join('\n'))
+}
+
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 
 app.get('/', requireAuth, async (c) => {
@@ -1333,6 +1383,19 @@ app.get('/submission/:id', requireAuth, async (c) => {
     c.env.DB.prepare('SELECT * FROM field_record_edits WHERE submission_id=? ORDER BY edited_at DESC').bind(id).all<any>().catch(() => ({ results: [] }))
   ])
   if (!sub) return c.html(layout('Not Found', '<p class="muted">Submission not found.</p>', user))
+
+  // ── For repair notes: pre-fetch the primary repair contact (Takka by default)
+  //    Falls back gracefully if table doesn't exist or no contact configured.
+  let repairContact: any = null
+  if (sub.form_type === 'repair') {
+    try {
+      repairContact = await c.env.DB.prepare(
+        `SELECT name, phone, whatsapp_phone FROM repair_contacts
+         WHERE role='repair' AND active=1 AND is_primary=1
+         ORDER BY id LIMIT 1`
+      ).bind().first<any>()
+    } catch (_e) { /* table missing on older deploys — ignore */ }
+  }
   const showReasonErr = errParam === 'reason'
   const editSaved = c.req.query('saved') === '1'
 
@@ -1354,7 +1417,7 @@ app.get('/submission/:id', requireAuth, async (c) => {
       <a href="/field/success/${id}" target="_blank" class="btn btn-secondary"><i class="fas fa-eye"></i> View Print Page</a>
       <a href="/field/admin/submission/${id}/edit" class="btn" style="background:#0ea5e9;color:#fff;border:none"><i class="fas fa-pen"></i> Edit Details</a>
       <a href="/field/admin/submission/${id}/preview.png" target="_blank" class="btn btn-secondary" title="Open PNG preview — great for WhatsApp/email"><i class="fas fa-image"></i> PNG Preview</a>
-      <button type="button" onclick="document.getElementById('waModal').style.display='flex'" class="btn" style="background:#25d366;color:#fff;border:none;cursor:pointer" title="Share via WhatsApp"><i class="fab fa-whatsapp"></i> Send to WhatsApp</button>
+      <button type="button" onclick="document.getElementById('waModal').style.display='flex'" class="btn" style="background:#25d366;color:#fff;border:none;cursor:pointer" title="Share via WhatsApp"><i class="fab fa-whatsapp"></i> ${sub.form_type === 'repair' && repairContact ? `Send to ${esc(repairContact.name)}` : 'Send to WhatsApp'}</button>
       <a href="/field/admin/submissions" class="btn btn-secondary">← Back</a>
       <button onclick="document.getElementById('deleteModal').style.display='flex'" class="btn" style="margin-left:auto;background:#dc2626;color:#fff;border:none;cursor:pointer">
         <i class="fas fa-trash"></i> Delete Submission
@@ -1393,17 +1456,28 @@ app.get('/submission/:id', requireAuth, async (c) => {
         </div>
 
         <form id="waForm" onsubmit="return waShare(event, ${id})">
+          ${sub.form_type === 'repair' && repairContact ? `
+          <div style="background:#fff7ed;border:1px solid #fdba74;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#9a3412">
+            <i class="fas fa-wrench"></i> <strong>Repair Note</strong> — auto-addressed to <strong>${esc(repairContact.name)}</strong> (primary repair contact).
+            You can change the number below if needed.
+          </div>` : ''}
           <div style="margin-bottom:14px">
             <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:#333">Recipient phone <span style="color:#dc2626">*</span></label>
-            <input id="waPhone" type="tel" required placeholder="e.g. 0829241496 or +27829241496" value="${esc(sub.contact_number || '')}" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box">
+            <input id="waPhone" type="tel" required placeholder="e.g. 0829241496 or +27829241496" value="${esc(
+              sub.form_type === 'repair' && repairContact
+                ? (repairContact.whatsapp_phone || repairContact.phone)
+                : (sub.contact_number || '')
+            )}" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box">
             <div class="muted" style="font-size:11px;margin-top:4px">South African numbers auto-convert: 082… → +2782…</div>
           </div>
 
           <div style="margin-bottom:14px">
             <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:#333">Message preview</label>
-            <textarea id="waMessage" rows="5" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;resize:vertical;box-sizing:border-box;font-family:inherit">Hi ${esc(sub.attention || sub.received_by || 'there')},
-
-Here is the ${esc(FORM_LABELS[sub.form_type] || 'delivery note')} for ${esc(sub.event_name || sub.venue || 'your event')} (Ref ${esc(sub.form_number)}):</textarea>
+            <textarea id="waMessage" rows="${sub.form_type === 'repair' ? 9 : 5}" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;resize:vertical;box-sizing:border-box;font-family:inherit">${
+              sub.form_type === 'repair'
+                ? buildRepairWhatsappMessage(sub, lines.results || [], others.results || [], repairContact)
+                : `Hi ${esc(sub.attention || sub.received_by || 'there')},\n\nHere is the ${esc(FORM_LABELS[sub.form_type] || 'delivery note')} for ${esc(sub.event_name || sub.venue || 'your event')} (Ref ${esc(sub.form_number)}):`
+            }</textarea>
           </div>
 
           <div style="margin-bottom:18px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;font-size:12px;color:#1e40af">
