@@ -6,6 +6,7 @@ import { requireAuth } from '../middleware/auth.js'
 import { layout } from '../lib/layout.js'
 import { zipSync, strToU8 } from 'fflate'
 import { runDigest, ACCOUNTS_RECIPIENTS } from '../lib/email-digest.js'
+import { renderAndStorePdf, buildPdfFilename } from './field.js'
 
 type Env = { Bindings: {
   DB: D1Database
@@ -1417,12 +1418,18 @@ app.get('/submission/:id', requireAuth, async (c) => {
       <a href="/field/success/${id}" target="_blank" class="btn btn-secondary"><i class="fas fa-eye"></i> View Print Page</a>
       <a href="/field/admin/submission/${id}/edit" class="btn" style="background:#0ea5e9;color:#fff;border:none"><i class="fas fa-pen"></i> Edit Details</a>
       <a href="/field/admin/submission/${id}/preview.png" target="_blank" class="btn btn-secondary" title="Open PNG preview — great for WhatsApp/email"><i class="fas fa-image"></i> PNG Preview</a>
+      <form method="POST" action="/field/admin/submission/${id}/regenerate-pdf" style="display:inline-block;margin:0" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').innerHTML='<i class=&quot;fas fa-spinner fa-spin&quot;></i> Regenerating…'">
+        <button type="submit" class="btn btn-secondary" title="Force a fresh PDF render — use after edits if the downloaded PDF looks stale"><i class="fas fa-rotate"></i> Regenerate PDF</button>
+      </form>
       <button type="button" onclick="document.getElementById('waModal').style.display='flex'" class="btn" style="background:#25d366;color:#fff;border:none;cursor:pointer" title="Share via WhatsApp"><i class="fab fa-whatsapp"></i> ${sub.form_type === 'repair' && repairContact ? `Send to ${esc(repairContact.name)}` : 'Send to WhatsApp'}</button>
       <a href="/field/admin/submissions" class="btn btn-secondary">← Back</a>
       <button onclick="document.getElementById('deleteModal').style.display='flex'" class="btn" style="margin-left:auto;background:#dc2626;color:#fff;border:none;cursor:pointer">
         <i class="fas fa-trash"></i> Delete Submission
       </button>
     </div>
+
+    ${c.req.query('pdf_regenerated') === '1' ? '<div style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:14px">✅ PDF regenerated from the current data. Try downloading again.</div>' : ''}
+    ${c.req.query('pdf_regen_failed') === '1' ? '<div style="background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:14px">⚠️ PDF render failed — check Renderer Stats. The cached PDF was cleared; try again in a moment.</div>' : ''}
 
     ${editSaved ? '<div style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:14px">✅ Changes saved and logged to the audit trail.</div>' : ''}
     ${showReasonErr ? '<div style="background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:14px">⚠️ A reason is required before deleting.</div>' : ''}
@@ -1815,7 +1822,117 @@ app.post('/submission/:id/edit', requireAuth, async (c) => {
     await c.env.DB.prepare(`UPDATE field_submissions SET ${ch.key} = ? WHERE id = ?`).bind(ch.newV, id).run()
   }
 
+  // ── 1. SYNC form_data JSON ────────────────────────────────────────────────
+  // The /delivery/open/:id render path (and several others) prefer fd.{key}
+  // over sub.{key}, so leaving form_data stale silently strands the edit.
+  // Merge every changed field into the JSON blob too.
+  try {
+    let fd: any = {}
+    try { fd = JSON.parse(sub.form_data || '{}') } catch {}
+    for (const ch of changes) {
+      // null means "clear it" — drop the key entirely so fallback to sub.{key}
+      // (which we also just updated) wins
+      if (ch.newV === null || ch.newV === '') {
+        delete fd[ch.key]
+      } else {
+        fd[ch.key] = ch.newV
+      }
+    }
+    await c.env.DB.prepare('UPDATE field_submissions SET form_data=? WHERE id=?')
+      .bind(JSON.stringify(fd), id).run()
+  } catch (err) {
+    // Best-effort — don't fail the edit if JSON merge breaks
+    console.error('form_data sync failed for submission', id, err)
+  }
+
+  // ── 2. INVALIDATE CACHED RENDERS ─────────────────────────────────────────
+  // The PDF and PNG preview were rendered once at submission time and stored
+  // in R2. Without this invalidation an admin edit would never reach the
+  // downloadable PDF — the recipient keeps seeing the stale snapshot.
+  if (c.env.PDF_BUCKET) {
+    try {
+      const pdfKey = `pdfs/${sub.form_number}-${id}.pdf`
+      const pngKey = `previews/png/${sub.form_number}-${id}.png`
+      await c.env.PDF_BUCKET.delete(pdfKey).catch(() => {})
+      await c.env.PDF_BUCKET.delete(pngKey).catch(() => {})
+    } catch (err) {
+      console.error('Cache invalidation failed for submission', id, err)
+    }
+  }
+
+  // ── 3. TRIGGER FRESH PDF RENDER ──────────────────────────────────────────
+  // Best-effort, synchronous so the redirect lands on a page that can serve
+  // the new PDF immediately. Render failures are logged but don't block the
+  // redirect — the next /field/pdf/:id hit will retry.
+  try {
+    // Reload the now-updated row so the filename + render reflect the edit
+    const fresh = await c.env.DB.prepare(
+      'SELECT form_number, form_type, event_name, venue, vehicle_reg, driver, prepared_by, delivery_date, collection_date FROM field_submissions WHERE id=?'
+    ).bind(id).first<any>()
+    if (fresh) {
+      const pdfFilename = await buildPdfFilename({
+        db: c.env.DB,
+        formNumber: fresh.form_number,
+        formType: fresh.form_type,
+        vehicleReg: (fresh.vehicle_reg || '') as string,
+        driver: (fresh.driver || '') as string,
+        preparedBy: (fresh.prepared_by || '') as string,
+        eventName: (fresh.event_name || '') as string,
+        venue: (fresh.venue || '') as string,
+        date: (fresh.delivery_date || fresh.collection_date || '') as string
+      })
+      const pageUrl = `https://bwprodsystem.co.za/field/success/${id}`
+      await renderAndStorePdf(c.env, id, fresh.form_number, pageUrl, pdfFilename)
+    }
+  } catch (err) {
+    console.error('PDF re-render failed for submission', id, err)
+  }
+
   return c.redirect(`/field/admin/submission/${id}?saved=1`)
+})
+
+// ─── FORCE-REGENERATE PDF ────────────────────────────────────────────────────
+// One-click way to rebuild the R2-cached PDF (and PNG preview) from the
+// current DB row. Useful when an old PDF still shows pre-edit data — drops
+// the stale R2 objects and triggers a fresh Urlbox render.
+app.post('/submission/:id/regenerate-pdf', requireAuth, async (c) => {
+  const id = Number(c.req.param('id'))
+  const sub = await c.env.DB.prepare(
+    'SELECT form_number, form_type, event_name, venue, vehicle_reg, driver, prepared_by, delivery_date, collection_date FROM field_submissions WHERE id=?'
+  ).bind(id).first<any>()
+  if (!sub) return c.redirect('/field/admin/submissions')
+
+  // Drop the stale R2 objects so a failed render leaves nothing misleading
+  if (c.env.PDF_BUCKET) {
+    try {
+      await c.env.PDF_BUCKET.delete(`pdfs/${sub.form_number}-${id}.pdf`).catch(() => {})
+      await c.env.PDF_BUCKET.delete(`previews/png/${sub.form_number}-${id}.png`).catch(() => {})
+    } catch {}
+  }
+
+  // Trigger fresh render
+  try {
+    const pdfFilename = await buildPdfFilename({
+      db: c.env.DB,
+      formNumber: sub.form_number,
+      formType: sub.form_type,
+      vehicleReg: (sub.vehicle_reg || '') as string,
+      driver: (sub.driver || '') as string,
+      preparedBy: (sub.prepared_by || '') as string,
+      eventName: (sub.event_name || '') as string,
+      venue: (sub.venue || '') as string,
+      date: (sub.delivery_date || sub.collection_date || '') as string
+    })
+    const pageUrl = `https://bwprodsystem.co.za/field/success/${id}`
+    const pdfUrl = await renderAndStorePdf(c.env, id, sub.form_number, pageUrl, pdfFilename)
+    if (!pdfUrl) {
+      return c.redirect(`/field/admin/submission/${id}?pdf_regen_failed=1`)
+    }
+    return c.redirect(`/field/admin/submission/${id}?pdf_regenerated=1`)
+  } catch (err) {
+    console.error('Manual PDF regen failed for submission', id, err)
+    return c.redirect(`/field/admin/submission/${id}?pdf_regen_failed=1`)
+  }
 })
 
 // ─── URLBOX: PREVIEW PNG OF A SUBMISSION (OPTION C) ──────────────────────────

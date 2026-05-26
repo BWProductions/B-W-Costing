@@ -7096,4 +7096,6 @@ function registerFleetRoutes(fleetApp: Hono<Env>, cfg: FleetConfig) {
 registerFleetRoutes(musicbusApp, MUSICBUS_CONFIG)
 
 export { musicbusApp }
+// Exported so field-admin.ts can trigger a re-render after office edits
+export { renderAndStorePdf, buildPdfFilename }
 export default app
