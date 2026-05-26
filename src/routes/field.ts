@@ -31,7 +31,7 @@ const musicbusApp = new Hono<Env>()
 // isTeam   = appears in Team Member dropdown
 const PEOPLE_DIR = [
   // ── Males (A-Z) ──────────────────────────────────────────────────────────
-  { name: 'Beki',     gender: 'M', isDriver: true,  isTeam: true  },
+  { name: 'Bhekhizita', gender: 'M', isDriver: true,  isTeam: true  },
   { name: 'Bibi',     gender: 'M', isDriver: false, isTeam: true  },
   { name: 'Daniel',   gender: 'M', isDriver: true,  isTeam: true  },
   { name: 'Eric',     gender: 'M', isDriver: false, isTeam: true  },
