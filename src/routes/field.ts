@@ -42,9 +42,10 @@ const PEOPLE_DIR = [
   { name: 'Patrick',  gender: 'M', isDriver: true,  isTeam: true  },
   { name: 'Sipho',    gender: 'M', isDriver: true,  isTeam: true  },
   { name: 'Solly',    gender: 'M', isDriver: true,  isTeam: true  },
-  { name: 'Takka',    gender: 'M', isDriver: false, isTeam: true  },
-  { name: 'Thandani', gender: 'M', isDriver: true,  isTeam: true  },
-  { name: 'Thina',    gender: 'M', isDriver: true,  isTeam: true  },
+  { name: 'Petrus',     gender: 'M', isDriver: false, isTeam: true  },
+  { name: 'Takavaudza', gender: 'M', isDriver: false, isTeam: true  },
+  { name: 'Thandani',   gender: 'M', isDriver: true,  isTeam: true  },
+  { name: 'Thina',      gender: 'M', isDriver: true,  isTeam: true  },
   // ── Females (A-Z) ────────────────────────────────────────────────────────
   { name: 'Bernie',   gender: 'F', isDriver: false, isTeam: true  },
   { name: 'Girlie',   gender: 'F', isDriver: false, isTeam: true  },

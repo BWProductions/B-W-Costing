@@ -178,7 +178,7 @@ admin.get('/', async (c) => {
         </a>
       </div>
       <div style="padding:14px 4px;color:var(--muted);font-size:13px;line-height:1.6">
-        People who get auto-suggested as WhatsApp recipients on Repair Notes (e.g. Takka). Add mechanics, panel beaters, electricians, etc. Mark one as primary per role.
+        People who get auto-suggested as WhatsApp recipients on Repair Notes (e.g. Takavaudza). Add mechanics, panel beaters, electricians, etc. Mark one as primary per role.
       </div>
     </div>
 
@@ -947,7 +947,7 @@ admin.get('/repair-contacts', async (c) => {
           <div class="form-grid" style="gap:14px">
             <div class="form-group">
               <label>Full Name *</label>
-              <input type="text" id="rc-name" name="name" required placeholder="e.g. Takka" maxlength="80">
+              <input type="text" id="rc-name" name="name" required placeholder="e.g. Takavaudza" maxlength="80">
             </div>
             <div class="form-group">
               <label>Role *</label>

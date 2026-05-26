@@ -38,11 +38,11 @@ function formatDate(d: string): string {
 }
 
 // ─── REPAIR NOTE → WHATSAPP MESSAGE TEMPLATE ──────────────────────────────────
-// Builds a Takka-friendly WhatsApp message from a repair submission.
+// Builds a repair-guy-friendly WhatsApp message from a repair submission.
 // Plain text only — emojis allowed (WhatsApp renders them fine).
 // HTML-escaped because it lands inside a <textarea>.
 function buildRepairWhatsappMessage(sub: any, lines: any[], others: any[], contact: any): string {
-  const greet = contact?.name ? `Hi ${contact.name}` : 'Hi Takka'
+  const greet = contact?.name ? `Hi ${contact.name}` : 'Hi there'
   const ref = sub.form_number || ''
   const vehicle = sub.vehicle_reg ? sub.vehicle_reg.toUpperCase() : null
   const location = sub.venue || sub.address || null
@@ -1384,7 +1384,7 @@ app.get('/submission/:id', requireAuth, async (c) => {
   ])
   if (!sub) return c.html(layout('Not Found', '<p class="muted">Submission not found.</p>', user))
 
-  // ── For repair notes: pre-fetch the primary repair contact (Takka by default)
+  // ── For repair notes: pre-fetch the primary repair contact (Takavaudza by default)
   //    Falls back gracefully if table doesn't exist or no contact configured.
   let repairContact: any = null
   if (sub.form_type === 'repair') {
