@@ -1207,7 +1207,28 @@ function fieldPage(title: string, body: string, extraHead = ''): string {
 </head>
 <body>
 ${body}
-<!-- ── NAV-GUARD: stops accidental back/refresh while a form is in progress ── -->
+${NAV_GUARD_SCRIPT}
+</body>
+</html>`
+}
+
+// ─── SHARED NAV-GUARD SCRIPT ──────────────────────────────────────────────────
+// Stops accidental back-button / refresh / tab-close while a form is in
+// progress. Used by both fieldPage() and fleetPage() so EVERY form route
+// (delivery, collection, repair, inspection, shortlist, musicbus, djdrivers)
+// gets the same protection.
+//
+// Triggers in three situations:
+//   1. User typed something          → marked dirty on input/change
+//   2. User touched a signature pad  → marked dirty on pointerdown
+//   3. Form was pre-loaded with data → marked dirty immediately on arm()
+//                                      (so /field/delivery/open/:id and
+//                                      /field/collect-from/:id are guarded
+//                                      from the moment the page opens)
+//
+// Confirms with the native browser prompt on beforeunload (refresh, close,
+// typed URL) and with a custom confirm() on popstate (back button).
+const NAV_GUARD_SCRIPT = `<!-- ── NAV-GUARD: stops accidental back/refresh while a form is in progress ── -->
 <script>
 (function () {
   // Only arm on pages that contain a real input form (not landing tiles, not success pages).
@@ -1226,9 +1247,26 @@ ${body}
 
   var dirty = false
   var submitting = false
-  var msg = 'Are you sure you want to leave? Your form is not saved yet.'
+  var msg = 'Are you sure you want to leave this page? Any unsaved changes on this form will be lost.'
 
   function markDirty() { dirty = true }
+
+  // Pre-loaded form detection — if any visible input/textarea/select already
+  // has a non-empty value on first render, treat the whole page as dirty.
+  // This covers /delivery/open/:id, /collect-from/:id, and any other route
+  // where the office has pre-filled data the driver mustn't accidentally drop.
+  function hasPreloadedData() {
+    var els = document.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=checkbox]):not([type=radio]), textarea, select')
+    for (var i = 0; i < els.length; i++) {
+      var el = els[i]
+      var v = (el.value || '').trim()
+      if (v && v !== '— select driver —' && v !== '— select —') return true
+    }
+    // Also check radios/checkboxes — a pre-checked one counts as preloaded
+    var checks = document.querySelectorAll('input[type=checkbox]:checked, input[type=radio]:checked')
+    if (checks.length) return true
+    return false
+  }
 
   // Wait for DOM ready so dynamic inputs are caught too
   function arm() {
@@ -1247,6 +1285,9 @@ ${body}
     document.querySelectorAll('form').forEach(function (f) {
       f.addEventListener('submit', function () { submitting = true; dirty = false })
     })
+    // If the form was pre-loaded by office, treat it as already-dirty so back
+    // navigation warns even before the driver has typed anything.
+    if (hasPreloadedData()) dirty = true
     // Push a sentinel history entry so the FIRST back-press hits us
     try { history.pushState({ navGuard: true }, '', location.href) } catch (e) {}
   }
@@ -1282,10 +1323,7 @@ ${body}
     }
   })
 })()
-</script>
-</body>
-</html>`
-}
+</script>`
 
 function formHeader(
   formTitle: string,
@@ -6590,6 +6628,7 @@ function fleetPage(title: string, body: string, cfg: FleetConfig): string {
 </head>
 <body>
 ${body}
+${NAV_GUARD_SCRIPT}
 </body>
 </html>`
 }
