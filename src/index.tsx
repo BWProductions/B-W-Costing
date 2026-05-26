@@ -14,6 +14,7 @@ import events from './routes/events.js'
 import rateCard from './routes/rate-card.js'
 import quotes from './routes/quotes.js'
 import admin from './routes/admin.js'
+import stockAdmin from './routes/stock-admin.js'
 import { publicLanding } from './routes/public.js'
 import account from './routes/account.js'
 import questionSheet from './routes/question-sheet.js'
@@ -202,6 +203,9 @@ app.route('/suppliers', suppliers)
 app.route('/events', events)
 app.route('/rate-card', rateCard)
 app.route('/quotes', quotes)
+// ── Master Stock Admin — mounted under /admin/stock
+//     Must be registered BEFORE the broader /admin route
+app.route('/admin/stock', stockAdmin)
 app.route('/admin', admin)
 app.route('/question-sheet', questionSheet)
 app.route('/print-sheets', printSheets)

@@ -46,6 +46,7 @@ export function layout(title: string, body: string, user: AuthUser, activeNav?: 
         { href: '/field/admin/musicbus-damages',      icon: 'fa-clipboard-list',        label: 'Inspections',       key: 'musicbus-damages',  roles: ['founder','ops_director'] },
       ]
     },
+    { href: '/admin/stock',               icon: 'fa-warehouse',        label: 'Master Stock',   key: 'stock-admin',    roles: ['founder','ops_director'] },
     { href: '/admin',                     icon: 'fa-gear',             label: 'Admin',          key: 'admin',          roles: ['founder'] },
     { href: '/account',                   icon: 'fa-circle-user',      label: 'My Account',     key: 'account',        roles: ['founder','ops_director','finance_director','account_director','crew'] },
   ]
