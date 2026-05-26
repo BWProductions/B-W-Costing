@@ -170,6 +170,18 @@ admin.get('/', async (c) => {
       </div>
     </div>
 
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title"><i class="fas fa-screwdriver-wrench" style="color:var(--gold)"></i> &nbsp;Repair Contacts</span>
+        <a href="/admin/repair-contacts" class="btn btn-outline btn-sm">
+          <i class="fas fa-arrow-right"></i> Manage contacts
+        </a>
+      </div>
+      <div style="padding:14px 4px;color:var(--muted);font-size:13px;line-height:1.6">
+        People who get auto-suggested as WhatsApp recipients on Repair Notes (e.g. Takka). Add mechanics, panel beaters, electricians, etc. Mark one as primary per role.
+      </div>
+    </div>
+
     <div class="card card-glow">
       <div class="card-title" style="margin-bottom:12px"><i class="fas fa-shield-halved" style="color:var(--gold)"></i> &nbsp;Role Permissions</div>
       <div class="perm-grid">
@@ -775,6 +787,375 @@ admin.post('/backup/run', async (c) => {
   return c.redirect('/admin/backup?msg=' + encodeURIComponent(
     `Backup complete — ${totalRows} rows across ${Object.keys(result.table_counts || {}).length} tables, ${fmtBytes(result.bytes || 0)} stored at ${result.key}`
   ))
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REPAIR CONTACTS — manage "who gets the WhatsApp" when a repair note is sent
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Phone normalisation:
+//   '+27 78 204 5663' → '+27782045663'
+//   '078 204 5663'    → '+27782045663'  (SA local → international)
+//   '27782045663'     → '+27782045663'
+function normalisePhone(raw: string): string {
+  if (!raw) return ''
+  let p = raw.replace(/[^0-9+]/g, '')
+  if (p.startsWith('+')) {
+    // already international
+  } else if (p.startsWith('0')) {
+    p = '+27' + p.slice(1)
+  } else if (p.startsWith('27')) {
+    p = '+' + p
+  } else if (/^[0-9]+$/.test(p)) {
+    // bare digits without leading 0 or 27 → assume local without leading 0
+    p = '+27' + p
+  }
+  return p
+}
+
+const ROLE_LABELS_REPAIR: Record<string, string> = {
+  repair:       'General Repair',
+  mechanic:     'Mechanic',
+  panel_beater: 'Panel Beater',
+  electrician:  'Electrician',
+  other:        'Other',
+}
+
+admin.get('/repair-contacts', async (c) => {
+  const user = c.get('user')
+  const msg  = c.req.query('msg') ?? ''
+  const err  = c.req.query('err') ?? ''
+
+  const rows = await c.env.DB.prepare(
+    `SELECT id, name, role, phone, whatsapp_phone, notes, is_primary, active,
+            created_at, updated_at
+     FROM repair_contacts
+     ORDER BY active DESC, is_primary DESC, role, name`
+  ).all<any>()
+  const contacts = rows.results || []
+
+  // Count of primaries per role — useful for warning if 0 or >1
+  const primaryByRole: Record<string, number> = {}
+  for (const c of contacts) {
+    if (c.active && c.is_primary) {
+      primaryByRole[c.role] = (primaryByRole[c.role] || 0) + 1
+    }
+  }
+  const noPrimaryRepair = (primaryByRole['repair'] || 0) === 0
+  const multiPrimaryRepair = (primaryByRole['repair'] || 0) > 1
+
+  const tableRows = contacts.length === 0
+    ? `<tr><td colspan="6" style="padding:32px;text-align:center;color:#6b7589">No repair contacts yet — add one ↓</td></tr>`
+    : contacts.map((r: any) => {
+        const roleLabel = ROLE_LABELS_REPAIR[r.role] || r.role
+        return `
+        <tr class="${r.active ? '' : 'row-inactive'}">
+          <td style="padding:10px 12px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div style="font-weight:600;color:#fff">${esc(r.name)}</div>
+              ${r.is_primary && r.active ? '<span style="font-size:9px;padding:2px 7px;background:rgba(240,208,128,0.15);color:#F0D080;border:1px solid rgba(240,208,128,0.35);border-radius:4px;letter-spacing:.5px">PRIMARY</span>' : ''}
+              ${!r.active ? '<span style="font-size:9px;padding:2px 7px;background:rgba(156,163,175,0.10);color:#9ca3af;border-radius:4px">INACTIVE</span>' : ''}
+            </div>
+            ${r.notes ? `<div style="font-size:11px;color:#6b7589;margin-top:3px">${esc(r.notes)}</div>` : ''}
+          </td>
+          <td style="padding:10px 12px"><span class="badge badge-grey" style="font-size:11px">${esc(roleLabel)}</span></td>
+          <td style="padding:10px 12px;font-family:monospace;font-size:12px;color:#9ca3af">${esc(r.phone)}</td>
+          <td style="padding:10px 12px;font-family:monospace;font-size:12px;color:#9ca3af">
+            ${r.whatsapp_phone ? esc(r.whatsapp_phone) : '<span style="color:#6b7589;font-style:italic">(same as phone)</span>'}
+          </td>
+          <td style="padding:10px 12px;font-size:11px;color:#6b7589">${r.updated_at ? r.updated_at.split('T')[0] : '—'}</td>
+          <td style="padding:10px 12px">
+            <div class="action-group">
+              <button class="btn btn-outline btn-sm" onclick='openEditRC(${JSON.stringify(r).replace(/'/g, "&apos;")})'>
+                <i class="fas fa-pen"></i> Edit
+              </button>
+              ${!r.is_primary && r.active ? `
+              <form method="POST" action="/admin/repair-contacts/${r.id}/make-primary" style="display:inline">
+                <button type="submit" class="btn btn-sm" style="background:rgba(240,208,128,0.15);color:#F0D080;border:1px solid rgba(240,208,128,0.35)" title="Make primary for ${esc(roleLabel)}">
+                  <i class="fas fa-star"></i>
+                </button>
+              </form>` : ''}
+              ${r.active ? `
+              <form method="POST" action="/admin/repair-contacts/${r.id}/toggle" style="display:inline">
+                <button type="submit" class="btn btn-sm" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid #f59e0b" title="Deactivate">
+                  <i class="fas fa-pause"></i>
+                </button>
+              </form>` : `
+              <form method="POST" action="/admin/repair-contacts/${r.id}/toggle" style="display:inline">
+                <button type="submit" class="btn btn-success btn-sm" title="Reactivate">
+                  <i class="fas fa-play"></i>
+                </button>
+              </form>`}
+              <form method="POST" action="/admin/repair-contacts/${r.id}/delete" style="display:inline" onsubmit="return confirm('Permanently delete ${esc(r.name)}? This cannot be undone.')">
+                <button type="submit" class="btn btn-danger btn-sm" title="Delete">
+                  <i class="fas fa-trash"></i>
+                </button>
+              </form>
+            </div>
+          </td>
+        </tr>`
+      }).join('')
+
+  const roleOpts = Object.entries(ROLE_LABELS_REPAIR)
+    .map(([k, v]) => `<option value="${k}">${v}</option>`)
+    .join('')
+
+  const body = `
+    ${msg ? `<div class="alert alert-success"><i class="fas fa-check-circle"></i> ${esc(msg)}</div>` : ''}
+    ${err ? `<div class="alert alert-error"><i class="fas fa-exclamation-triangle"></i> ${esc(err)}</div>` : ''}
+    ${noPrimaryRepair ? `<div class="alert alert-error"><i class="fas fa-triangle-exclamation"></i> No primary repair contact set — repair-note WhatsApp button will not auto-fill. Mark one contact as primary.</div>` : ''}
+    ${multiPrimaryRepair ? `<div class="alert alert-error"><i class="fas fa-triangle-exclamation"></i> More than one primary repair contact — only the first will be auto-suggested. Clean this up.</div>` : ''}
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title"><i class="fas fa-screwdriver-wrench" style="color:var(--gold)"></i> &nbsp;Repair Contacts</span>
+        <button class="btn btn-gold btn-sm" onclick="openAddRC()">
+          <i class="fas fa-user-plus"></i> Add Contact
+        </button>
+      </div>
+      <div style="padding:8px 4px 14px;color:var(--muted);font-size:13px;line-height:1.6">
+        These are the people who get auto-suggested as WhatsApp recipients when a Repair Note is shared from the submissions viewer.
+        The <strong>primary</strong> contact for the <em>General Repair</em> role is what fills in the modal by default. Mark exactly one per role as primary.
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Role</th>
+              <th>Phone</th>
+              <th>WhatsApp</th>
+              <th>Updated</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ADD / EDIT MODAL -->
+    <div id="rc-modal-overlay" class="modal-overlay" onclick="closeRCModal(event)" style="display:none">
+      <div class="modal-box" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <span id="rc-modal-title" class="modal-title">Add Repair Contact</span>
+          <button class="modal-close" onclick="closeRCModalDirect()"><i class="fas fa-times"></i></button>
+        </div>
+        <form id="rc-form" method="POST" action="/admin/repair-contacts/create">
+          <input type="hidden" id="rc-id" name="contact_id" value="">
+
+          <div class="form-grid" style="gap:14px">
+            <div class="form-group">
+              <label>Full Name *</label>
+              <input type="text" id="rc-name" name="name" required placeholder="e.g. Takka" maxlength="80">
+            </div>
+            <div class="form-group">
+              <label>Role *</label>
+              <select id="rc-role" name="role" required>${roleOpts}</select>
+            </div>
+            <div class="form-group">
+              <label>Phone *</label>
+              <input type="tel" id="rc-phone" name="phone" required placeholder="+27 78 204 5663 or 078 204 5663" maxlength="30">
+              <div style="font-size:11px;color:var(--bw-muted);margin-top:4px">SA local (078…) auto-converts to international (+2778…)</div>
+            </div>
+            <div class="form-group">
+              <label>WhatsApp Number <span style="font-weight:400;color:var(--bw-muted)">(optional)</span></label>
+              <input type="tel" id="rc-whatsapp" name="whatsapp_phone" placeholder="Only if different from phone above" maxlength="30">
+            </div>
+            <div class="form-group" style="grid-column:span 2">
+              <label>Notes <span style="font-weight:400;color:var(--bw-muted)">(optional)</span></label>
+              <input type="text" id="rc-notes" name="notes" placeholder="e.g. Specialises in MAN trucks" maxlength="200">
+            </div>
+            <div class="form-group">
+              <label>
+                <input type="checkbox" id="rc-primary" name="is_primary" value="1" style="margin-right:6px">
+                Mark as primary for this role
+              </label>
+              <div style="font-size:11px;color:var(--bw-muted);margin-top:4px">Only one primary per role. Marking this will unmark any existing primary.</div>
+            </div>
+            <div class="form-group" id="rc-active-group" style="display:none">
+              <label>Status</label>
+              <select id="rc-active" name="active">
+                <option value="1">Active</option>
+                <option value="0">Inactive</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" class="btn btn-outline" onclick="closeRCModalDirect()">Cancel</button>
+            <button type="submit" class="btn btn-gold">
+              <i class="fas fa-save"></i> Save Contact
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      function openAddRC() {
+        document.getElementById('rc-modal-title').textContent = 'Add Repair Contact'
+        document.getElementById('rc-form').action = '/admin/repair-contacts/create'
+        document.getElementById('rc-id').value = ''
+        document.getElementById('rc-name').value = ''
+        document.getElementById('rc-role').value = 'repair'
+        document.getElementById('rc-phone').value = ''
+        document.getElementById('rc-whatsapp').value = ''
+        document.getElementById('rc-notes').value = ''
+        document.getElementById('rc-primary').checked = false
+        document.getElementById('rc-active-group').style.display = 'none'
+        document.getElementById('rc-modal-overlay').style.display = 'flex'
+      }
+      function openEditRC(r) {
+        document.getElementById('rc-modal-title').textContent = 'Edit ' + r.name
+        document.getElementById('rc-form').action = '/admin/repair-contacts/' + r.id + '/edit'
+        document.getElementById('rc-id').value = r.id
+        document.getElementById('rc-name').value = r.name || ''
+        document.getElementById('rc-role').value = r.role || 'repair'
+        document.getElementById('rc-phone').value = r.phone || ''
+        document.getElementById('rc-whatsapp').value = r.whatsapp_phone || ''
+        document.getElementById('rc-notes').value = r.notes || ''
+        document.getElementById('rc-primary').checked = !!r.is_primary
+        document.getElementById('rc-active-group').style.display = 'block'
+        document.getElementById('rc-active').value = r.active ? '1' : '0'
+        document.getElementById('rc-modal-overlay').style.display = 'flex'
+      }
+      function closeRCModal(e) { if (e.target.id === 'rc-modal-overlay') closeRCModalDirect() }
+      function closeRCModalDirect() { document.getElementById('rc-modal-overlay').style.display = 'none' }
+    </script>
+  `
+
+  return c.html(layout('Repair Contacts', body, user, 'admin'))
+})
+
+// ── CREATE ─────────────────────────────────────────────────────────────────
+admin.post('/repair-contacts/create', async (c) => {
+  const f = await c.req.parseBody()
+  const name           = String(f.name || '').trim().slice(0, 80)
+  const role           = String(f.role || 'repair').trim()
+  const phoneRaw       = String(f.phone || '').trim()
+  const waRaw          = String(f.whatsapp_phone || '').trim()
+  const notes          = String(f.notes || '').trim().slice(0, 200)
+  const isPrimary      = f.is_primary ? 1 : 0
+
+  if (!name)     return c.redirect('/admin/repair-contacts?err=' + encodeURIComponent('Name is required'))
+  if (!phoneRaw) return c.redirect('/admin/repair-contacts?err=' + encodeURIComponent('Phone is required'))
+  if (!Object.keys(ROLE_LABELS_REPAIR).includes(role)) {
+    return c.redirect('/admin/repair-contacts?err=' + encodeURIComponent('Invalid role'))
+  }
+
+  const phone = normalisePhone(phoneRaw)
+  const waPhone = waRaw ? normalisePhone(waRaw) : null
+  if (!/^\+[0-9]{10,15}$/.test(phone)) {
+    return c.redirect('/admin/repair-contacts?err=' + encodeURIComponent('Phone format invalid: ' + phoneRaw))
+  }
+  if (waPhone && !/^\+[0-9]{10,15}$/.test(waPhone)) {
+    return c.redirect('/admin/repair-contacts?err=' + encodeURIComponent('WhatsApp format invalid: ' + waRaw))
+  }
+
+  // If marking primary, demote existing primaries for that role first
+  if (isPrimary) {
+    await c.env.DB.prepare(
+      `UPDATE repair_contacts SET is_primary = 0, updated_at = CURRENT_TIMESTAMP
+       WHERE role = ? AND is_primary = 1`
+    ).bind(role).run()
+  }
+
+  await c.env.DB.prepare(
+    `INSERT INTO repair_contacts (name, role, phone, whatsapp_phone, notes, is_primary, active)
+     VALUES (?, ?, ?, ?, ?, ?, 1)`
+  ).bind(name, role, phone, waPhone, notes || null, isPrimary).run()
+
+  return c.redirect('/admin/repair-contacts?msg=' + encodeURIComponent(`Added ${name}`))
+})
+
+// ── EDIT ───────────────────────────────────────────────────────────────────
+admin.post('/repair-contacts/:id/edit', async (c) => {
+  const id = parseInt(c.req.param('id'))
+  if (!id) return c.redirect('/admin/repair-contacts?err=bad+id')
+  const f = await c.req.parseBody()
+  const name           = String(f.name || '').trim().slice(0, 80)
+  const role           = String(f.role || 'repair').trim()
+  const phoneRaw       = String(f.phone || '').trim()
+  const waRaw          = String(f.whatsapp_phone || '').trim()
+  const notes          = String(f.notes || '').trim().slice(0, 200)
+  const isPrimary      = f.is_primary ? 1 : 0
+  const active         = String(f.active || '1') === '1' ? 1 : 0
+
+  if (!name)     return c.redirect('/admin/repair-contacts?err=' + encodeURIComponent('Name is required'))
+  if (!phoneRaw) return c.redirect('/admin/repair-contacts?err=' + encodeURIComponent('Phone is required'))
+  if (!Object.keys(ROLE_LABELS_REPAIR).includes(role)) {
+    return c.redirect('/admin/repair-contacts?err=' + encodeURIComponent('Invalid role'))
+  }
+
+  const phone = normalisePhone(phoneRaw)
+  const waPhone = waRaw ? normalisePhone(waRaw) : null
+  if (!/^\+[0-9]{10,15}$/.test(phone)) {
+    return c.redirect('/admin/repair-contacts?err=' + encodeURIComponent('Phone format invalid: ' + phoneRaw))
+  }
+  if (waPhone && !/^\+[0-9]{10,15}$/.test(waPhone)) {
+    return c.redirect('/admin/repair-contacts?err=' + encodeURIComponent('WhatsApp format invalid: ' + waRaw))
+  }
+
+  // If marking primary, demote others
+  if (isPrimary && active) {
+    await c.env.DB.prepare(
+      `UPDATE repair_contacts SET is_primary = 0, updated_at = CURRENT_TIMESTAMP
+       WHERE role = ? AND is_primary = 1 AND id != ?`
+    ).bind(role, id).run()
+  }
+
+  await c.env.DB.prepare(
+    `UPDATE repair_contacts
+     SET name=?, role=?, phone=?, whatsapp_phone=?, notes=?, is_primary=?, active=?, updated_at=CURRENT_TIMESTAMP
+     WHERE id=?`
+  ).bind(name, role, phone, waPhone, notes || null, isPrimary, active, id).run()
+
+  return c.redirect('/admin/repair-contacts?msg=' + encodeURIComponent(`Updated ${name}`))
+})
+
+// ── MAKE PRIMARY ───────────────────────────────────────────────────────────
+admin.post('/repair-contacts/:id/make-primary', async (c) => {
+  const id = parseInt(c.req.param('id'))
+  if (!id) return c.redirect('/admin/repair-contacts?err=bad+id')
+  const row = await c.env.DB.prepare(`SELECT role, name, active FROM repair_contacts WHERE id=?`).bind(id).first<any>()
+  if (!row) return c.redirect('/admin/repair-contacts?err=not+found')
+  if (!row.active) return c.redirect('/admin/repair-contacts?err=' + encodeURIComponent('Cannot make an inactive contact primary'))
+  await c.env.DB.prepare(
+    `UPDATE repair_contacts SET is_primary = 0, updated_at = CURRENT_TIMESTAMP
+     WHERE role = ? AND is_primary = 1 AND id != ?`
+  ).bind(row.role, id).run()
+  await c.env.DB.prepare(
+    `UPDATE repair_contacts SET is_primary = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+  ).bind(id).run()
+  return c.redirect('/admin/repair-contacts?msg=' + encodeURIComponent(`${row.name} is now the primary ${ROLE_LABELS_REPAIR[row.role] || row.role}`))
+})
+
+// ── TOGGLE ACTIVE ──────────────────────────────────────────────────────────
+admin.post('/repair-contacts/:id/toggle', async (c) => {
+  const id = parseInt(c.req.param('id'))
+  if (!id) return c.redirect('/admin/repair-contacts?err=bad+id')
+  const row = await c.env.DB.prepare(`SELECT name, active FROM repair_contacts WHERE id=?`).bind(id).first<any>()
+  if (!row) return c.redirect('/admin/repair-contacts?err=not+found')
+  const newActive = row.active ? 0 : 1
+  // If deactivating, also clear is_primary so we don't end up with an inactive primary
+  await c.env.DB.prepare(
+    `UPDATE repair_contacts
+     SET active = ?,
+         is_primary = CASE WHEN ? = 0 THEN 0 ELSE is_primary END,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`
+  ).bind(newActive, newActive, id).run()
+  return c.redirect('/admin/repair-contacts?msg=' + encodeURIComponent(`${row.name} ${newActive ? 'reactivated' : 'deactivated'}`))
+})
+
+// ── DELETE ─────────────────────────────────────────────────────────────────
+admin.post('/repair-contacts/:id/delete', async (c) => {
+  const id = parseInt(c.req.param('id'))
+  if (!id) return c.redirect('/admin/repair-contacts?err=bad+id')
+  const row = await c.env.DB.prepare(`SELECT name FROM repair_contacts WHERE id=?`).bind(id).first<any>()
+  await c.env.DB.prepare(`DELETE FROM repair_contacts WHERE id=?`).bind(id).run()
+  return c.redirect('/admin/repair-contacts?msg=' + encodeURIComponent(`Deleted ${row?.name || 'contact'}`))
 })
 
 export default admin
