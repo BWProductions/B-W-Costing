@@ -4,15 +4,19 @@
 // CRUD over stock_items (seeded from BW_MASTER_STOCK_v1.xlsx in migration 0028).
 //
 // Routes:
-//   GET  /admin/stock                 → list (filter by brand, custody, q)
-//   GET  /admin/stock/summary         → per-brand totals + custody breakdown
-//   GET  /admin/stock/new             → add-new form
-//   POST /admin/stock/new             → insert
-//   GET  /admin/stock/:id             → view/edit single item
-//   POST /admin/stock/:id             → update
-//   POST /admin/stock/:id/delete      → soft-delete (active=0)
+//   GET  /admin/stock                    → list (filter by brand, custody, q)
+//   GET  /admin/stock/summary            → per-brand totals + custody breakdown
+//   GET  /admin/stock/export.csv         → CSV export honoring same filters
+//   GET  /admin/stock/movements          → global audit log
+//   GET  /admin/stock/new                → add-new form
+//   POST /admin/stock/new                → insert
+//   POST /admin/stock/bulk               → bulk update (custody/status/qty/delete)
+//   GET  /admin/stock/:id                → view/edit single item
+//   POST /admin/stock/:id                → update
+//   GET  /admin/stock/:id/history        → per-item movement history
+//   POST /admin/stock/:id/delete         → soft-delete (active=0)
 //
-// All routes require auth + founder role (this is data-of-record).
+// All routes require auth + founder/ops_director role.
 
 import { Hono } from 'hono'
 import { requireAuth } from '../middleware/auth.js'
@@ -31,14 +35,36 @@ const CUSTODY_LABELS: Record<string, string> = {
   offsite:                  'Off-site',
 }
 const CUSTODY_COLORS: Record<string, string> = {
-  owned:                    '#10b981',  // green
-  third_party_in_warehouse: '#f59e0b',  // amber
-  offsite:                  '#8b5cf6',  // purple
+  owned:                    '#10b981',
+  third_party_in_warehouse: '#f59e0b',
+  offsite:                  '#8b5cf6',
 }
 const CUSTODY_ICONS: Record<string, string> = {
   owned:                    'fa-warehouse',
   third_party_in_warehouse: 'fa-handshake',
   offsite:                  'fa-truck-moving',
+}
+
+const ACTION_LABELS: Record<string, string> = {
+  create:      'Created',
+  update:      'Updated',
+  delete:      'Deleted',
+  restore:     'Restored',
+  bulk_update: 'Bulk update',
+}
+const ACTION_COLORS: Record<string, string> = {
+  create:      '#10b981',
+  update:      '#3b82f6',
+  delete:      '#ef4444',
+  restore:     '#8b5cf6',
+  bulk_update: '#f59e0b',
+}
+const ACTION_ICONS: Record<string, string> = {
+  create:      'fa-plus-circle',
+  update:      'fa-pen',
+  delete:      'fa-trash',
+  restore:     'fa-rotate-left',
+  bulk_update: 'fa-layer-group',
 }
 
 function esc(s: any): string {
@@ -60,6 +86,15 @@ function badge(custody: string): string {
   </span>`
 }
 
+function actionBadge(action: string): string {
+  const color = ACTION_COLORS[action] || '#6b7280'
+  const label = ACTION_LABELS[action] || action
+  const icon  = ACTION_ICONS[action] || 'fa-circle'
+  return `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 8px;border-radius:10px;background:${color}22;color:${color};font-weight:600">
+    <i class="fas ${icon}" style="font-size:10px"></i>${esc(label)}
+  </span>`
+}
+
 function flashBanner(c: any): string {
   const msg = c.req.query('msg')
   const err = c.req.query('err')
@@ -68,15 +103,82 @@ function flashBanner(c: any): string {
   return ''
 }
 
+// CSV-safe quote: wrap in "..." and double any internal quotes
+function csvCell(v: any): string {
+  if (v === null || v === undefined) return ''
+  const s = String(v)
+  if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
+    return '"' + s.replace(/"/g, '""') + '"'
+  }
+  return s
+}
+
+// Log one or more changes against a stock item. Cheap fire-and-forget pattern.
+async function logMovement(
+  c: any,
+  stockItemId: number,
+  action: string,
+  field: string | null,
+  oldValue: any,
+  newValue: any,
+  reason: string | null = null,
+): Promise<void> {
+  const user: AuthUser | undefined = c.get('user')
+  let delta: number | null = null
+  if (field === 'qty_on_hand') {
+    const o = parseInt(String(oldValue ?? '0'), 10)
+    const n = parseInt(String(newValue ?? '0'), 10)
+    if (Number.isFinite(o) && Number.isFinite(n)) delta = n - o
+  }
+  await c.env.DB.prepare(
+    `INSERT INTO stock_movements
+     (stock_item_id, action, field_changed, old_value, new_value, delta, reason, user_id, user_name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    stockItemId,
+    action,
+    field,
+    oldValue === null || oldValue === undefined ? null : String(oldValue),
+    newValue === null || newValue === undefined ? null : String(newValue),
+    delta,
+    reason,
+    user?.id ?? null,
+    user?.name ?? null,
+  ).run()
+}
+
+// Compare two row snapshots and log every field that changed.
+async function logDiffs(
+  c: any,
+  stockItemId: number,
+  before: Record<string, any>,
+  after: Record<string, any>,
+  fields: string[],
+  reason: string | null = null,
+): Promise<number> {
+  let changed = 0
+  for (const f of fields) {
+    const b = before[f]
+    const a = after[f]
+    // Normalize for comparison (treat '' and null the same)
+    const bs = (b === null || b === undefined) ? '' : String(b)
+    const as = (a === null || a === undefined) ? '' : String(a)
+    if (bs !== as) {
+      await logMovement(c, stockItemId, 'update', f, b, a, reason)
+      changed++
+    }
+  }
+  return changed
+}
+
 // ── GET /admin/stock — list with filters ──────────────────────────────────
 stockAdmin.get('/', async (c) => {
   const user    = c.get('user')
   const brand   = c.req.query('brand')    || ''
   const custody = c.req.query('custody')  || ''
   const q       = c.req.query('q')        || ''
-  const sort    = c.req.query('sort')     || 'brand'   // brand | description | qty | custody
+  const sort    = c.req.query('sort')     || 'brand'
 
-  // Build WHERE clauses
   const conds: string[] = ['active = 1']
   const params: any[] = []
   if (brand)   { conds.push('brand = ?');                                  params.push(brand) }
@@ -100,13 +202,11 @@ stockAdmin.get('/', async (c) => {
      LIMIT 2000`
   ).bind(...params).all<any>()
 
-  // For brand filter dropdown
   const brandsRes = await c.env.DB.prepare(
     `SELECT DISTINCT brand FROM stock_items WHERE active=1 ORDER BY brand`
   ).all<any>()
   const brands = brandsRes.results.map((r: any) => r.brand)
 
-  // Top-line counters
   const stats = await c.env.DB.prepare(
     `SELECT custody_type, COUNT(*) as items, COALESCE(SUM(qty_on_hand),0) as units
      FROM stock_items WHERE active=1 GROUP BY custody_type`
@@ -116,8 +216,17 @@ stockAdmin.get('/', async (c) => {
 
   const brandOptions = brands.map(b => `<option value="${esc(b)}" ${b === brand ? 'selected' : ''}>${esc(b)}</option>`).join('')
 
+  // Preserve current filters in CSV export URL
+  const qs = new URLSearchParams()
+  if (brand)   qs.set('brand', brand)
+  if (custody) qs.set('custody', custody)
+  if (q)       qs.set('q', q)
+  if (sort)    qs.set('sort', sort)
+  const csvHref = `/admin/stock/export.csv${qs.toString() ? '?' + qs.toString() : ''}`
+
   const tableRows = rows.results.map((r: any) => `
-    <tr>
+    <tr data-id="${r.id}">
+      <td style="width:32px"><input type="checkbox" class="row-check" value="${r.id}" /></td>
       <td>
         <a href="/admin/stock/${r.id}" style="color:var(--bw-gold);text-decoration:none;font-weight:600">${esc(r.brand)}</a>
       </td>
@@ -141,9 +250,11 @@ stockAdmin.get('/', async (c) => {
         <h1 style="margin:0"><i class="fas fa-boxes-stacked"></i> Master Stock</h1>
         <p class="text-muted" style="margin:4px 0 0">All inventory across all 12 brands. Edit an item to change quantity, location, or custody.</p>
       </div>
-      <div style="display:flex;gap:8px">
-        <a href="/admin/stock/summary" class="btn btn-outline"><i class="fas fa-chart-pie"></i> Summary</a>
-        <a href="/admin/stock/new"     class="btn btn-primary"><i class="fas fa-plus"></i> Add Item</a>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <a href="/admin/stock/movements" class="btn btn-outline"><i class="fas fa-clock-rotate-left"></i> Movements</a>
+        <a href="/admin/stock/summary"   class="btn btn-outline"><i class="fas fa-chart-pie"></i> Summary</a>
+        <a href="${csvHref}"             class="btn btn-outline"><i class="fas fa-file-csv"></i> Export CSV</a>
+        <a href="/admin/stock/new"       class="btn btn-primary"><i class="fas fa-plus"></i> Add Item</a>
       </div>
     </div>
 
@@ -202,31 +313,199 @@ stockAdmin.get('/', async (c) => {
       </div>
     </form>
 
-    <div class="card" style="padding:0">
-      <div style="padding:8px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)">
-        <div style="font-size:13px;color:var(--text-muted)">
-          Showing <strong style="color:var(--text)">${totals.items.toLocaleString()}</strong> items
-          (<strong style="color:var(--text)">${totals.units.toLocaleString()}</strong> units)
-          ${rows.results.length >= 2000 ? ' — capped at 2000 — refine your filter' : ''}
+    <!-- Bulk action form wraps the table -->
+    <form id="bulk-form" method="post" action="/admin/stock/bulk">
+      <div class="card" style="padding:0">
+        <div style="padding:8px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:8px">
+          <div style="font-size:13px;color:var(--text-muted)">
+            Showing <strong style="color:var(--text)">${totals.items.toLocaleString()}</strong> items
+            (<strong style="color:var(--text)">${totals.units.toLocaleString()}</strong> units)
+            ${rows.results.length >= 2000 ? ' — capped at 2000 — refine your filter' : ''}
+            <span id="selected-count" style="margin-left:12px;color:var(--bw-gold);display:none">
+              · <strong id="selected-n">0</strong> selected
+            </span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th style="width:32px"><input type="checkbox" id="check-all" title="Select all" /></th>
+              <th>Brand</th>
+              <th>Description</th>
+              <th style="text-align:right">Qty</th>
+              <th>Custody</th>
+              <th class="hide-mobile">Location</th>
+              <th class="hide-mobile">Notes</th>
+              <th></th>
+            </tr></thead>
+            <tbody>${tableRows || '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">No items match your filter.</td></tr>'}</tbody>
+          </table>
         </div>
       </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th>Brand</th>
-            <th>Description</th>
-            <th style="text-align:right">Qty</th>
-            <th>Custody</th>
-            <th class="hide-mobile">Location</th>
-            <th class="hide-mobile">Notes</th>
-            <th></th>
-          </tr></thead>
-          <tbody>${tableRows || '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">No items match your filter.</td></tr>'}</tbody>
-        </table>
+
+      <!-- Floating bulk action bar -->
+      <div id="bulk-bar" style="position:sticky;bottom:0;margin-top:12px;background:var(--bg);border:1px solid var(--bw-gold);border-radius:8px;padding:12px 16px;display:none;box-shadow:0 -4px 12px rgba(0,0,0,0.3)">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <strong style="color:var(--bw-gold)"><i class="fas fa-layer-group"></i> Bulk action on <span id="bulk-n">0</span> items:</strong>
+
+          <select name="bulk_action" id="bulk-action" required style="min-width:200px">
+            <option value="">— choose action —</option>
+            <option value="set_custody">Set custody type to…</option>
+            <option value="set_status">Set status to…</option>
+            <option value="adjust_qty">Adjust quantity by (±)</option>
+            <option value="set_qty">Set quantity to…</option>
+            <option value="delete">Soft-delete (hide)</option>
+          </select>
+
+          <select name="bulk_custody" id="bulk-custody" style="display:none">
+            <option value="owned">Owned</option>
+            <option value="third_party_in_warehouse">Third-party (in our warehouse)</option>
+            <option value="offsite">Off-site</option>
+          </select>
+
+          <select name="bulk_status" id="bulk-status" style="display:none">
+            <option value="active">Active</option>
+            <option value="review">Review</option>
+            <option value="retired">Retired</option>
+          </select>
+
+          <input type="number" name="bulk_qty_delta" id="bulk-qty-delta" placeholder="e.g. -5 or 10" style="display:none;width:140px" />
+          <input type="number" name="bulk_qty_set"   id="bulk-qty-set"   placeholder="new qty"      style="display:none;width:140px" min="0" />
+
+          <input type="text" name="bulk_reason" placeholder="Reason (optional)" style="flex:1;min-width:160px" />
+
+          <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Apply</button>
+          <button type="button" class="btn btn-outline" onclick="clearSelection()">Cancel</button>
+        </div>
+        <input type="hidden" name="ids" id="bulk-ids" />
+        <input type="hidden" name="return_qs" value="${esc(qs.toString())}" />
       </div>
-    </div>
+    </form>
+
+    <script>
+      (function() {
+        const checkAll  = document.getElementById('check-all')
+        const rowChecks = () => document.querySelectorAll('.row-check')
+        const bulkBar   = document.getElementById('bulk-bar')
+        const bulkN     = document.getElementById('bulk-n')
+        const selCount  = document.getElementById('selected-count')
+        const selN      = document.getElementById('selected-n')
+        const bulkIds   = document.getElementById('bulk-ids')
+        const action    = document.getElementById('bulk-action')
+        const inputs = {
+          set_custody: 'bulk-custody',
+          set_status:  'bulk-status',
+          adjust_qty:  'bulk-qty-delta',
+          set_qty:     'bulk-qty-set',
+        }
+
+        function updateBulk() {
+          const checked = Array.from(rowChecks()).filter(c => c.checked)
+          const ids = checked.map(c => c.value)
+          bulkIds.value = ids.join(',')
+          bulkN.textContent = ids.length
+          selN.textContent  = ids.length
+          if (ids.length) {
+            bulkBar.style.display  = 'block'
+            selCount.style.display = 'inline'
+          } else {
+            bulkBar.style.display  = 'none'
+            selCount.style.display = 'none'
+          }
+        }
+
+        function clearSelection() {
+          rowChecks().forEach(c => c.checked = false)
+          checkAll.checked = false
+          updateBulk()
+        }
+        window.clearSelection = clearSelection
+
+        checkAll && checkAll.addEventListener('change', () => {
+          rowChecks().forEach(c => c.checked = checkAll.checked)
+          updateBulk()
+        })
+        document.addEventListener('change', (e) => {
+          if (e.target && e.target.classList && e.target.classList.contains('row-check')) updateBulk()
+        })
+
+        action.addEventListener('change', () => {
+          // Hide all conditional inputs first
+          Object.values(inputs).forEach(id => {
+            const el = document.getElementById(id)
+            if (el) { el.style.display = 'none'; el.required = false }
+          })
+          const targetId = inputs[action.value]
+          if (targetId) {
+            const el = document.getElementById(targetId)
+            if (el) { el.style.display = 'inline-block'; el.required = true }
+          }
+        })
+
+        document.getElementById('bulk-form').addEventListener('submit', (e) => {
+          if (!bulkIds.value) { e.preventDefault(); alert('No items selected'); return }
+          if (!action.value)  { e.preventDefault(); alert('Choose an action'); return }
+          if (action.value === 'delete') {
+            if (!confirm('Soft-delete ' + bulkN.textContent + ' items? They will be hidden but recoverable from the audit log.')) {
+              e.preventDefault()
+            }
+          }
+        })
+      })()
+    </script>
   `
   return c.html(layout('Master Stock', body, user, 'stock-admin'))
+})
+
+// ── GET /admin/stock/export.csv — download filtered list ──────────────────
+// Registered BEFORE /:id so it doesn't get caught as an id param.
+stockAdmin.get('/export.csv', async (c) => {
+  const brand   = c.req.query('brand')    || ''
+  const custody = c.req.query('custody')  || ''
+  const q       = c.req.query('q')        || ''
+  const sort    = c.req.query('sort')     || 'brand'
+
+  const conds: string[] = ['active = 1']
+  const params: any[] = []
+  if (brand)   { conds.push('brand = ?');                                  params.push(brand) }
+  if (custody) { conds.push('custody_type = ?');                           params.push(custody) }
+  if (q)       { conds.push('(brand LIKE ? OR description LIKE ? OR notes LIKE ?)')
+                 const like = `%${q}%`; params.push(like, like, like) }
+
+  const orderBy = ({
+    brand:        'brand, description',
+    description:  'description, brand',
+    qty:          'qty_on_hand DESC, brand',
+    custody:      'custody_type, brand, description',
+  } as Record<string,string>)[sort] || 'brand, description'
+
+  const rows = await c.env.DB.prepare(
+    `SELECT id, brand, description, qty_on_hand, custody_type, location, notes,
+            source_sheet, status, created_at, updated_at
+     FROM stock_items
+     WHERE ${conds.join(' AND ')}
+     ORDER BY ${orderBy}`
+  ).bind(...params).all<any>()
+
+  const headers = ['id','brand','description','qty_on_hand','custody_type','location','notes','source_sheet','status','created_at','updated_at']
+  const lines: string[] = [headers.join(',')]
+  for (const r of rows.results) {
+    lines.push(headers.map(h => csvCell((r as any)[h])).join(','))
+  }
+  // BOM for Excel UTF-8 compatibility
+  const csv = '\uFEFF' + lines.join('\r\n') + '\r\n'
+
+  const ts = new Date().toISOString().slice(0,10)
+  const tag = [brand, custody, q].filter(Boolean).join('_').replace(/[^a-z0-9_-]/gi,'_').slice(0,40)
+  const filename = `bw_stock_${ts}${tag ? '_' + tag : ''}.csv`
+
+  return new Response(csv, {
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Cache-Control': 'no-store',
+    },
+  })
 })
 
 // ── GET /admin/stock/summary — per-brand + custody totals ─────────────────
@@ -240,7 +519,6 @@ stockAdmin.get('/summary', async (c) => {
      ORDER BY brand, custody_type`
   ).all<any>()
 
-  // Pivot
   const brands: Record<string, Record<string,{items:number,units:number}>> = {}
   for (const r of byBrand.results) {
     if (!brands[r.brand]) brands[r.brand] = {}
@@ -285,7 +563,6 @@ stockAdmin.get('/summary', async (c) => {
       <a href="/admin/stock" class="btn btn-outline"><i class="fas fa-arrow-left"></i> Back to items</a>
     </div>
 
-    <!-- Grand totals card -->
     <div class="card" style="padding:16px 20px;margin-bottom:16px;background:linear-gradient(135deg, var(--bw-gold)11, transparent)">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px">
         <div>
@@ -341,6 +618,196 @@ stockAdmin.get('/summary', async (c) => {
     </p>
   `
   return c.html(layout('Stock Summary', body, user, 'stock-admin'))
+})
+
+// ── GET /admin/stock/movements — global audit log ─────────────────────────
+stockAdmin.get('/movements', async (c) => {
+  const user   = c.get('user')
+  const action = c.req.query('action') || ''
+  const itemQ  = c.req.query('item')   || ''
+  const userQ  = c.req.query('user')   || ''
+
+  const conds: string[] = ['1=1']
+  const params: any[] = []
+  if (action) { conds.push('m.action = ?');     params.push(action) }
+  if (itemQ)  { conds.push('(s.brand LIKE ? OR s.description LIKE ?)'); params.push(`%${itemQ}%`, `%${itemQ}%`) }
+  if (userQ)  { conds.push('m.user_name LIKE ?'); params.push(`%${userQ}%`) }
+
+  const rows = await c.env.DB.prepare(
+    `SELECT m.id, m.stock_item_id, m.action, m.field_changed,
+            m.old_value, m.new_value, m.delta, m.reason,
+            m.user_name, m.created_at,
+            s.brand, s.description
+     FROM stock_movements m
+     LEFT JOIN stock_items s ON s.id = m.stock_item_id
+     WHERE ${conds.join(' AND ')}
+     ORDER BY m.created_at DESC, m.id DESC
+     LIMIT 500`
+  ).bind(...params).all<any>()
+
+  const tableRows = rows.results.map((r: any) => {
+    const itemLink = r.brand
+      ? `<a href="/admin/stock/${r.stock_item_id}" style="color:var(--bw-gold);text-decoration:none">${esc(r.brand)} — ${esc(r.description)}</a>`
+      : `<span class="muted">#${r.stock_item_id} (deleted)</span>`
+    const delta = (r.delta !== null && r.delta !== undefined)
+      ? `<strong style="color:${r.delta >= 0 ? '#10b981' : '#ef4444'}">${r.delta >= 0 ? '+' : ''}${r.delta}</strong>`
+      : ''
+    const change = r.field_changed
+      ? `<code style="font-size:11px;background:var(--surface);padding:1px 6px;border-radius:4px">${esc(r.field_changed)}</code>
+         <span class="muted" style="font-size:11px">${esc(String(r.old_value ?? '').slice(0,30))}</span>
+         <span style="color:var(--text-muted)">→</span>
+         <span style="font-size:11px">${esc(String(r.new_value ?? '').slice(0,30))}</span>
+         ${delta ? ' ' + delta : ''}`
+      : ''
+    return `
+      <tr>
+        <td class="muted" style="font-size:11px;white-space:nowrap">${esc(String(r.created_at).replace('T',' ').slice(0,16))}</td>
+        <td>${actionBadge(r.action)}</td>
+        <td>${itemLink}</td>
+        <td>${change}</td>
+        <td class="muted" style="font-size:11px">${esc(r.reason) || ''}</td>
+        <td class="muted" style="font-size:11px;white-space:nowrap">${esc(r.user_name) || '—'}</td>
+        <td>${r.stock_item_id ? `<a href="/admin/stock/${r.stock_item_id}/history" class="btn btn-outline btn-sm" title="Item history">↳</a>` : ''}</td>
+      </tr>`
+  }).join('')
+
+  const body = `
+    <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;flex-wrap:wrap">
+      <div>
+        <h1 style="margin:0"><i class="fas fa-clock-rotate-left"></i> Stock Movements</h1>
+        <p class="text-muted" style="margin:4px 0 0">Audit trail of every change. Most recent 500 entries.</p>
+      </div>
+      <a href="/admin/stock" class="btn btn-outline"><i class="fas fa-arrow-left"></i> Back to stock</a>
+    </div>
+
+    <form method="get" action="/admin/stock/movements" class="card" style="padding:12px;margin-bottom:16px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;align-items:end">
+        <div>
+          <label style="font-size:11px;color:var(--text-muted);display:block">Item search</label>
+          <input type="text" name="item" value="${esc(itemQ)}" placeholder="brand or description" />
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--text-muted);display:block">Action</label>
+          <select name="action">
+            <option value="">All actions</option>
+            ${Object.entries(ACTION_LABELS).map(([k,v]) =>
+              `<option value="${k}" ${action===k?'selected':''}>${esc(v)}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--text-muted);display:block">User</label>
+          <input type="text" name="user" value="${esc(userQ)}" placeholder="user name" />
+        </div>
+        <div style="display:flex;gap:6px">
+          <button type="submit" class="btn btn-primary"><i class="fas fa-filter"></i> Filter</button>
+          <a href="/admin/stock/movements" class="btn btn-outline" title="Clear"><i class="fas fa-times"></i></a>
+        </div>
+      </div>
+    </form>
+
+    <div class="card" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>When</th>
+            <th>Action</th>
+            <th>Item</th>
+            <th>Change</th>
+            <th>Reason</th>
+            <th>User</th>
+            <th></th>
+          </tr></thead>
+          <tbody>${tableRows || '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">No movements yet.</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+  `
+  return c.html(layout('Stock Movements', body, user, 'stock-admin'))
+})
+
+// ── POST /admin/stock/bulk — bulk action on selected ids ──────────────────
+// Registered BEFORE /:id paths.
+stockAdmin.post('/bulk', async (c) => {
+  const form = await c.req.parseBody()
+  const idsRaw   = String(form.ids || '')
+  const action   = String(form.bulk_action || '')
+  const reason   = String(form.bulk_reason || '').trim() || null
+  const returnQs = String(form.return_qs || '')
+  const returnUrl = '/admin/stock' + (returnQs ? '?' + returnQs : '')
+
+  const ids = idsRaw.split(',').map(s => parseInt(s.trim(), 10)).filter(n => Number.isFinite(n) && n > 0)
+  if (!ids.length) return c.redirect(returnUrl + (returnUrl.includes('?') ? '&' : '?') + 'err=' + encodeURIComponent('No items selected'))
+
+  const placeholders = ids.map(() => '?').join(',')
+  const items = await c.env.DB.prepare(
+    `SELECT id, brand, description, qty_on_hand, custody_type, status, active
+     FROM stock_items WHERE id IN (${placeholders})`
+  ).bind(...ids).all<any>()
+
+  if (!items.results.length) {
+    return c.redirect(returnUrl + (returnUrl.includes('?') ? '&' : '?') + 'err=' + encodeURIComponent('No matching items'))
+  }
+
+  let changed = 0
+  const sep = (s: string) => s.includes('?') ? '&' : '?'
+
+  if (action === 'set_custody') {
+    const v = String(form.bulk_custody || '')
+    if (!['owned','third_party_in_warehouse','offsite'].includes(v)) {
+      return c.redirect(returnUrl + sep(returnUrl) + 'err=' + encodeURIComponent('Invalid custody type'))
+    }
+    for (const it of items.results) {
+      if (it.custody_type === v) continue
+      await c.env.DB.prepare(`UPDATE stock_items SET custody_type=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(v, it.id).run()
+      await logMovement(c, it.id, 'bulk_update', 'custody_type', it.custody_type, v, reason)
+      changed++
+    }
+  } else if (action === 'set_status') {
+    const v = String(form.bulk_status || '')
+    if (!['active','review','retired'].includes(v)) {
+      return c.redirect(returnUrl + sep(returnUrl) + 'err=' + encodeURIComponent('Invalid status'))
+    }
+    for (const it of items.results) {
+      if (it.status === v) continue
+      await c.env.DB.prepare(`UPDATE stock_items SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(v, it.id).run()
+      await logMovement(c, it.id, 'bulk_update', 'status', it.status, v, reason)
+      changed++
+    }
+  } else if (action === 'adjust_qty') {
+    const delta = parseInt(String(form.bulk_qty_delta || '0'), 10)
+    if (!Number.isFinite(delta) || delta === 0) {
+      return c.redirect(returnUrl + sep(returnUrl) + 'err=' + encodeURIComponent('Adjustment must be a non-zero number'))
+    }
+    for (const it of items.results) {
+      const newQty = Math.max(0, (it.qty_on_hand || 0) + delta)
+      if (newQty === it.qty_on_hand) continue
+      await c.env.DB.prepare(`UPDATE stock_items SET qty_on_hand=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(newQty, it.id).run()
+      await logMovement(c, it.id, 'bulk_update', 'qty_on_hand', it.qty_on_hand, newQty, reason)
+      changed++
+    }
+  } else if (action === 'set_qty') {
+    const v = parseInt(String(form.bulk_qty_set || ''), 10)
+    if (!Number.isFinite(v) || v < 0) {
+      return c.redirect(returnUrl + sep(returnUrl) + 'err=' + encodeURIComponent('Quantity must be 0 or more'))
+    }
+    for (const it of items.results) {
+      if (it.qty_on_hand === v) continue
+      await c.env.DB.prepare(`UPDATE stock_items SET qty_on_hand=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(v, it.id).run()
+      await logMovement(c, it.id, 'bulk_update', 'qty_on_hand', it.qty_on_hand, v, reason)
+      changed++
+    }
+  } else if (action === 'delete') {
+    for (const it of items.results) {
+      if (!it.active) continue
+      await c.env.DB.prepare(`UPDATE stock_items SET active=0, updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(it.id).run()
+      await logMovement(c, it.id, 'delete', 'active', 1, 0, reason)
+      changed++
+    }
+  } else {
+    return c.redirect(returnUrl + sep(returnUrl) + 'err=' + encodeURIComponent('Unknown bulk action'))
+  }
+
+  return c.redirect(returnUrl + sep(returnUrl) + 'msg=' + encodeURIComponent(`Bulk ${action.replace('_',' ')}: ${changed} item(s) updated`))
 })
 
 // ── GET /admin/stock/new — add-new form ───────────────────────────────────
@@ -433,8 +900,83 @@ stockAdmin.post('/new', async (c) => {
      VALUES (?, ?, ?, ?, ?, ?, 'manual_admin', 'active', 1)`
   ).bind(brand, description, qty, custody_type, location, notes).run()
 
-  const newId = res.meta?.last_row_id
+  const newId = Number(res.meta?.last_row_id)
+  if (Number.isFinite(newId)) {
+    await logMovement(c, newId, 'create', 'multiple', null, `${brand} — ${description} (qty ${qty}, custody ${custody_type})`, 'created via admin')
+  }
   return c.redirect(`/admin/stock/${newId}?msg=` + encodeURIComponent(`Added "${description}" to ${brand}`))
+})
+
+// ── GET /admin/stock/:id/history — per-item movements ─────────────────────
+// Registered BEFORE /:id so it doesn't get swallowed.
+stockAdmin.get('/:id/history', async (c) => {
+  const user = c.get('user')
+  const id = Number(c.req.param('id'))
+  if (!Number.isFinite(id)) return c.redirect('/admin/stock?err=Invalid+id')
+
+  const item = await c.env.DB.prepare(`SELECT * FROM stock_items WHERE id = ?`).bind(id).first<any>()
+  if (!item) return c.redirect('/admin/stock?err=Item+not+found')
+
+  const rows = await c.env.DB.prepare(
+    `SELECT id, action, field_changed, old_value, new_value, delta, reason, user_name, created_at
+     FROM stock_movements
+     WHERE stock_item_id = ?
+     ORDER BY created_at DESC, id DESC
+     LIMIT 200`
+  ).bind(id).all<any>()
+
+  const tableRows = rows.results.map((r: any) => {
+    const delta = (r.delta !== null && r.delta !== undefined)
+      ? `<strong style="color:${r.delta >= 0 ? '#10b981' : '#ef4444'}">${r.delta >= 0 ? '+' : ''}${r.delta}</strong>`
+      : ''
+    const change = r.field_changed
+      ? `<code style="font-size:11px;background:var(--surface);padding:1px 6px;border-radius:4px">${esc(r.field_changed)}</code>
+         <span class="muted" style="font-size:11px">${esc(String(r.old_value ?? '').slice(0,40))}</span>
+         <span style="color:var(--text-muted)">→</span>
+         <span style="font-size:11px">${esc(String(r.new_value ?? '').slice(0,40))}</span>
+         ${delta ? ' ' + delta : ''}`
+      : ''
+    return `
+      <tr>
+        <td class="muted" style="font-size:11px;white-space:nowrap">${esc(String(r.created_at).replace('T',' ').slice(0,16))}</td>
+        <td>${actionBadge(r.action)}</td>
+        <td>${change}</td>
+        <td class="muted" style="font-size:11px">${esc(r.reason) || ''}</td>
+        <td class="muted" style="font-size:11px">${esc(r.user_name) || '—'}</td>
+      </tr>`
+  }).join('')
+
+  const body = `
+    <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;flex-wrap:wrap">
+      <div>
+        <h1 style="margin:0">
+          <i class="fas fa-clock-rotate-left"></i>
+          History: ${esc(item.brand)} — ${esc(item.description)}
+        </h1>
+        <p class="text-muted" style="margin:4px 0 0">All changes to item #${item.id}. Most recent first.</p>
+      </div>
+      <div style="display:flex;gap:8px">
+        <a href="/admin/stock/${item.id}"     class="btn btn-outline"><i class="fas fa-pen"></i> Edit item</a>
+        <a href="/admin/stock"                class="btn btn-outline"><i class="fas fa-arrow-left"></i> Back to list</a>
+      </div>
+    </div>
+
+    <div class="card" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>When</th>
+            <th>Action</th>
+            <th>Change</th>
+            <th>Reason</th>
+            <th>User</th>
+          </tr></thead>
+          <tbody>${tableRows || '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-muted)">No history yet — changes from now on will be logged here.</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+  `
+  return c.html(layout(`History — ${item.brand}`, body, user, 'stock-admin'))
 })
 
 // ── GET /admin/stock/:id — view/edit ──────────────────────────────────────
@@ -454,6 +996,38 @@ stockAdmin.get('/:id', async (c) => {
   ).all<any>()
   const brands = brandsRes.results.map((r: any) => r.brand)
 
+  // Latest 5 movements for this item — inline preview
+  const recentRes = await c.env.DB.prepare(
+    `SELECT action, field_changed, old_value, new_value, delta, user_name, created_at
+     FROM stock_movements WHERE stock_item_id = ?
+     ORDER BY created_at DESC, id DESC LIMIT 5`
+  ).bind(id).all<any>()
+  const recent = recentRes.results
+
+  const recentBlock = recent.length ? `
+    <div class="card" style="padding:12px 16px;max-width:720px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong><i class="fas fa-clock-rotate-left"></i> Recent activity</strong>
+        <a href="/admin/stock/${item.id}/history" class="btn btn-outline btn-sm">Full history</a>
+      </div>
+      <ul style="margin:0;padding:0;list-style:none;font-size:12px">
+        ${recent.map((r: any) => `
+          <li style="padding:4px 0;border-bottom:1px dashed var(--border)">
+            <span class="muted">${esc(String(r.created_at).replace('T',' ').slice(0,16))}</span>
+            ${actionBadge(r.action)}
+            ${r.field_changed ? `
+              <code style="font-size:10px;background:var(--surface);padding:1px 4px;border-radius:3px">${esc(r.field_changed)}</code>
+              <span class="muted">${esc(String(r.old_value ?? '').slice(0,30))}</span> →
+              <span>${esc(String(r.new_value ?? '').slice(0,30))}</span>
+              ${(r.delta !== null && r.delta !== undefined) ? `<strong style="color:${r.delta >= 0 ? '#10b981' : '#ef4444'}">${r.delta >= 0 ? '+' : ''}${r.delta}</strong>` : ''}
+            ` : ''}
+            <span class="muted" style="float:right">${esc(r.user_name) || '—'}</span>
+          </li>
+        `).join('')}
+      </ul>
+    </div>
+  ` : ''
+
   const body = `
     <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
       <div>
@@ -467,7 +1041,10 @@ stockAdmin.get('/:id', async (c) => {
           ${item.updated_at && item.updated_at !== item.created_at ? ' · Last edit ' + esc(String(item.updated_at).split(' ')[0]) : ''}
         </p>
       </div>
-      <a href="/admin/stock" class="btn btn-outline"><i class="fas fa-arrow-left"></i> Back to list</a>
+      <div style="display:flex;gap:8px">
+        <a href="/admin/stock/${item.id}/history" class="btn btn-outline"><i class="fas fa-clock-rotate-left"></i> History</a>
+        <a href="/admin/stock"                    class="btn btn-outline"><i class="fas fa-arrow-left"></i> Back</a>
+      </div>
     </div>
 
     ${flashBanner(c)}
@@ -519,17 +1096,24 @@ stockAdmin.get('/:id', async (c) => {
         </select>
       </div>
 
+      <div style="margin-top:12px">
+        <label>Reason for change <span class="muted" style="font-weight:400">(optional, shown in audit log)</span></label>
+        <input type="text" name="reason" placeholder="e.g. stock count correction, broken items removed, etc." />
+      </div>
+
       <div style="display:flex;justify-content:space-between;gap:8px;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
         <div style="display:flex;gap:8px">
           <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Changes</button>
           <a href="/admin/stock" class="btn btn-outline">Cancel</a>
         </div>
         <button type="button" class="btn btn-outline" style="color:#ef4444;border-color:#ef4444"
-          onclick="if(confirm('Soft-delete this item? It will be hidden from the list but not permanently removed.')) document.getElementById('delete-form').submit()">
+          onclick="if(confirm('Soft-delete this item? It will be hidden from the list but kept in the audit log.')) document.getElementById('delete-form').submit()">
           <i class="fas fa-trash"></i> Delete
         </button>
       </div>
     </form>
+
+    ${recentBlock}
 
     <form id="delete-form" method="post" action="/admin/stock/${item.id}/delete" style="display:none"></form>
   `
@@ -549,6 +1133,7 @@ stockAdmin.post('/:id', async (c) => {
   const location     = String(form.location     || '').trim()
   const notes        = String(form.notes        || '').trim()
   const status       = String(form.status       || 'active')
+  const reason       = String(form.reason       || '').trim() || null
 
   if (!brand || !description) {
     return c.redirect(`/admin/stock/${id}?err=` + encodeURIComponent('Brand and Description are required'))
@@ -560,6 +1145,10 @@ stockAdmin.post('/:id', async (c) => {
     return c.redirect(`/admin/stock/${id}?err=` + encodeURIComponent('Invalid status'))
   }
 
+  // Read before-snapshot for diff logging
+  const before = await c.env.DB.prepare(`SELECT * FROM stock_items WHERE id=?`).bind(id).first<any>()
+  if (!before) return c.redirect('/admin/stock?err=Item+not+found')
+
   await c.env.DB.prepare(
     `UPDATE stock_items
      SET brand=?, description=?, qty_on_hand=?, custody_type=?,
@@ -567,7 +1156,12 @@ stockAdmin.post('/:id', async (c) => {
      WHERE id=?`
   ).bind(brand, description, qty, custody_type, location, notes, status, id).run()
 
-  return c.redirect(`/admin/stock/${id}?msg=Saved`)
+  const after = { brand, description, qty_on_hand: qty, custody_type, location, notes, status }
+  const n = await logDiffs(c, id, before, after,
+    ['brand','description','qty_on_hand','custody_type','location','notes','status'],
+    reason)
+
+  return c.redirect(`/admin/stock/${id}?msg=` + encodeURIComponent(n ? `Saved (${n} change${n===1?'':'s'} logged)` : 'No changes'))
 })
 
 // ── POST /admin/stock/:id/delete — soft-delete ────────────────────────────
@@ -575,12 +1169,14 @@ stockAdmin.post('/:id/delete', async (c) => {
   const id = Number(c.req.param('id'))
   if (!Number.isFinite(id)) return c.redirect('/admin/stock?err=Invalid+id')
 
-  const item = await c.env.DB.prepare(`SELECT brand, description FROM stock_items WHERE id=?`).bind(id).first<any>()
+  const item = await c.env.DB.prepare(`SELECT brand, description, active FROM stock_items WHERE id=?`).bind(id).first<any>()
   if (!item) return c.redirect('/admin/stock?err=Item+not+found')
 
   await c.env.DB.prepare(
     `UPDATE stock_items SET active=0, updated_at=CURRENT_TIMESTAMP WHERE id=?`
   ).bind(id).run()
+
+  await logMovement(c, id, 'delete', 'active', item.active ?? 1, 0, null)
 
   return c.redirect('/admin/stock?msg=' + encodeURIComponent(`Deleted "${item.description}" from ${item.brand}`))
 })
