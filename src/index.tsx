@@ -158,6 +158,17 @@ app.get('/calendar/ics/:userId/:tokenFile', async (c) => {
 //    app.use('*', requireAuth) which would block the warehouse TV.
 app.route('/dispatch', dispatch)
 
+// ── Friendly URL alias: /stock-admin/* → /admin/stock/* (301 permanent redirect)
+// MUST be registered BEFORE the dashboard mount (which has app.use('*', requireAuth)
+// catching everything on '/'). Catches mistyped/legacy links and forwards them
+// to the canonical path. Auth gate still fires AFTER redirect at /admin/stock/*.
+app.all('/stock-admin', (c) => c.redirect('/admin/stock', 301))
+app.all('/stock-admin/*', (c) => {
+  const url = new URL(c.req.url)
+  const tail = url.pathname.replace(/^\/stock-admin/, '') // keeps leading "/"
+  return c.redirect('/admin/stock' + tail + url.search, 301)
+})
+
 // ── Token-protected cron endpoint (MUST be before the dashboard mount because
 // the dashboard router has app.use('*', requireAuth) which catches everything
 // on '/'). External scheduler (GitHub Actions + cron-job.org) POSTs here
