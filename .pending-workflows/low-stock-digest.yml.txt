@@ -1,0 +1,52 @@
+name: Weekly Low-Stock Digest
+
+# Sends the low-stock email digest every Monday at 07:00 SAST.
+# 05:00 UTC Monday = 07:00 SAST Monday.
+#
+# Calls POST https://bwprodsystem.co.za/api/cron/low-stock-digest with the
+# bearer token from the LOW_STOCK_WEBHOOK_TOKEN repo secret.
+#
+# The endpoint will skip sending if no items are below threshold (clean inbox)
+# unless skipIfEmpty=false is passed in the body.
+
+on:
+  schedule:
+    - cron: '0 5 * * 1'   # Monday 05:00 UTC = 07:00 SAST
+  workflow_dispatch:
+    inputs:
+      skipIfEmpty:
+        description: 'Skip sending if no items below threshold? (true/false)'
+        required: false
+        default: 'true'
+
+jobs:
+  fire-digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fire low-stock digest webhook
+        env:
+          TOKEN: ${{ secrets.LOW_STOCK_WEBHOOK_TOKEN }}
+          SKIP_IF_EMPTY: ${{ github.event.inputs.skipIfEmpty || 'true' }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::LOW_STOCK_WEBHOOK_TOKEN secret is not set in the GitHub repo."
+            echo "Add it under: Settings → Secrets and variables → Actions → New repo secret"
+            exit 1
+          fi
+          set -e
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://bwprodsystem.co.za/api/cron/low-stock-digest" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"skipIfEmpty\": $SKIP_IF_EMPTY, \"reason\": \"github-actions\"}" \
+            --max-time 60)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          STATUS=$(echo "$RESPONSE" | tail -n1)
+          echo "Status: $STATUS"
+          echo "Response: $BODY"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Low-stock digest webhook returned $STATUS"
+            exit 1
+          fi
+          echo "::notice::Low-stock digest fired successfully"

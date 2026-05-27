@@ -23,15 +23,18 @@ import { requireAuth } from '../middleware/auth.js'
 import { layout } from '../lib/layout.js'
 import type { AuthUser } from '../lib/auth.js'
 import stockScan from './stock-scan.js'
+import stockAlerts from './stock-alerts.js'
 
-type Env = { Bindings: { DB: D1Database }; Variables: { user: AuthUser } }
+type Env = { Bindings: { DB: D1Database; RESEND_API_KEY?: string }; Variables: { user: AuthUser } }
 
 const stockAdmin = new Hono<Env>()
 stockAdmin.use('*', requireAuth)
 
 // Phase 4: stock-take scan mode — mounted under /admin/stock/scan
-// Auth middleware above covers it. Mounted FIRST so /:id below doesn't swallow /scan.
+// Phase 5: low-stock alerts        — mounted under /admin/stock/alerts
+// Auth middleware above covers both. Mounted FIRST so /:id below doesn't swallow them.
 stockAdmin.route('/scan', stockScan)
+stockAdmin.route('/alerts', stockAlerts)
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 const CUSTODY_LABELS: Record<string, string> = {
@@ -236,6 +239,17 @@ stockAdmin.get('/', async (c) => {
   const statMap: Record<string, {items:number, units:number}> = {}
   for (const s of stats.results) statMap[s.custody_type] = { items: s.items, units: s.units }
 
+  // Phase 5: live count of items currently triggering an alert (for header badge)
+  const today = new Date().toISOString().slice(0, 10)
+  const alertCountRow = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM stock_items
+     WHERE active = 1
+       AND COALESCE(low_stock_threshold, 5) > 0
+       AND qty_on_hand <= COALESCE(low_stock_threshold, 5)
+       AND (alert_snoozed_until IS NULL OR alert_snoozed_until < ?)`
+  ).bind(today).first<{ n: number }>()
+  const alertCount = alertCountRow?.n ?? 0
+
   const brandOptions = brands.map(b => `<option value="${esc(b)}" ${b === brand ? 'selected' : ''}>${esc(b)}</option>`).join('')
 
   // Preserve current filters in CSV export URL (note: CSV always exports active)
@@ -297,6 +311,9 @@ stockAdmin.get('/', async (c) => {
         <p class="text-muted" style="margin:4px 0 0">All inventory across all 12 brands. Edit an item to change quantity, location, or custody.</p>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <a href="/admin/stock/alerts"    class="btn btn-outline" style="${alertCount > 0 ? 'color:#dc2626;border-color:#dc2626' : 'color:#10b981;border-color:#10b981'}">
+          <i class="fas fa-bell"></i> Alerts${alertCount > 0 ? ` <span style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;background:#dc2626;color:#fff;border-radius:9px;font-size:11px;font-weight:700;margin-left:4px">${alertCount}</span>` : ''}
+        </a>
         <a href="/admin/stock/scan"      class="btn btn-outline" style="color:#06b6d4;border-color:#06b6d4"><i class="fas fa-barcode"></i> Stock-take</a>
         <a href="/admin/stock/movements" class="btn btn-outline"><i class="fas fa-clock-rotate-left"></i> Movements</a>
         <a href="/admin/stock/summary"   class="btn btn-outline"><i class="fas fa-chart-pie"></i> Summary</a>
@@ -1229,13 +1246,23 @@ stockAdmin.get('/:id', async (c) => {
         <textarea name="notes" rows="4">${esc(item.notes)}</textarea>
       </div>
 
-      <div style="margin-top:12px">
-        <label>Status</label>
-        <select name="status">
-          <option value="active" ${item.status === 'active' ? 'selected' : ''}>Active</option>
-          <option value="review" ${item.status === 'review' ? 'selected' : ''}>Review (needs human eyeballs)</option>
-          <option value="retired" ${item.status === 'retired' ? 'selected' : ''}>Retired</option>
-        </select>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
+        <div>
+          <label>Status</label>
+          <select name="status">
+            <option value="active" ${item.status === 'active' ? 'selected' : ''}>Active</option>
+            <option value="review" ${item.status === 'review' ? 'selected' : ''}>Review (needs human eyeballs)</option>
+            <option value="retired" ${item.status === 'retired' ? 'selected' : ''}>Retired</option>
+          </select>
+        </div>
+        <div>
+          <label>Low-stock threshold
+            <span class="muted" style="font-weight:400;font-size:11px">— alert when qty ≤ this. Blank = use default of 5. 0 = never alert.</span>
+          </label>
+          <input type="number" name="low_stock_threshold" min="0" step="1"
+                 value="${item.low_stock_threshold === null || item.low_stock_threshold === undefined ? '' : item.low_stock_threshold}"
+                 placeholder="5 (default)" />
+        </div>
       </div>
 
       <div style="margin-top:12px">
@@ -1277,6 +1304,14 @@ stockAdmin.post('/:id', async (c) => {
   const status       = String(form.status       || 'active')
   const reason       = String(form.reason       || '').trim() || null
 
+  // Low-stock threshold: blank → NULL (use default); otherwise integer ≥0
+  const rawThreshold = String(form.low_stock_threshold ?? '').trim()
+  let low_stock_threshold: number | null = null
+  if (rawThreshold !== '') {
+    const n = parseInt(rawThreshold, 10)
+    if (Number.isFinite(n) && n >= 0) low_stock_threshold = n
+  }
+
   // Where to return after save — honour hidden __back input from edit form
   const rawBack = String(form.__back || '/admin/stock')
   const backUrl = rawBack.startsWith('/admin/stock') ? rawBack : '/admin/stock'
@@ -1298,13 +1333,14 @@ stockAdmin.post('/:id', async (c) => {
   await c.env.DB.prepare(
     `UPDATE stock_items
      SET brand=?, description=?, qty_on_hand=?, custody_type=?,
-         location=?, notes=?, status=?, updated_at=CURRENT_TIMESTAMP
+         location=?, notes=?, status=?, low_stock_threshold=?,
+         updated_at=CURRENT_TIMESTAMP
      WHERE id=?`
-  ).bind(brand, description, qty, custody_type, location, notes, status, id).run()
+  ).bind(brand, description, qty, custody_type, location, notes, status, low_stock_threshold, id).run()
 
-  const after = { brand, description, qty_on_hand: qty, custody_type, location, notes, status }
+  const after = { brand, description, qty_on_hand: qty, custody_type, location, notes, status, low_stock_threshold }
   const n = await logDiffs(c, id, before, after,
-    ['brand','description','qty_on_hand','custody_type','location','notes','status'],
+    ['brand','description','qty_on_hand','custody_type','location','notes','status','low_stock_threshold'],
     reason)
 
   const sep = backUrl.includes('?') ? '&' : '?'

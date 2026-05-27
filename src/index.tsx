@@ -5,6 +5,7 @@ import { logger } from 'hono/logger'
 import { serveStatic } from 'hono/cloudflare-workers'
 import { runDigest } from './lib/email-digest.js'
 import { runBackup } from './lib/backup.js'
+import { runLowStockDigest } from './lib/low-stock.js'
 import auth from './routes/auth.js'
 import dashboard from './routes/dashboard.js'
 import fleet from './routes/fleet.js'
@@ -205,6 +206,31 @@ app.post('/api/cron/backup', async (c) => {
   return c.json(result)
 })
 
+// ── Phase 5: Token-protected weekly low-stock digest cron.
+// Fired by GitHub Actions every Monday at 05:00 UTC (07:00 SAST).
+// Uses LOW_STOCK_WEBHOOK_TOKEN secret (rotatable independently of other crons).
+// Skips sending if no items are below threshold (set skipIfEmpty=false in
+// the body to force "all OK" mail).
+app.post('/api/cron/low-stock-digest', async (c) => {
+  const env = c.env as any
+  const auth = c.req.header('authorization') || ''
+  const token = auth.replace(/^Bearer\s+/i, '').trim()
+  const expected = (env.LOW_STOCK_WEBHOOK_TOKEN || '').trim()
+  if (!token || !expected || token !== expected) {
+    return c.json({ ok: false, error: 'unauthorized' }, 401)
+  }
+  // Optional body overrides for manual testing via cURL
+  let body: any = {}
+  try { body = await c.req.json() } catch { /* empty body is fine */ }
+  const result = await runLowStockDigest(env, {
+    reason: body.reason || 'cron-webhook',
+    skipIfEmpty: body.skipIfEmpty !== false,
+    dashboardUrl: 'https://bwprodsystem.co.za/admin/stock/alerts',
+  })
+  if (!result.ok) return c.json(result, 500)
+  return c.json(result)
+})
+
 // ── Protected app routes
 app.route('/account', account)
 app.route('/', dashboard)
@@ -286,11 +312,17 @@ app.notFound((c) => c.html(`<!DOCTYPE html>
 
 // ─── SCHEDULER NOTES ────────────────────────────────────────────────────────
 // Cloudflare Pages doesn't support native cron triggers in wrangler.jsonc.
-// The accounts email digest is fired by an EXTERNAL scheduler hitting
-//     POST /api/cron/email-digest
-// twice daily at 05:00 UTC (07:00 SAST) and 10:00 UTC (12:00 SAST).
-// The webhook is bearer-token protected (token = last 12 chars of
-// RESEND_API_KEY). For now Bibi can also fire it manually via the
-// "Send digest now" button at /field/admin/email-digest.
+// All scheduled jobs are fired by an EXTERNAL scheduler (GitHub Actions)
+// hitting bearer-token-protected POST endpoints.
+//
+//   POST /api/cron/email-digest        — Twice daily 05:00 + 10:00 UTC
+//                                         CRON_WEBHOOK_TOKEN
+//   POST /api/cron/backup              — Sunday 00:00 UTC (02:00 SAST)
+//                                         BACKUP_WEBHOOK_TOKEN
+//   POST /api/cron/low-stock-digest    — Monday 05:00 UTC (07:00 SAST)
+//                                         LOW_STOCK_WEBHOOK_TOKEN
+//
+// Tokens are stored as Cloudflare Pages secrets. Bibi can also fire each one
+// manually via in-UI buttons (e.g. "Send digest now" on the alerts page).
 
 export default app
