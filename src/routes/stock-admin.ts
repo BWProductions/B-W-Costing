@@ -239,14 +239,19 @@ stockAdmin.get('/', async (c) => {
   if (show && show !== 'active') qs.set('show', show)
   const csvHref = `/admin/stock/export.csv${qs.toString() ? '?' + qs.toString() : ''}`
 
-  const isDeletedView = show === 'deleted' || show === 'all'
   const tableRows = rows.results.map((r: any) => {
     const deleted = r.active === 0
     const rowStyle = deleted ? 'opacity:0.55;background:rgba(239,68,68,0.04)' : ''
+    // IMPORTANT: HTML forbids nested <form>. The table is inside the bulk-form,
+    // so the Restore button uses the HTML5 form="restore-form-{id}" attribute
+    // to bind to an external form that we render AFTER </form> of bulk-form.
     const actionCell = deleted
-      ? `<form method="post" action="/admin/stock/${r.id}/restore" style="display:inline" onsubmit="return confirm('Restore this item to active stock?')">
-           <button type="submit" class="btn btn-sm" style="background:#10b981;color:#000;border-color:#10b981" title="Undelete"><i class="fas fa-rotate-left"></i> Restore</button>
-         </form>`
+      ? `<button type="submit" form="restore-form-${r.id}" class="btn btn-sm"
+                 style="background:#10b981;color:#000;border-color:#10b981;cursor:pointer"
+                 title="Undelete this item"
+                 onclick="return confirm('Restore this item to active stock?')">
+           <i class="fas fa-rotate-left"></i> Restore
+         </button>`
       : `<a href="/admin/stock/${r.id}" class="btn btn-outline btn-sm">Edit</a>`
     const brandLink = deleted
       ? `<span style="color:#ef4444;text-decoration:line-through;font-weight:600" title="Soft-deleted — click Restore to recover">${esc(r.brand)}</span>`
@@ -263,8 +268,14 @@ stockAdmin.get('/', async (c) => {
       <td>${actionCell}</td>
     </tr>`
   }).join('')
-  // Suppress isDeletedView lint — referenced for future use
-  void isDeletedView
+
+  // Restore forms — one per deleted item — rendered OUTSIDE the bulk-form
+  // (nested <form> is invalid HTML and browsers silently drop the inner one).
+  // The submit buttons in the table reference these via the form="..." attribute.
+  const restoreForms = rows.results
+    .filter((r: any) => r.active === 0)
+    .map((r: any) => `<form id="restore-form-${r.id}" method="post" action="/admin/stock/${r.id}/restore" style="display:none"></form>`)
+    .join('')
 
   const totals = rows.results.reduce(
     (a: any, r: any) => { a.items++; a.units += (r.qty_on_hand || 0); return a },
@@ -415,6 +426,8 @@ stockAdmin.get('/', async (c) => {
         <input type="hidden" name="return_qs" value="${esc(qs.toString())}" />
       </div>
     </form>
+
+    ${restoreForms}
 
     <script>
       (function() {
