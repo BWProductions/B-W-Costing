@@ -620,6 +620,59 @@ stockAdmin.get('/summary', async (c) => {
   return c.html(layout('Stock Summary', body, user, 'stock-admin'))
 })
 
+// ── GET /admin/stock/movements.csv — download filtered audit log ─────────
+// MUST be registered BEFORE /movements so the literal path wins over the
+// broader /movements handler. Also before /:id so it isn't caught as a param.
+stockAdmin.get('/movements.csv', async (c) => {
+  const action = c.req.query('action') || ''
+  const itemQ  = c.req.query('item')   || ''
+  const userQ  = c.req.query('user')   || ''
+
+  const conds: string[] = ['1=1']
+  const params: any[] = []
+  if (action) { conds.push('m.action = ?');     params.push(action) }
+  if (itemQ)  { conds.push('(s.brand LIKE ? OR s.description LIKE ?)'); params.push(`%${itemQ}%`, `%${itemQ}%`) }
+  if (userQ)  { conds.push('m.user_name LIKE ?'); params.push(`%${userQ}%`) }
+
+  // No LIMIT — audit log exports need full coverage of filtered set.
+  // Practical safety net at 50,000 rows (~10MB CSV — comfortable for Excel).
+  const rows = await c.env.DB.prepare(
+    `SELECT m.id, m.created_at, m.action, m.stock_item_id,
+            m.field_changed, m.old_value, m.new_value, m.delta,
+            m.reason, m.user_id, m.user_name,
+            s.brand, s.description
+     FROM stock_movements m
+     LEFT JOIN stock_items s ON s.id = m.stock_item_id
+     WHERE ${conds.join(' AND ')}
+     ORDER BY m.created_at DESC, m.id DESC
+     LIMIT 50000`
+  ).bind(...params).all<any>()
+
+  // 13 columns — analyst-friendly: timestamps first, who/what/why last
+  const headers = [
+    'id','created_at','action','stock_item_id','brand','description',
+    'field_changed','old_value','new_value','delta','reason','user_id','user_name'
+  ]
+  const lines: string[] = [headers.join(',')]
+  for (const r of rows.results) {
+    lines.push(headers.map(h => csvCell((r as any)[h])).join(','))
+  }
+  // BOM for Excel UTF-8 compatibility (matches stock CSV export)
+  const csv = '\uFEFF' + lines.join('\r\n') + '\r\n'
+
+  const ts = new Date().toISOString().slice(0,10)
+  const tag = [action, itemQ, userQ].filter(Boolean).join('_').replace(/[^a-z0-9_-]/gi,'_').slice(0,40)
+  const filename = `bw_movements_${ts}${tag ? '_' + tag : ''}.csv`
+
+  return new Response(csv, {
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Cache-Control': 'no-store',
+    },
+  })
+})
+
 // ── GET /admin/stock/movements — global audit log ─────────────────────────
 stockAdmin.get('/movements', async (c) => {
   const user   = c.get('user')
@@ -671,13 +724,24 @@ stockAdmin.get('/movements', async (c) => {
       </tr>`
   }).join('')
 
+  // Build CSV export URL that respects current filters
+  const csvQs = new URLSearchParams()
+  if (action) csvQs.set('action', action)
+  if (itemQ)  csvQs.set('item', itemQ)
+  if (userQ)  csvQs.set('user', userQ)
+  const csvHref = `/admin/stock/movements.csv${csvQs.toString() ? '?' + csvQs.toString() : ''}`
+  const filterActive = !!(action || itemQ || userQ)
+
   const body = `
     <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;flex-wrap:wrap">
       <div>
         <h1 style="margin:0"><i class="fas fa-clock-rotate-left"></i> Stock Movements</h1>
-        <p class="text-muted" style="margin:4px 0 0">Audit trail of every change. Most recent 500 entries.</p>
+        <p class="text-muted" style="margin:4px 0 0">Audit trail of every change. Showing most recent 500 entries on screen; export captures up to 50,000.</p>
       </div>
-      <a href="/admin/stock" class="btn btn-outline"><i class="fas fa-arrow-left"></i> Back to stock</a>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <a href="${csvHref}" class="btn btn-outline" title="${filterActive ? 'Export filtered audit log' : 'Export full audit log'}"><i class="fas fa-file-csv"></i> Export CSV${filterActive ? ' (filtered)' : ''}</a>
+        <a href="/admin/stock" class="btn btn-outline"><i class="fas fa-arrow-left"></i> Back to stock</a>
+      </div>
     </div>
 
     <form method="get" action="/admin/stock/movements" class="card" style="padding:12px;margin-bottom:16px">
