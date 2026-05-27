@@ -178,8 +178,12 @@ stockAdmin.get('/', async (c) => {
   const custody = c.req.query('custody')  || ''
   const q       = c.req.query('q')        || ''
   const sort    = c.req.query('sort')     || 'brand'
+  // show=active (default) | deleted | all  — controls the active-flag filter
+  const show    = (c.req.query('show')    || 'active').toLowerCase()
 
-  const conds: string[] = ['active = 1']
+  const conds: string[] = []
+  if (show === 'deleted')      conds.push('active = 0')
+  else if (show !== 'all')     conds.push('active = 1')  // default = active only
   const params: any[] = []
   if (brand)   { conds.push('brand = ?');                                  params.push(brand) }
   if (custody) { conds.push('custody_type = ?');                           params.push(custody) }
@@ -193,11 +197,15 @@ stockAdmin.get('/', async (c) => {
     custody:      'custody_type, brand, description',
   } as Record<string,string>)[sort] || 'brand, description'
 
+  // Edge case: with no conds at all (which can only happen if a future change
+  // adds a path that empties conds), SQL would fail with "WHERE ". Inject 1=1.
+  const whereClause = conds.length ? conds.join(' AND ') : '1=1'
+
   const rows = await c.env.DB.prepare(
     `SELECT id, brand, description, qty_on_hand, custody_type, location, notes,
-            source_sheet, status
+            source_sheet, status, active
      FROM stock_items
-     WHERE ${conds.join(' AND ')}
+     WHERE ${whereClause}
      ORDER BY ${orderBy}
      LIMIT 2000`
   ).bind(...params).all<any>()
@@ -206,6 +214,12 @@ stockAdmin.get('/', async (c) => {
     `SELECT DISTINCT brand FROM stock_items WHERE active=1 ORDER BY brand`
   ).all<any>()
   const brands = brandsRes.results.map((r: any) => r.brand)
+
+  // Count of soft-deleted items — drives the visibility of the "Show deleted" link
+  const deletedCountRow = await c.env.DB.prepare(
+    `SELECT COUNT(*) as n FROM stock_items WHERE active=0`
+  ).first<any>()
+  const deletedCount = deletedCountRow?.n || 0
 
   const stats = await c.env.DB.prepare(
     `SELECT custody_type, COUNT(*) as items, COALESCE(SUM(qty_on_hand),0) as units
@@ -216,28 +230,41 @@ stockAdmin.get('/', async (c) => {
 
   const brandOptions = brands.map(b => `<option value="${esc(b)}" ${b === brand ? 'selected' : ''}>${esc(b)}</option>`).join('')
 
-  // Preserve current filters in CSV export URL
+  // Preserve current filters in CSV export URL (note: CSV always exports active)
   const qs = new URLSearchParams()
   if (brand)   qs.set('brand', brand)
   if (custody) qs.set('custody', custody)
   if (q)       qs.set('q', q)
   if (sort)    qs.set('sort', sort)
+  if (show && show !== 'active') qs.set('show', show)
   const csvHref = `/admin/stock/export.csv${qs.toString() ? '?' + qs.toString() : ''}`
 
-  const tableRows = rows.results.map((r: any) => `
-    <tr data-id="${r.id}">
-      <td style="width:32px"><input type="checkbox" class="row-check" value="${r.id}" /></td>
-      <td>
-        <a href="/admin/stock/${r.id}" style="color:var(--bw-gold);text-decoration:none;font-weight:600">${esc(r.brand)}</a>
-      </td>
-      <td>${esc(r.description)}</td>
+  const isDeletedView = show === 'deleted' || show === 'all'
+  const tableRows = rows.results.map((r: any) => {
+    const deleted = r.active === 0
+    const rowStyle = deleted ? 'opacity:0.55;background:rgba(239,68,68,0.04)' : ''
+    const actionCell = deleted
+      ? `<form method="post" action="/admin/stock/${r.id}/restore" style="display:inline" onsubmit="return confirm('Restore this item to active stock?')">
+           <button type="submit" class="btn btn-sm" style="background:#10b981;color:#000;border-color:#10b981" title="Undelete"><i class="fas fa-rotate-left"></i> Restore</button>
+         </form>`
+      : `<a href="/admin/stock/${r.id}" class="btn btn-outline btn-sm">Edit</a>`
+    const brandLink = deleted
+      ? `<span style="color:#ef4444;text-decoration:line-through;font-weight:600" title="Soft-deleted — click Restore to recover">${esc(r.brand)}</span>`
+      : `<a href="/admin/stock/${r.id}" style="color:var(--bw-gold);text-decoration:none;font-weight:600">${esc(r.brand)}</a>`
+    return `
+    <tr data-id="${r.id}" style="${rowStyle}">
+      <td style="width:32px">${deleted ? '' : `<input type="checkbox" class="row-check" value="${r.id}" />`}</td>
+      <td>${brandLink}</td>
+      <td>${esc(r.description)}${deleted ? ' <span style="font-size:10px;background:#ef4444;color:#fff;padding:1px 6px;border-radius:3px;margin-left:6px;text-transform:uppercase;letter-spacing:0.5px">deleted</span>' : ''}</td>
       <td style="text-align:right;font-weight:700;font-variant-numeric:tabular-nums">${r.qty_on_hand}</td>
       <td>${badge(r.custody_type)}</td>
       <td class="muted hide-mobile">${esc(r.location) || '—'}</td>
       <td class="muted hide-mobile" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.notes)}">${esc(r.notes) || '—'}</td>
-      <td><a href="/admin/stock/${r.id}" class="btn btn-outline btn-sm">Edit</a></td>
-    </tr>
-  `).join('')
+      <td>${actionCell}</td>
+    </tr>`
+  }).join('')
+  // Suppress isDeletedView lint — referenced for future use
+  void isDeletedView
 
   const totals = rows.results.reduce(
     (a: any, r: any) => { a.items++; a.units += (r.qty_on_hand || 0); return a },
@@ -318,12 +345,19 @@ stockAdmin.get('/', async (c) => {
       <div class="card" style="padding:0">
         <div style="padding:8px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:8px">
           <div style="font-size:13px;color:var(--text-muted)">
-            Showing <strong style="color:var(--text)">${totals.items.toLocaleString()}</strong> items
+            Showing <strong style="color:var(--text)">${totals.items.toLocaleString()}</strong> ${show === 'deleted' ? '<span style="color:#ef4444;font-weight:600">deleted</span>' : show === 'all' ? '<span style="color:var(--bw-gold);font-weight:600">total</span>' : ''} items
             (<strong style="color:var(--text)">${totals.units.toLocaleString()}</strong> units)
             ${rows.results.length >= 2000 ? ' — capped at 2000 — refine your filter' : ''}
             <span id="selected-count" style="margin-left:12px;color:var(--bw-gold);display:none">
               · <strong id="selected-n">0</strong> selected
             </span>
+          </div>
+          <div style="font-size:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            ${show === 'active'  ? '<span style="color:var(--text-muted)">Active only</span>' : `<a href="/admin/stock${(() => { const p = new URLSearchParams(qs); p.delete('show'); return p.toString() ? '?' + p.toString() : '' })()}" style="color:var(--bw-gold)">Active only</a>`}
+            ·
+            ${show === 'deleted' ? `<span style="color:#ef4444;font-weight:600">Deleted (${deletedCount})</span>` : `<a href="/admin/stock${(() => { const p = new URLSearchParams(qs); p.set('show','deleted'); return '?' + p.toString() })()}" style="color:${deletedCount > 0 ? '#ef4444' : 'var(--text-muted)'}">Deleted${deletedCount > 0 ? ` (${deletedCount})` : ''}</a>`}
+            ·
+            ${show === 'all'     ? '<span style="color:var(--bw-gold);font-weight:600">All</span>' : `<a href="/admin/stock${(() => { const p = new URLSearchParams(qs); p.set('show','all'); return '?' + p.toString() })()}" style="color:var(--text-muted)">All</a>`}
           </div>
         </div>
         <div class="table-wrap">
@@ -1243,6 +1277,37 @@ stockAdmin.post('/:id/delete', async (c) => {
   await logMovement(c, id, 'delete', 'active', item.active ?? 1, 0, null)
 
   return c.redirect('/admin/stock?msg=' + encodeURIComponent(`Deleted "${item.description}" from ${item.brand}`))
+})
+
+// ── POST /admin/stock/:id/restore — undelete a soft-deleted item ──────────
+// Flips active back to 1, writes an audit row, and bounces back to wherever
+// the user came from (via the show param if present, default = active list).
+stockAdmin.post('/:id/restore', async (c) => {
+  const id = Number(c.req.param('id'))
+  if (!Number.isFinite(id)) return c.redirect('/admin/stock?err=Invalid+id')
+
+  const item = await c.env.DB.prepare(
+    `SELECT brand, description, active FROM stock_items WHERE id=?`
+  ).bind(id).first<any>()
+  if (!item) return c.redirect('/admin/stock?err=Item+not+found')
+
+  // Idempotent: if already active, log nothing, just bounce with a notice
+  if (item.active === 1) {
+    return c.redirect('/admin/stock?msg=' + encodeURIComponent(`"${item.description}" is already active`))
+  }
+
+  await c.env.DB.prepare(
+    `UPDATE stock_items SET active=1, updated_at=CURRENT_TIMESTAMP WHERE id=?`
+  ).bind(id).run()
+
+  // Use the 'restore' action so it stands out in the movements log
+  await logMovement(c, id, 'restore', 'active', 0, 1, null)
+
+  // Stay on the deleted view if user came from there (helps batch restores)
+  const referer = c.req.header('referer') || ''
+  const backToDeleted = /[?&]show=deleted/.test(referer)
+  const target = backToDeleted ? '/admin/stock?show=deleted' : '/admin/stock'
+  return c.redirect(target + (target.includes('?') ? '&' : '?') + 'msg=' + encodeURIComponent(`Restored "${item.description}" from ${item.brand}`))
 })
 
 export default stockAdmin
