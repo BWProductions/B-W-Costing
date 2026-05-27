@@ -1096,6 +1096,27 @@ stockAdmin.get('/:id', async (c) => {
   const id = Number(c.req.param('id'))
   if (!Number.isFinite(id)) return c.redirect('/admin/stock?err=Invalid+id')
 
+  // Capture where the user came from so Back / Cancel / Save return there
+  // (preserves page, filters, search, view toggles).
+  // Priority: explicit ?from=  →  Referer header  →  /admin/stock
+  const explicitFrom = c.req.query('from')
+  const referer = c.req.header('referer') || ''
+  let backUrl = '/admin/stock'
+  if (explicitFrom && explicitFrom.startsWith('/admin/stock')) {
+    backUrl = explicitFrom
+  } else if (referer) {
+    try {
+      const refUrl = new URL(referer)
+      // only honour same-origin referers that point at the stock list (not another edit page)
+      const path = refUrl.pathname + refUrl.search
+      if (/^\/admin\/stock(\/?$|\/?\?)/.test(refUrl.pathname + (refUrl.search ? '?' : ''))) {
+        backUrl = path
+      } else if (/^\/admin\/stock\/movements/.test(refUrl.pathname)) {
+        backUrl = path
+      }
+    } catch { /* ignore malformed referers */ }
+  }
+
   const item = await c.env.DB.prepare(
     `SELECT * FROM stock_items WHERE id = ?`
   ).bind(id).first<any>()
@@ -1154,13 +1175,14 @@ stockAdmin.get('/:id', async (c) => {
       </div>
       <div style="display:flex;gap:8px">
         <a href="/admin/stock/${item.id}/history" class="btn btn-outline"><i class="fas fa-clock-rotate-left"></i> History</a>
-        <a href="/admin/stock"                    class="btn btn-outline"><i class="fas fa-arrow-left"></i> Back</a>
+        <a href="${esc(backUrl)}"                 class="btn btn-outline"><i class="fas fa-arrow-left"></i> Back to list</a>
       </div>
     </div>
 
     ${flashBanner(c)}
 
     <form method="post" action="/admin/stock/${item.id}" class="card" style="padding:20px;max-width:720px;margin-bottom:16px">
+      <input type="hidden" name="__back" value="${esc(backUrl)}" />
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
         <div>
           <label>Brand <span style="color:#ef4444">*</span></label>
@@ -1215,7 +1237,7 @@ stockAdmin.get('/:id', async (c) => {
       <div style="display:flex;justify-content:space-between;gap:8px;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
         <div style="display:flex;gap:8px">
           <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Changes</button>
-          <a href="/admin/stock" class="btn btn-outline">Cancel</a>
+          <a href="${esc(backUrl)}" class="btn btn-outline">Cancel</a>
         </div>
         <button type="button" class="btn btn-outline" style="color:#ef4444;border-color:#ef4444"
           onclick="if(confirm('Soft-delete this item? It will be hidden from the list but kept in the audit log.')) document.getElementById('delete-form').submit()">
@@ -1246,6 +1268,10 @@ stockAdmin.post('/:id', async (c) => {
   const status       = String(form.status       || 'active')
   const reason       = String(form.reason       || '').trim() || null
 
+  // Where to return after save — honour hidden __back input from edit form
+  const rawBack = String(form.__back || '/admin/stock')
+  const backUrl = rawBack.startsWith('/admin/stock') ? rawBack : '/admin/stock'
+
   if (!brand || !description) {
     return c.redirect(`/admin/stock/${id}?err=` + encodeURIComponent('Brand and Description are required'))
   }
@@ -1272,7 +1298,9 @@ stockAdmin.post('/:id', async (c) => {
     ['brand','description','qty_on_hand','custody_type','location','notes','status'],
     reason)
 
-  return c.redirect(`/admin/stock/${id}?msg=` + encodeURIComponent(n ? `Saved (${n} change${n===1?'':'s'} logged)` : 'No changes'))
+  const sep = backUrl.includes('?') ? '&' : '?'
+  const msg = n ? `Saved "${description}" (${n} change${n===1?'':'s'} logged)` : `No changes to "${description}"`
+  return c.redirect(`${backUrl}${sep}msg=` + encodeURIComponent(msg))
 })
 
 // ── POST /admin/stock/:id/delete — soft-delete ────────────────────────────
