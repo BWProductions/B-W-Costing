@@ -22,11 +22,16 @@ import { Hono } from 'hono'
 import { requireAuth } from '../middleware/auth.js'
 import { layout } from '../lib/layout.js'
 import type { AuthUser } from '../lib/auth.js'
+import stockScan from './stock-scan.js'
 
 type Env = { Bindings: { DB: D1Database }; Variables: { user: AuthUser } }
 
 const stockAdmin = new Hono<Env>()
 stockAdmin.use('*', requireAuth)
+
+// Phase 4: stock-take scan mode — mounted under /admin/stock/scan
+// Auth middleware above covers it. Mounted FIRST so /:id below doesn't swallow /scan.
+stockAdmin.route('/scan', stockScan)
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 const CUSTODY_LABELS: Record<string, string> = {
@@ -51,6 +56,7 @@ const ACTION_LABELS: Record<string, string> = {
   delete:      'Deleted',
   restore:     'Restored',
   bulk_update: 'Bulk update',
+  stocktake:   'Stock-take',
 }
 const ACTION_COLORS: Record<string, string> = {
   create:      '#10b981',
@@ -58,6 +64,7 @@ const ACTION_COLORS: Record<string, string> = {
   delete:      '#ef4444',
   restore:     '#8b5cf6',
   bulk_update: '#f59e0b',
+  stocktake:   '#06b6d4',
 }
 const ACTION_ICONS: Record<string, string> = {
   create:      'fa-plus-circle',
@@ -65,6 +72,7 @@ const ACTION_ICONS: Record<string, string> = {
   delete:      'fa-trash',
   restore:     'fa-rotate-left',
   bulk_update: 'fa-layer-group',
+  stocktake:   'fa-clipboard-check',
 }
 
 function esc(s: any): string {
@@ -289,6 +297,7 @@ stockAdmin.get('/', async (c) => {
         <p class="text-muted" style="margin:4px 0 0">All inventory across all 12 brands. Edit an item to change quantity, location, or custody.</p>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <a href="/admin/stock/scan"      class="btn btn-outline" style="color:#06b6d4;border-color:#06b6d4"><i class="fas fa-barcode"></i> Stock-take</a>
         <a href="/admin/stock/movements" class="btn btn-outline"><i class="fas fa-clock-rotate-left"></i> Movements</a>
         <a href="/admin/stock/summary"   class="btn btn-outline"><i class="fas fa-chart-pie"></i> Summary</a>
         <a href="${csvHref}"             class="btn btn-outline"><i class="fas fa-file-csv"></i> Export CSV</a>
