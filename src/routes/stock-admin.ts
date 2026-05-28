@@ -25,6 +25,11 @@ import type { AuthUser } from '../lib/auth.js'
 import stockScan from './stock-scan.js'
 import stockAlerts from './stock-alerts.js'
 import stockBulkImport from './stock-bulk-import.js'
+import {
+  countOpenShortages, listOpenShortages, listRecentResolvedShortages,
+  resolveShortage, reopenShortage, getCommitmentsForItem,
+  SHORTAGE_RESOLUTIONS,
+} from '../lib/allocations.js'
 
 type Env = { Bindings: { DB: D1Database; RESEND_API_KEY?: string }; Variables: { user: AuthUser } }
 
@@ -65,6 +70,8 @@ const ACTION_LABELS: Record<string, string> = {
   stocktake:   'Stock-take',
   bulk_import: 'Bulk import',
   bulk_import_undo: 'Bulk undo',
+  allocate:    'Allocated',
+  deallocate:  'De-allocated',
 }
 const ACTION_COLORS: Record<string, string> = {
   create:      '#10b981',
@@ -75,6 +82,8 @@ const ACTION_COLORS: Record<string, string> = {
   stocktake:   '#06b6d4',
   bulk_import: '#a855f7',
   bulk_import_undo: '#dc2626',
+  allocate:    '#0ea5e9',
+  deallocate:  '#64748b',
 }
 const ACTION_ICONS: Record<string, string> = {
   create:      'fa-plus-circle',
@@ -85,6 +94,8 @@ const ACTION_ICONS: Record<string, string> = {
   stocktake:   'fa-clipboard-check',
   bulk_import: 'fa-file-import',
   bulk_import_undo: 'fa-rotate-left',
+  allocate:    'fa-calendar-check',
+  deallocate:  'fa-calendar-xmark',
 }
 
 function esc(s: any): string {
@@ -259,6 +270,9 @@ stockAdmin.get('/', async (c) => {
   ).bind(today).first<{ n: number }>()
   const alertCount = alertCountRow?.n ?? 0
 
+  // Phase 7: count of open shortages for header badge
+  const shortageCount = await countOpenShortages(c.env.DB)
+
   const brandOptions = brands.map(b => `<option value="${esc(b)}" ${b === brand ? 'selected' : ''}>${esc(b)}</option>`).join('')
 
   // Preserve current filters in CSV export URL (note: CSV always exports active)
@@ -325,6 +339,9 @@ stockAdmin.get('/', async (c) => {
         </a>
         <a href="/admin/stock/scan"      class="btn btn-outline" style="color:#06b6d4;border-color:#06b6d4"><i class="fas fa-barcode"></i> Stock-take</a>
         <a href="/admin/stock/import"    class="btn btn-outline" style="color:#a855f7;border-color:#a855f7"><i class="fas fa-file-import"></i> Bulk Import</a>
+        <a href="/admin/stock/shortages" class="btn btn-outline" style="${shortageCount > 0 ? 'color:#ff7a66;border-color:#ff7a66' : 'color:#9ca3af;border-color:#9ca3af'}">
+          <i class="fas fa-triangle-exclamation"></i> Shortages${shortageCount > 0 ? ` <span style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;background:#ff7a66;color:#1a1004;border-radius:9px;font-size:11px;font-weight:700;margin-left:4px">${shortageCount}</span>` : ''}
+        </a>
         <a href="/admin/stock/movements" class="btn btn-outline"><i class="fas fa-clock-rotate-left"></i> Movements</a>
         <a href="/admin/stock/summary"   class="btn btn-outline"><i class="fas fa-chart-pie"></i> Summary</a>
         <a href="${csvHref}"             class="btn btn-outline"><i class="fas fa-file-csv"></i> Export CSV</a>
@@ -870,6 +887,255 @@ stockAdmin.get('/movements', async (c) => {
     </div>
   `
   return c.html(layout('Stock Movements', body, user, 'stock-admin'))
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 7: Shortages dashboard + per-item allocations view
+// Registered BEFORE /:id so literal paths win.
+// ─────────────────────────────────────────────────────────────────────────
+
+// ── GET /admin/stock/shortages — open shortages dashboard ─────────────────
+stockAdmin.get('/shortages', async (c) => {
+  const user = c.get('user')
+  const open = await listOpenShortages(c.env.DB)
+  const resolved = await listRecentResolvedShortages(c.env.DB, 30)
+
+  const renderResolutionLabel = (r: string | null) => {
+    if (!r) return '—'
+    const map: Record<string, string> = {
+      sub_rental: 'Sub-rental',
+      fix_by_event: 'Fix-by-event',
+      override: 'Override',
+      cancelled: 'Cancelled',
+      self_resolved: 'Self-resolved',
+    }
+    return map[r] || r
+  }
+  const resolutionBadge = (r: string | null) => {
+    const colors: Record<string, string> = {
+      sub_rental: '#0ea5e9', fix_by_event: '#10b981',
+      override: '#f59e0b', cancelled: '#6b7280', self_resolved: '#10b981',
+    }
+    const bg = r ? (colors[r] || '#6b7280') : '#dc2626'
+    return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:${bg};color:#fff;font-size:11px;font-weight:700">${esc(renderResolutionLabel(r))}</span>`
+  }
+
+  const openRows = open.length === 0 ? `<tr><td colspan="7" style="padding:30px;text-align:center;opacity:0.6">🎉 No open shortages right now.</td></tr>`
+    : open.map(s => /*html*/ `
+      <tr style="border-top:1px solid rgba(255,255,255,0.06)">
+        <td style="padding:10px 12px;white-space:nowrap">${esc(s.event_date)}</td>
+        <td style="padding:10px 12px"><a href="/calendar/event/${s.event_id}" style="color:inherit;text-decoration:underline">${esc(s.event_name)}</a></td>
+        <td style="padding:10px 12px"><a href="/admin/stock/${s.stock_item_id}" style="color:inherit;text-decoration:underline">${esc(s.brand)} — ${esc(s.description)}</a></td>
+        <td style="padding:10px 12px;font-family:monospace;text-align:right;color:#ff7a66;font-weight:700">${s.quantity_short}</td>
+        <td style="padding:10px 12px;font-family:monospace;text-align:right;opacity:0.7">${s.qty_on_hand}</td>
+        <td style="padding:10px 12px">${esc(s.notes || '')}</td>
+        <td style="padding:10px 12px;text-align:right">
+          <form method="post" action="/admin/stock/shortages/${s.id}/resolve" style="display:inline-flex;gap:4px;align-items:center">
+            <select name="resolution" style="padding:4px 6px;border-radius:4px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.15);color:inherit;font-size:12px">
+              <option value="sub_rental">Sub-rental</option>
+              <option value="fix_by_event">Fix-by-event</option>
+              <option value="override">Override</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+            <input type="text" name="notes" placeholder="notes…" style="padding:4px 6px;border-radius:4px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.15);color:inherit;font-size:12px;width:140px">
+            <button type="submit" class="btn" style="padding:4px 10px;font-size:12px;background:#10b981;color:#fff;border:none">Resolve</button>
+          </form>
+        </td>
+      </tr>
+    `).join('')
+
+  const resolvedRows = resolved.length === 0 ? '' : resolved.map(s => /*html*/ `
+    <tr style="border-top:1px solid rgba(255,255,255,0.06);opacity:0.85">
+      <td style="padding:8px 12px;white-space:nowrap;font-size:12px">${esc(s.event_date)}</td>
+      <td style="padding:8px 12px;font-size:12px"><a href="/calendar/event/${s.event_id}" style="color:inherit;text-decoration:underline">${esc(s.event_name)}</a></td>
+      <td style="padding:8px 12px;font-size:12px"><a href="/admin/stock/${s.stock_item_id}" style="color:inherit;text-decoration:underline">${esc(s.brand)} — ${esc(s.description)}</a></td>
+      <td style="padding:8px 12px;font-family:monospace;text-align:right;font-size:12px">${s.quantity_short}</td>
+      <td style="padding:8px 12px;font-size:12px">${resolutionBadge(s.resolution)}</td>
+      <td style="padding:8px 12px;font-size:12px;white-space:nowrap;opacity:0.7">${esc((s.resolved_at || '').replace('T', ' ').replace(/\.\d+Z?$/, ''))}</td>
+      <td style="padding:8px 12px;font-size:12px;opacity:0.7">${esc(s.notes || '')}</td>
+      <td style="padding:8px 12px;text-align:right">
+        <form method="post" action="/admin/stock/shortages/${s.id}/reopen" style="display:inline">
+          <button type="submit" class="btn" style="padding:3px 9px;font-size:11px;background:transparent;border:1px solid rgba(255,255,255,0.2);color:inherit">Reopen</button>
+        </form>
+      </td>
+    </tr>
+  `).join('')
+
+  const body = /*html*/ `
+    <div style="max-width:1400px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:12px">
+        <h1 style="margin:0">⚠ Stock Shortages</h1>
+        <a href="/admin/stock" class="btn btn-outline"><i class="fas fa-arrow-left"></i> Back to stock</a>
+      </div>
+
+      <div style="background:rgba(255,122,102,0.08);border:1px solid rgba(255,122,102,0.3);border-radius:8px;padding:14px;margin-bottom:20px;font-size:13px;line-height:1.6">
+        <strong style="color:#ff7a66">How shortages work:</strong> when you commit more units of an owned item than you have, a shortage row is auto-created. Resolve each one:
+        <strong>Sub-rental</strong> = sub-renting in to cover, <strong>Fix-by-event</strong> = will be returned/repaired in time, <strong>Override</strong> = no fix coming, just acknowledging, <strong>Cancelled</strong> = event cancelled or item swapped out.
+        Shortages that disappear on their own (e.g. you removed an equipment line) are auto-flagged <em>self-resolved</em>.
+      </div>
+
+      <h2 style="font-size:17px;margin:18px 0 8px 0;color:#ff7a66">Open (${open.length})</h2>
+      <div style="overflow-x:auto;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:8px">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead style="background:rgba(255,255,255,0.05)">
+            <tr>
+              <th style="text-align:left;padding:10px 12px">Event date</th>
+              <th style="text-align:left;padding:10px 12px">Event</th>
+              <th style="text-align:left;padding:10px 12px">Item</th>
+              <th style="text-align:right;padding:10px 12px">Short by</th>
+              <th style="text-align:right;padding:10px 12px">On hand</th>
+              <th style="text-align:left;padding:10px 12px">Notes</th>
+              <th style="text-align:right;padding:10px 12px">Resolve</th>
+            </tr>
+          </thead>
+          <tbody>${openRows}</tbody>
+        </table>
+      </div>
+
+      ${resolved.length > 0 ? `
+      <h2 style="font-size:17px;margin:24px 0 8px 0;opacity:0.85">Recently resolved (${resolved.length})</h2>
+      <div style="overflow-x:auto;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:8px">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead style="background:rgba(255,255,255,0.05)">
+            <tr>
+              <th style="text-align:left;padding:8px 12px">Event date</th>
+              <th style="text-align:left;padding:8px 12px">Event</th>
+              <th style="text-align:left;padding:8px 12px">Item</th>
+              <th style="text-align:right;padding:8px 12px">Short</th>
+              <th style="text-align:left;padding:8px 12px">Resolution</th>
+              <th style="text-align:left;padding:8px 12px">When</th>
+              <th style="text-align:left;padding:8px 12px">Notes</th>
+              <th style="text-align:right;padding:8px 12px"></th>
+            </tr>
+          </thead>
+          <tbody>${resolvedRows}</tbody>
+        </table>
+      </div>` : ''}
+    </div>
+  `
+  return c.html(layout('Shortages — Stock Admin', body, user, 'stock-admin'))
+})
+
+// ── POST /admin/stock/shortages/:id/resolve ───────────────────────────────
+stockAdmin.post('/shortages/:id/resolve', async (c) => {
+  const user = c.get('user')
+  const id = parseInt(c.req.param('id'), 10)
+  if (!Number.isFinite(id)) return c.notFound()
+  const form = await c.req.parseBody()
+  const resolution = String(form.resolution || '').trim() as any
+  const notes = (String(form.notes || '').trim() || null) as string | null
+  if (!SHORTAGE_RESOLUTIONS.includes(resolution)) {
+    return c.redirect('/admin/stock/shortages', 303)
+  }
+  await resolveShortage(c.env.DB, id, resolution, notes, user)
+  return c.redirect('/admin/stock/shortages', 303)
+})
+
+// ── POST /admin/stock/shortages/:id/reopen ────────────────────────────────
+stockAdmin.post('/shortages/:id/reopen', async (c) => {
+  const id = parseInt(c.req.param('id'), 10)
+  if (!Number.isFinite(id)) return c.notFound()
+  await reopenShortage(c.env.DB, id)
+  return c.redirect('/admin/stock/shortages', 303)
+})
+
+// ── GET /admin/stock/:id/allocations — per-item commitment view ───────────
+// Registered BEFORE /:id so it doesn't get caught as part of the param.
+stockAdmin.get('/:id/allocations', async (c) => {
+  const user = c.get('user')
+  const id = parseInt(c.req.param('id'), 10)
+  if (!Number.isFinite(id)) return c.notFound()
+
+  const item = await c.env.DB.prepare(
+    `SELECT id, brand, description, qty_on_hand, custody_type, status, active, low_stock_threshold
+     FROM stock_items WHERE id = ?`
+  ).bind(id).first<any>()
+  if (!item) return c.notFound()
+
+  // Default window: today → +90 days
+  const today = new Date().toISOString().slice(0, 10)
+  const horizon = new Date(Date.now() + 90 * 86400 * 1000).toISOString().slice(0, 10)
+  const commits = await getCommitmentsForItem(c.env.DB, id, today, horizon)
+
+  // Build a per-date roll-up
+  const byDate = new Map<string, Array<typeof commits[0]>>()
+  for (const cm of commits) {
+    const arr = byDate.get(cm.event_date) || []
+    arr.push(cm)
+    byDate.set(cm.event_date, arr)
+  }
+
+  const onHand = item.qty_on_hand
+  const countsTowardAvail = item.active === 1 && item.status === 'active' && item.custody_type === 'owned'
+
+  const rows = Array.from(byDate.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, list]) => {
+      const total = list.reduce((s, c) => s + c.quantity, 0)
+      const left = countsTowardAvail ? onHand - total : null
+      const isShort = countsTowardAvail && total > onHand
+      const cellColor = isShort ? '#ff7a66' : (countsTowardAvail && total === onHand ? '#fbbf24' : '#a8ff7a')
+      return /*html*/ `
+        <tr style="border-top:1px solid rgba(255,255,255,0.06)">
+          <td style="padding:10px 12px;font-family:monospace;white-space:nowrap">${esc(date)}</td>
+          <td style="padding:10px 12px">
+            ${list.map(c => `
+              <div style="display:flex;gap:8px;align-items:center;margin:2px 0">
+                <span style="font-family:monospace;color:${cellColor};min-width:40px;text-align:right">${c.quantity}×</span>
+                <a href="/calendar/event/${c.event_id}" style="color:inherit;text-decoration:underline;font-size:13px">${esc(c.event_name)}</a>
+                <span style="font-size:11px;opacity:0.6">${esc(c.status)}</span>
+                ${c.override_reason ? `<span style="font-size:10px;padding:1px 5px;background:rgba(245,158,11,0.15);color:#fbbf24;border-radius:4px" title="${esc(c.override_reason)}">override</span>` : ''}
+              </div>
+            `).join('')}
+          </td>
+          <td style="padding:10px 12px;text-align:right;font-family:monospace;color:${cellColor};font-weight:700">${total}</td>
+          <td style="padding:10px 12px;text-align:right;font-family:monospace;color:${cellColor}">${left === null ? '—' : left}</td>
+        </tr>
+      `
+    }).join('')
+
+  const body = /*html*/ `
+    <div style="max-width:1100px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;gap:12px;flex-wrap:wrap">
+        <div>
+          <h1 style="margin:0 0 6px 0">📅 Allocations — ${esc(item.brand)} · ${esc(item.description)}</h1>
+          <div style="font-size:13px;opacity:0.75">
+            On hand: <strong>${onHand}</strong> ·
+            Custody: <strong>${esc(item.custody_type)}</strong> ·
+            Status: <strong>${esc(item.status)}</strong> ·
+            ${countsTowardAvail
+              ? '<span style="color:#a8ff7a">counts toward availability</span>'
+              : '<span style="color:#fbbf24">does NOT count toward availability (not owned-active)</span>'}
+          </div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <a href="/admin/stock/${id}" class="btn btn-outline"><i class="fas fa-pen"></i> Edit item</a>
+          <a href="/admin/stock" class="btn btn-outline"><i class="fas fa-arrow-left"></i> Back</a>
+        </div>
+      </div>
+
+      ${commits.length === 0 ? `
+        <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:30px;text-align:center;opacity:0.6">
+          No allocations for this item in the next 90 days.
+        </div>
+      ` : `
+        <div style="overflow-x:auto;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:8px">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead style="background:rgba(255,255,255,0.05)">
+              <tr>
+                <th style="text-align:left;padding:10px 12px">Date</th>
+                <th style="text-align:left;padding:10px 12px">Events / committed</th>
+                <th style="text-align:right;padding:10px 12px">Total committed</th>
+                <th style="text-align:right;padding:10px 12px">Remaining</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `}
+    </div>
+  `
+  return c.html(layout(`Allocations — ${item.brand} ${item.description}`, body, user, 'stock-admin'))
 })
 
 // ── POST /admin/stock/bulk — bulk action on selected ids ──────────────────

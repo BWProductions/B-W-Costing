@@ -8,6 +8,10 @@ import { layout } from '../lib/layout.js'
 import type { AuthUser } from '../lib/auth.js'
 import { buildICS, generateIcsToken, type ICSEvent } from '../lib/ics.js'
 import { audit, diff } from '../lib/audit.js'
+import {
+  pickerCandidates, recordAllocation, recordDeallocation, recomputeShortage,
+  getAvailability,
+} from '../lib/allocations.js'
 
 type Env = { Bindings: { DB: D1Database }; Variables: { user: AuthUser } }
 
@@ -100,12 +104,39 @@ function vehicleChip(r: any, eventId: number): string {
 }
 
 function equipRow(r: any, eventId: number): string {
-  return `<div class="equip-row" data-equip-id="${r.id}" data-event-id="${eventId}"
-    style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:#161b22;border:1px solid #21262d;border-radius:6px;margin-bottom:4px">
+  // Phase 7: surface availability + shortage on stock-linked rows.
+  // r.qty_on_hand / r.committed_other / r.shortage_qty are joined in by the loader.
+  const isLinked = !!r.stock_item_id
+  const shortageQty = Number(r.shortage_qty) || 0
+  const isShort = shortageQty > 0
+  const linkedBadge = isLinked
+    ? `<a href="/admin/stock/${r.stock_item_id}/allocations" target="_blank" title="View allocations for stock #${r.stock_item_id}"
+         style="font-size:9px;padding:1px 5px;background:rgba(124,255,43,0.15);color:#a8ff7a;border-radius:4px;text-decoration:none">
+         <i class="fa-solid fa-link" style="font-size:8px"></i> #${r.stock_item_id}
+       </a>`
+    : `<button type="button" class="equip-link-stock" title="Link this row to a stock item"
+         style="font-size:9px;padding:1px 6px;background:rgba(156,163,175,0.10);color:#9ca3af;border:1px solid rgba(156,163,175,0.25);border-radius:4px;cursor:pointer">
+         <i class="fa-solid fa-link"></i> link
+       </button>`
+  const availInline = (isLinked && r.qty_on_hand !== null && r.qty_on_hand !== undefined && r.custody_type === 'owned' && r.status === 'active')
+    ? `<span style="font-size:10px;color:${isShort ? '#ff7a66' : '#9ca3af'};font-family:monospace" title="qty held by this event / qty owned">
+         ${r.quantity}/${r.qty_on_hand}
+       </span>`
+    : ''
+  const shortBadge = isShort
+    ? `<a href="/admin/stock/shortages" target="_blank" title="Short by ${shortageQty} — open shortages dashboard"
+         style="font-size:9px;padding:1px 6px;background:rgba(255,74,28,0.20);color:#ffb066;border:1px solid rgba(255,74,28,0.35);border-radius:4px;text-decoration:none;font-weight:700">
+         <i class="fa-solid fa-triangle-exclamation"></i> short ${shortageQty}
+       </a>`
+    : ''
+  return `<div class="equip-row" data-equip-id="${r.id}" data-event-id="${eventId}" data-stock-id="${r.stock_item_id || ''}"
+    style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:#161b22;border:1px solid ${isShort ? 'rgba(255,74,28,0.35)' : '#21262d'};border-radius:6px;margin-bottom:4px">
     <span style="font-family:monospace;color:#F0D080;font-size:13px;min-width:50px;text-align:right">${r.quantity}×</span>
     <span style="flex:1;color:#fff;font-size:13px">${escapeHtml(r.description)}</span>
     ${r.notes ? `<span style="color:#9ca3af;font-size:11px;font-style:italic">${escapeHtml(r.notes)}</span>` : ''}
-    ${r.stock_item_id ? `<span style="font-size:9px;padding:1px 5px;background:rgba(124,255,43,0.15);color:#a8ff7a;border-radius:4px">linked</span>` : `<span style="font-size:9px;padding:1px 5px;background:rgba(156,163,175,0.10);color:#6b7280;border-radius:4px">free</span>`}
+    ${availInline}
+    ${shortBadge}
+    ${linkedBadge}
     <button type="button" class="equip-remove" title="Remove" style="background:none;border:0;color:#6b7280;cursor:pointer;padding:2px 6px;font-size:12px">
       <i class="fa-solid fa-xmark"></i>
     </button>
@@ -708,10 +739,19 @@ calendar.get('/event/:id', async (c) => {
      FROM calendar_event_vehicles cev JOIN fleet f ON f.id = cev.fleet_id
      WHERE cev.event_id = ? ORDER BY f.description`
   ).bind(id).all<any>()
+  // Phase 7: pull stock_items meta + shortage info alongside equipment rows
   const equipRows = await db.prepare(
-    `SELECT id, description, quantity, notes, stock_item_id
-     FROM calendar_event_equipment
-     WHERE event_id = ? ORDER BY id`
+    `SELECT cee.id, cee.description, cee.quantity, cee.notes, cee.stock_item_id,
+            si.qty_on_hand, si.custody_type, si.status,
+            (SELECT COALESCE(SUM(s.quantity_short), 0)
+               FROM stock_shortages s
+              WHERE s.event_id = cee.event_id
+                AND s.stock_item_id = cee.stock_item_id
+                AND (s.resolution IS NULL OR s.resolution = '')
+            ) AS shortage_qty
+     FROM calendar_event_equipment cee
+     LEFT JOIN stock_items si ON si.id = cee.stock_item_id
+     WHERE cee.event_id = ? ORDER BY cee.id`
   ).bind(id).all<any>()
 
   // ── Load sheets: explicitly pinned via calendar_event_id, OR matching by date
@@ -882,14 +922,18 @@ calendar.get('/event/:id', async (c) => {
           <div style="color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1px">
             <i class="fa-solid fa-boxes-stacked"></i> Equipment (${equipRows.results?.length || 0})
           </div>
-          <span style="font-size:10px;color:#6b7280;font-style:italic">free-type for now · stock-linked once import lands</span>
+          <span style="font-size:10px;color:#6b7280;font-style:italic">type to search stock · or type free text and add</span>
         </div>
         <div id="equipList">
           ${(equipRows.results || []).map((r:any) => equipRow(r, e.id)).join('')}
         </div>
-        <form id="equipAddForm" style="display:flex;gap:6px;margin-top:10px;align-items:stretch;flex-wrap:wrap">
-          <input type="text" id="equipDesc" placeholder="e.g. Castle Lager umbrellas - New" required
-            style="flex:1;min-width:200px;padding:8px 10px;background:#161b22;border:1px solid #21262d;border-radius:6px;color:#fff;font-size:13px" />
+        <form id="equipAddForm" style="display:flex;gap:6px;margin-top:10px;align-items:stretch;flex-wrap:wrap;position:relative">
+          <div style="flex:1;min-width:200px;position:relative">
+            <input type="text" id="equipDesc" placeholder="Type to search stock (e.g. Castle umbrella)" required autocomplete="off"
+              style="width:100%;padding:8px 10px;background:#161b22;border:1px solid #21262d;border-radius:6px;color:#fff;font-size:13px;box-sizing:border-box" />
+            <input type="hidden" id="equipStockId" value="" />
+            <div id="equipPicker" style="display:none;position:absolute;left:0;right:0;top:100%;margin-top:4px;background:#0d1117;border:1px solid #21262d;border-radius:6px;max-height:320px;overflow-y:auto;z-index:50;box-shadow:0 8px 16px rgba(0,0,0,0.4)"></div>
+          </div>
           <input type="number" id="equipQty" placeholder="Qty" min="1" step="1" value="1" required
             style="width:80px;padding:8px 10px;background:#161b22;border:1px solid #21262d;border-radius:6px;color:#fff;font-size:13px;font-family:monospace" />
           <button type="submit"
@@ -1211,34 +1255,128 @@ calendar.get('/event/:id', async (c) => {
         }
       });
 
-      // ── Equipment add ────────────────────────────────────────────
+      // ── Equipment add (Phase 7: with stock picker dropdown) ──────
       const equipForm = document.getElementById('equipAddForm');
       const equipDesc = document.getElementById('equipDesc');
-      const equipQty = document.getElementById('equipQty');
+      const equipQty  = document.getElementById('equipQty');
+      const equipStockId = document.getElementById('equipStockId');
+      const equipPicker = document.getElementById('equipPicker');
       const equipList = document.getElementById('equipList');
+
+      let pickerTimer = null;
+      let lastQuery = '';
+
+      function renderPicker(candidates, query) {
+        if (!candidates || !candidates.length) {
+          equipPicker.innerHTML = '<div style="padding:10px 12px;color:#6b7280;font-size:12px">No stock matches for "' + escapeAttr(query) + '" — Add to use as free-text.</div>';
+          equipPicker.style.display = 'block';
+          return;
+        }
+        const rows = candidates.map(c => {
+          const counts = c.counts_toward_availability;
+          const avail = c.available_on_date;
+          const availClass = avail < 0 ? '#ff7a66' : (avail === 0 ? '#ffb066' : '#a8ff7a');
+          const custodyTag = c.custody_type === 'owned' ? ''
+            : '<span style="font-size:9px;padding:1px 5px;background:rgba(245,158,11,0.15);color:#fbbf24;border-radius:4px;margin-left:6px">' + escapeAttr(c.custody_type) + '</span>';
+          const scoreTag = c.score < 1 ? '<span style="font-size:9px;padding:1px 5px;background:rgba(245,158,11,0.15);color:#fbbf24;border-radius:4px">fuzzy ' + c.score.toFixed(2) + '</span>' : '';
+          const availLine = counts
+            ? '<span style="font-family:monospace;color:' + availClass + ';font-size:11px">' + avail + '/' + c.qty_on_hand + ' avail</span>'
+            : '<span style="font-family:monospace;color:#6b7280;font-size:11px">' + c.qty_on_hand + ' (not avail)</span>';
+          return '<div class="picker-row" data-stock-id="' + c.id + '" data-desc="' + escapeAttr(c.brand + ' — ' + c.description) + '"'
+            + ' style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #21262d;display:flex;align-items:center;gap:10px"'
+            + ' onmouseover="this.style.background=\\'#161b22\\'" onmouseout="this.style.background=\\'transparent\\'">'
+            + '<div style="flex:1;min-width:0">'
+            +   '<div style="color:#fff;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeAttr(c.brand) + ' — ' + escapeAttr(c.description) + '</div>'
+            +   '<div style="font-size:11px;color:#9ca3af;margin-top:2px;display:flex;gap:8px;align-items:center">' + availLine + custodyTag + scoreTag + '</div>'
+            + '</div>'
+            + '<i class="fa-solid fa-arrow-right" style="color:#6b7280;font-size:11px"></i>'
+            + '</div>';
+        }).join('');
+        equipPicker.innerHTML = rows
+          + '<div style="padding:8px 12px;color:#6b7280;font-size:11px;background:#0a0d12;text-align:center">'
+          + 'Or press <kbd style="background:#21262d;padding:1px 4px;border-radius:3px;font-family:monospace">Enter</kbd> / click <strong>Add</strong> to use "' + escapeAttr(query) + '" as free text'
+          + '</div>';
+        equipPicker.style.display = 'block';
+      }
+
+      function hidePicker() { equipPicker.style.display = 'none'; }
+
+      async function searchPicker(q) {
+        if (!q || q.length < 2) { hidePicker(); return; }
+        if (q === lastQuery) return;
+        lastQuery = q;
+        try {
+          const r = await fetch('/calendar/api/event/' + EVENT_ID + '/equipment-picker?q=' + encodeURIComponent(q));
+          const data = await r.json();
+          if (q !== lastQuery) return; // user typed more in the meantime
+          renderPicker(data.candidates || [], q);
+        } catch (e) { /* silent */ }
+      }
+
+      equipDesc.addEventListener('input', () => {
+        equipStockId.value = ''; // typing breaks any prior selection
+        clearTimeout(pickerTimer);
+        pickerTimer = setTimeout(() => searchPicker(equipDesc.value.trim()), 220);
+      });
+      equipDesc.addEventListener('focus', () => {
+        if (equipDesc.value.trim().length >= 2) searchPicker(equipDesc.value.trim());
+      });
+      // Click outside closes picker
+      document.addEventListener('click', (ev) => {
+        if (!equipPicker.contains(ev.target) && ev.target !== equipDesc) hidePicker();
+      });
+      // Pick a candidate
+      equipPicker.addEventListener('click', (ev) => {
+        const row = ev.target.closest('.picker-row');
+        if (!row) return;
+        equipStockId.value = row.dataset.stockId;
+        equipDesc.value = row.dataset.desc;
+        hidePicker();
+        equipQty.focus();
+      });
+
       equipForm.addEventListener('submit', async (ev) => {
         ev.preventDefault();
         const description = equipDesc.value.trim();
         const quantity = parseFloat(equipQty.value);
+        const stockItemId = equipStockId.value ? parseInt(equipStockId.value, 10) : null;
         if (!description || !(quantity > 0)) return;
-        const { status, data } = await postJSON('/calendar/api/event/' + EVENT_ID + '/equipment', { description, quantity });
+        const { status, data } = await postJSON('/calendar/api/event/' + EVENT_ID + '/equipment', {
+          description, quantity, stock_item_id: stockItemId,
+        });
         if (status === 200 && data.ok) {
-          // optimistic append
-          const div = document.createElement('div');
-          div.innerHTML = '<div class="equip-row" data-equip-id="' + data.id + '" data-event-id="' + EVENT_ID + '" style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:#161b22;border:1px solid #21262d;border-radius:6px;margin-bottom:4px">'
-            + '<span style="font-family:monospace;color:#F0D080;font-size:13px;min-width:50px;text-align:right">' + escapeAttr(quantity) + '×</span>'
-            + '<span style="flex:1;color:#fff;font-size:13px">' + escapeAttr(description) + '</span>'
-            + '<span style="font-size:9px;padding:1px 5px;background:rgba(156,163,175,0.10);color:#6b7280;border-radius:4px">free</span>'
-            + '<button type="button" class="equip-remove" title="Remove" style="background:none;border:0;color:#6b7280;cursor:pointer;padding:2px 6px;font-size:12px"><i class="fa-solid fa-xmark"></i></button>'
-            + '</div>';
-          equipList.appendChild(div.firstChild);
-          equipDesc.value = '';
-          equipQty.value = '1';
+          const row = buildEquipRow(data, EVENT_ID);
+          equipList.insertAdjacentHTML('beforeend', row);
+          equipDesc.value = ''; equipQty.value = '1'; equipStockId.value = ''; lastQuery = '';
+          hidePicker();
           equipDesc.focus();
         } else {
           alert(data.error || 'Failed to add equipment');
         }
       });
+
+      // Build an equip-row DOM string mirroring server-side equipRow()
+      function buildEquipRow(d, evId) {
+        const isLinked = !!d.stock_item_id;
+        const isShort = (d.shortage_qty || 0) > 0;
+        const borderColor = isShort ? 'rgba(255,74,28,0.35)' : '#21262d';
+        const availInline = (isLinked && d.qty_on_hand != null && d.custody_type === 'owned' && d.status === 'active')
+          ? '<span style="font-size:10px;color:' + (isShort ? '#ff7a66' : '#9ca3af') + ';font-family:monospace">' + d.quantity + '/' + d.qty_on_hand + '</span>'
+          : '';
+        const shortBadge = isShort
+          ? '<a href="/admin/stock/shortages" target="_blank" style="font-size:9px;padding:1px 6px;background:rgba(255,74,28,0.20);color:#ffb066;border:1px solid rgba(255,74,28,0.35);border-radius:4px;text-decoration:none;font-weight:700"><i class="fa-solid fa-triangle-exclamation"></i> short ' + d.shortage_qty + '</a>'
+          : '';
+        const linkedBadge = isLinked
+          ? '<a href="/admin/stock/' + d.stock_item_id + '/allocations" target="_blank" style="font-size:9px;padding:1px 5px;background:rgba(124,255,43,0.15);color:#a8ff7a;border-radius:4px;text-decoration:none"><i class="fa-solid fa-link" style="font-size:8px"></i> #' + d.stock_item_id + '</a>'
+          : '<button type="button" class="equip-link-stock" style="font-size:9px;padding:1px 6px;background:rgba(156,163,175,0.10);color:#9ca3af;border:1px solid rgba(156,163,175,0.25);border-radius:4px;cursor:pointer"><i class="fa-solid fa-link"></i> link</button>';
+        return '<div class="equip-row" data-equip-id="' + d.id + '" data-event-id="' + evId + '" data-stock-id="' + (d.stock_item_id || '') + '"'
+          + ' style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:#161b22;border:1px solid ' + borderColor + ';border-radius:6px;margin-bottom:4px">'
+          + '<span style="font-family:monospace;color:#F0D080;font-size:13px;min-width:50px;text-align:right">' + d.quantity + '×</span>'
+          + '<span style="flex:1;color:#fff;font-size:13px">' + escapeAttr(d.description) + '</span>'
+          + availInline + shortBadge + linkedBadge
+          + '<button type="button" class="equip-remove" title="Remove" style="background:none;border:0;color:#6b7280;cursor:pointer;padding:2px 6px;font-size:12px"><i class="fa-solid fa-xmark"></i></button>'
+          + '</div>';
+      }
 
       // Equipment remove (delegated)
       document.addEventListener('click', async (ev) => {
@@ -1251,6 +1389,45 @@ calendar.get('/event/:id', async (c) => {
         const { status, data } = await deleteJSON('/calendar/api/event/' + EVENT_ID + '/equipment/' + eqId);
         if (status === 200 && data.ok) row.remove();
         else alert(data.error || 'Remove failed');
+      });
+
+      // ── Phase 7: Link existing free-text row to stock ────────────
+      document.addEventListener('click', async (ev) => {
+        const btn = ev.target.closest('.equip-link-stock');
+        if (!btn) return;
+        const row = btn.closest('.equip-row');
+        if (!row) return;
+        const eqId = row.dataset.equipId;
+        const descSpan = row.querySelector('span:nth-of-type(2)'); // [qty, desc]
+        const currentDesc = descSpan ? descSpan.textContent.trim() : '';
+        const q = prompt('Search stock to link to:\\n("' + currentDesc + '")', currentDesc);
+        if (!q || !q.trim()) return;
+        // Hit picker, show numbered list, prompt for choice
+        try {
+          const r = await fetch('/calendar/api/event/' + EVENT_ID + '/equipment-picker?q=' + encodeURIComponent(q));
+          const data = await r.json();
+          if (!data.ok || !data.candidates || !data.candidates.length) {
+            alert('No matches found for "' + q + '"');
+            return;
+          }
+          const choices = data.candidates.map((c, i) =>
+            (i + 1) + '. ' + c.brand + ' — ' + c.description
+              + '  (avail ' + c.available_on_date + '/' + c.qty_on_hand + (c.score < 1 ? ', fuzzy ' + c.score.toFixed(2) : '') + ')'
+          ).join('\\n');
+          const pickStr = prompt('Pick a number to link:\\n\\n' + choices, '1');
+          const idx = parseInt(pickStr, 10) - 1;
+          if (isNaN(idx) || idx < 0 || idx >= data.candidates.length) return;
+          const stockId = data.candidates[idx].id;
+          const link = await postJSON('/calendar/api/event/' + EVENT_ID + '/equipment/' + eqId + '/link', { stock_item_id: stockId });
+          if (link.status === 200 && link.data.ok) {
+            // Reload the page to show updated row state cleanly
+            window.location.reload();
+          } else {
+            alert(link.data.error || 'Link failed');
+          }
+        } catch (e) {
+          alert('Picker error: ' + e.message);
+        }
       });
     })();
     </script>
@@ -1728,31 +1905,148 @@ calendar.post('/api/event/:id/equipment', async (c) => {
   const description = String(body.description || '').trim().slice(0, 300)
   const quantity = parseFloat(body.quantity) || 1
   const notes = body.notes ? String(body.notes).trim().slice(0, 500) : null
+  // Phase 7: optional stock_item_id from picker
+  const stockItemId = body.stock_item_id != null ? parseInt(String(body.stock_item_id), 10) : null
   if (!description) return c.json({ ok: false, error: 'description required' }, 400)
   if (quantity <= 0) return c.json({ ok: false, error: 'quantity must be > 0' }, 400)
 
-  const result = await db.prepare(
-    `INSERT INTO calendar_event_equipment (event_id, description, quantity, notes, created_by)
-     VALUES (?, ?, ?, ?, ?)`
-  ).bind(eventId, description, quantity, notes, user?.id ?? null).run()
+  // Fetch event date for shortage recompute
+  const ev = await db.prepare(`SELECT event_date FROM calendar_events WHERE id = ?`).bind(eventId).first<{ event_date: string }>()
+  if (!ev) return c.json({ ok: false, error: 'event not found' }, 404)
 
+  // Validate stock_item_id if supplied
+  let linkedItem: any = null
+  if (stockItemId !== null && Number.isFinite(stockItemId)) {
+    linkedItem = await db.prepare(
+      `SELECT id, brand, description, qty_on_hand, custody_type, status, active
+       FROM stock_items WHERE id = ?`
+    ).bind(stockItemId).first<any>()
+    if (!linkedItem) return c.json({ ok: false, error: 'stock item not found' }, 400)
+    if (linkedItem.active !== 1) return c.json({ ok: false, error: 'stock item is inactive' }, 400)
+  }
+
+  const result = await db.prepare(
+    `INSERT INTO calendar_event_equipment (event_id, stock_item_id, description, quantity, notes, created_by)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).bind(eventId, linkedItem ? linkedItem.id : null, description, quantity, notes, user?.id ?? null).run()
+  const equipId = Number(result.meta.last_row_id)
+
+  // Audit + allocation write
   await audit(c, {
     action: 'create',
     entityType: 'event_equipment',
     entityId: eventId,
-    fieldChanges: { description: { from: null, to: description }, quantity: { from: null, to: quantity } },
+    fieldChanges: {
+      description: { from: null, to: description },
+      quantity: { from: null, to: quantity },
+      stock_item_id: { from: null, to: linkedItem ? linkedItem.id : null },
+    },
   })
 
-  return c.json({ ok: true, id: result.meta.last_row_id, description, quantity, notes })
+  let shortageQty = 0
+  if (linkedItem) {
+    await recordAllocation(db, equipId, eventId, linkedItem.id, quantity, user)
+    shortageQty = await recomputeShortage(db, eventId, linkedItem.id, ev.event_date)
+  }
+
+  return c.json({
+    ok: true,
+    id: equipId,
+    description,
+    quantity,
+    notes,
+    stock_item_id: linkedItem ? linkedItem.id : null,
+    qty_on_hand: linkedItem ? linkedItem.qty_on_hand : null,
+    custody_type: linkedItem ? linkedItem.custody_type : null,
+    status: linkedItem ? linkedItem.status : null,
+    shortage_qty: shortageQty,
+  })
 })
 
-// DELETE /calendar/api/event/:id/equipment/:eqId
-calendar.delete('/api/event/:id/equipment/:eqId', async (c) => {
+// ── GET /calendar/api/event/:id/equipment-picker?q=… ──────────────────────
+// Phase 7: live fuzzy picker for the equipment add box. Returns top N stock
+// candidates with availability for THIS event's date.
+calendar.get('/api/event/:id/equipment-picker', async (c) => {
+  const db = c.env.DB
+  const eventId = parseInt(c.req.param('id'))
+  const q = (c.req.query('q') || '').trim()
+  if (!eventId) return c.json({ ok: false, error: 'bad id' }, 400)
+  if (!q || q.length < 2) return c.json({ ok: true, candidates: [] })
+
+  const ev = await db.prepare(`SELECT event_date FROM calendar_events WHERE id = ?`).bind(eventId).first<{ event_date: string }>()
+  if (!ev) return c.json({ ok: false, error: 'event not found' }, 404)
+
+  const candidates = await pickerCandidates(db, q, ev.event_date, eventId, 8)
+  return c.json({ ok: true, candidates, event_date: ev.event_date })
+})
+
+// ── POST /calendar/api/event/:id/equipment/:eqId/link  ────────────────────
+// Phase 7: link an existing free-text equipment row to a stock_item_id.
+// Body: { stock_item_id: number }
+calendar.post('/api/event/:id/equipment/:eqId/link', async (c) => {
+  const user = c.get('user') as any
   const db = c.env.DB
   const eventId = parseInt(c.req.param('id'))
   const eqId = parseInt(c.req.param('eqId'))
   if (!eventId || !eqId) return c.json({ ok: false, error: 'bad id' }, 400)
-  const before = await db.prepare(`SELECT description, quantity FROM calendar_event_equipment WHERE id=? AND event_id=?`).bind(eqId, eventId).first<any>()
+  let body: any
+  try { body = await c.req.json() } catch { return c.json({ ok: false, error: 'invalid json' }, 400) }
+  const stockItemId = body.stock_item_id != null ? parseInt(String(body.stock_item_id), 10) : null
+  if (!Number.isFinite(stockItemId)) return c.json({ ok: false, error: 'stock_item_id required' }, 400)
+
+  // Verify ownership of the equipment row
+  const eq = await db.prepare(
+    `SELECT id, stock_item_id, quantity FROM calendar_event_equipment WHERE id = ? AND event_id = ?`
+  ).bind(eqId, eventId).first<{ id: number; stock_item_id: number | null; quantity: number }>()
+  if (!eq) return c.json({ ok: false, error: 'equipment row not found' }, 404)
+  if (eq.stock_item_id) return c.json({ ok: false, error: 'row is already linked — remove and re-add to change' }, 400)
+
+  const item = await db.prepare(
+    `SELECT id, brand, description, qty_on_hand, custody_type, status, active
+     FROM stock_items WHERE id = ?`
+  ).bind(stockItemId).first<any>()
+  if (!item) return c.json({ ok: false, error: 'stock item not found' }, 400)
+  if (item.active !== 1) return c.json({ ok: false, error: 'stock item is inactive' }, 400)
+
+  const ev = await db.prepare(`SELECT event_date FROM calendar_events WHERE id = ?`).bind(eventId).first<{ event_date: string }>()
+  if (!ev) return c.json({ ok: false, error: 'event not found' }, 404)
+
+  await db.prepare(
+    `UPDATE calendar_event_equipment SET stock_item_id = ? WHERE id = ? AND event_id = ?`
+  ).bind(stockItemId, eqId, eventId).run()
+
+  await audit(c, {
+    action: 'update',
+    entityType: 'event_equipment',
+    entityId: eventId,
+    fieldChanges: { stock_item_id: { from: null, to: stockItemId } },
+  })
+
+  await recordAllocation(db, eqId, eventId, stockItemId, eq.quantity, user)
+  const shortageQty = await recomputeShortage(db, eventId, stockItemId, ev.event_date)
+
+  return c.json({
+    ok: true,
+    stock_item_id: stockItemId,
+    qty_on_hand: item.qty_on_hand,
+    custody_type: item.custody_type,
+    status: item.status,
+    shortage_qty: shortageQty,
+  })
+})
+
+// DELETE /calendar/api/event/:id/equipment/:eqId
+calendar.delete('/api/event/:id/equipment/:eqId', async (c) => {
+  const user = c.get('user') as any
+  const db = c.env.DB
+  const eventId = parseInt(c.req.param('id'))
+  const eqId = parseInt(c.req.param('eqId'))
+  if (!eventId || !eqId) return c.json({ ok: false, error: 'bad id' }, 400)
+  const before = await db.prepare(
+    `SELECT description, quantity, stock_item_id FROM calendar_event_equipment WHERE id=? AND event_id=?`
+  ).bind(eqId, eventId).first<{ description: string; quantity: number; stock_item_id: number | null }>()
+  const ev = await db.prepare(`SELECT event_date FROM calendar_events WHERE id = ?`).bind(eventId).first<{ event_date: string }>()
+
   await db.prepare(`DELETE FROM calendar_event_equipment WHERE id=? AND event_id=?`).bind(eqId, eventId).run()
   await audit(c, {
     action: 'delete',
@@ -1760,6 +2054,12 @@ calendar.delete('/api/event/:id/equipment/:eqId', async (c) => {
     entityId: eventId,
     fieldChanges: before ? { description: { from: before.description, to: null }, quantity: { from: before.quantity, to: null } } : null,
   })
+
+  // Phase 7: write deallocation + recompute shortage if this row was linked
+  if (before?.stock_item_id && ev) {
+    await recordDeallocation(db, eqId, eventId, before.stock_item_id, before.quantity, user)
+    await recomputeShortage(db, eventId, before.stock_item_id, ev.event_date)
+  }
   return c.json({ ok: true })
 })
 
@@ -1789,7 +2089,7 @@ calendar.patch('/api/event/:id/equipment/:eqId', async (c) => {
   const keys = Object.keys(updates)
   if (!keys.length) return c.json({ ok: false, error: 'no updates' }, 400)
 
-  const before = await db.prepare(`SELECT ${keys.join(',')} FROM calendar_event_equipment WHERE id=? AND event_id=?`).bind(eqId, eventId).first<any>()
+  const before = await db.prepare(`SELECT ${keys.join(',')}, stock_item_id FROM calendar_event_equipment WHERE id=? AND event_id=?`).bind(eqId, eventId).first<any>()
   const sets = keys.map(k => `${k}=?`).join(', ')
   const vals = keys.map(k => updates[k])
   vals.push(eqId, eventId)
@@ -1801,6 +2101,22 @@ calendar.patch('/api/event/:id/equipment/:eqId', async (c) => {
     entityId: eventId,
     fieldChanges: diff(before || {}, updates, keys),
   })
+
+  // Phase 7: if qty changed on a stock-linked row, recompute shortage + log diff
+  if ('quantity' in updates && before?.stock_item_id) {
+    const ev = await db.prepare(`SELECT event_date FROM calendar_events WHERE id = ?`).bind(eventId).first<{ event_date: string }>()
+    if (ev) {
+      const oldQty = Number(before.quantity) || 0
+      const newQty = Number(updates.quantity) || 0
+      const delta = newQty - oldQty
+      if (delta !== 0) {
+        const user = c.get('user') as any
+        if (delta > 0) await recordAllocation(db, eqId, eventId, before.stock_item_id, delta, user)
+        else            await recordDeallocation(db, eqId, eventId, before.stock_item_id, -delta, user)
+      }
+      await recomputeShortage(db, eventId, before.stock_item_id, ev.event_date)
+    }
+  }
   return c.json({ ok: true })
 })
 
