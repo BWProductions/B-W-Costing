@@ -339,6 +339,7 @@ stockAdmin.get('/', async (c) => {
         </a>
         <a href="/admin/stock/scan"      class="btn btn-outline" style="color:#06b6d4;border-color:#06b6d4"><i class="fas fa-barcode"></i> Stock-take</a>
         <a href="/admin/stock/import"    class="btn btn-outline" style="color:#a855f7;border-color:#a855f7"><i class="fas fa-file-import"></i> Bulk Import</a>
+        <a href="/admin/brands"          class="btn btn-outline" style="color:#C9A84C;border-color:#C9A84C"><i class="fas fa-tags"></i> Brands</a>
         <a href="/admin/stock/shortages" class="btn btn-outline" style="${shortageCount > 0 ? 'color:#ff7a66;border-color:#ff7a66' : 'color:#9ca3af;border-color:#9ca3af'}">
           <i class="fas fa-triangle-exclamation"></i> Shortages${shortageCount > 0 ? ` <span style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;background:#ff7a66;color:#1a1004;border-radius:9px;font-size:11px;font-weight:700;margin-left:4px">${shortageCount}</span>` : ''}
         </a>
