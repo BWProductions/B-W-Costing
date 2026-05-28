@@ -272,7 +272,7 @@ damages.post('/new', async (c) => {
     const id = await createDamage(c.env.DB, {
       stock_item_id: stockItemId, quantity, damage_type: damageType,
       cause, event_id: eventId, unit_value: unitValue,
-    }, { id: user.id, name: user.full_name || user.email })
+    }, { id: user.id, name: user.name || user.email })
     return c.redirect(`/admin/stock/damages/${id}`)
   } catch (e: any) {
     return c.html(layout('Create failed', `<div class="card" style="padding:24px"><h2 style="color:#ff7a66">Create failed</h2><p>${esc(e?.message)}</p><a href="/admin/stock/damages/new" class="btn btn-outline">Back</a></div>`, user, 'stock-admin'), 400)
@@ -347,25 +347,25 @@ damages.get('/:id', async (c) => {
 
 damages.post('/:id/approve', async (c) => {
   const user = c.get('user'); const id = Number(c.req.param('id'))
-  try { await approveDamage(c.env.DB, id, { id: user.id, name: user.full_name || user.email }) } catch {}
+  try { await approveDamage(c.env.DB, id, { id: user.id, name: user.name || user.email }) } catch {}
   return c.redirect(`/admin/stock/damages/${id}`)
 })
 
 damages.post('/:id/writeoff', async (c) => {
   const user = c.get('user'); const id = Number(c.req.param('id'))
-  try { await writeOffDamage(c.env.DB, id, { id: user.id, name: user.full_name || user.email }) } catch {}
+  try { await writeOffDamage(c.env.DB, id, { id: user.id, name: user.name || user.email }) } catch {}
   return c.redirect(`/admin/stock/damages/${id}`)
 })
 
 damages.post('/:id/recover', async (c) => {
   const user = c.get('user'); const id = Number(c.req.param('id'))
-  try { await recoverDamage(c.env.DB, id, { id: user.id, name: user.full_name || user.email }) } catch {}
+  try { await recoverDamage(c.env.DB, id, { id: user.id, name: user.name || user.email }) } catch {}
   return c.redirect(`/admin/stock/damages/${id}`)
 })
 
 damages.post('/:id/cancel', async (c) => {
   const user = c.get('user'); const id = Number(c.req.param('id'))
-  try { await cancelDamage(c.env.DB, id, { id: user.id, name: user.full_name || user.email }) } catch {}
+  try { await cancelDamage(c.env.DB, id, { id: user.id, name: user.name || user.email }) } catch {}
   return c.redirect(`/admin/stock/damages/${id}`)
 })
 

@@ -19,6 +19,14 @@ import stockAdmin from './routes/stock-admin.js'
 import brands from './routes/brands.js'
 import stockReturns from './routes/stock-returns.js'
 import stockDamages from './routes/stock-damages.js'
+import eventCosts from './routes/event-costs.js'
+import quoteEventLink from './routes/quote-event-link.js'
+import brandShares from './routes/brand-shares.js'
+import brandDigest from './routes/brand-digest.js'
+import fieldStockCheckout from './routes/field-stock-checkout.js'
+import auditViewer from './routes/audit-viewer.js'
+import publicBrand from './routes/public-brand.js'
+import { runBrandDigest } from './lib/brand-digest.js'
 import { publicLanding } from './routes/public.js'
 import account from './routes/account.js'
 import questionSheet from './routes/question-sheet.js'
@@ -42,6 +50,10 @@ app.use('/static/*', serveStatic({ root: './public' }))
 // ── Public landing page (no auth)
 app.get('/about', publicLanding)
 
+// ── Phase 13: Public brand share viewer (no auth — token-gated in handler)
+//     MUST be registered BEFORE auth and dashboard mounts.
+app.route('/public/brand', publicBrand)
+
 // ── Auth routes (login / logout — no auth required)
 app.route('/', auth)
 
@@ -55,6 +67,9 @@ app.route('/field/admin/products', productsAdmin)
 
 // ── Field Admin (login-protected) — MUST be before /field to avoid prefix clash
 app.route('/field/admin', fieldAdmin)
+
+// ── Phase 15: Mobile field stock checkout — MUST be before /field for prefix precedence
+app.route('/field/stock-checkout', fieldStockCheckout)
 
 // ── Field Operations App (public — no login required) — MUST be before dashboard /
 app.route('/field', field)
@@ -209,6 +224,26 @@ app.post('/api/cron/backup', async (c) => {
   return c.json(result)
 })
 
+// ── Phase 17: Token-protected weekly brand-owner digest cron.
+// Fired by GitHub Actions every Monday at 04:00 UTC (06:00 SAST).
+// Uses BRAND_DIGEST_WEBHOOK_TOKEN (separate from accounts digest).
+app.post('/api/cron/brand-digest', async (c) => {
+  const env = c.env as any
+  const auth = c.req.header('authorization') || ''
+  const token = auth.replace(/^Bearer\s+/i, '').trim()
+  const expected = (env.BRAND_DIGEST_WEBHOOK_TOKEN || '').trim()
+  if (!token || !expected || token !== expected) {
+    return c.json({ ok: false, error: 'unauthorized' }, 401)
+  }
+  let body: any = {}
+  try { body = await c.req.json() } catch { /* empty body is fine */ }
+  const result = await runBrandDigest(env, {
+    reason: body.reason || 'cron-webhook',
+    filterBrand: body.filterBrand,
+  })
+  return c.json(result)
+})
+
 // ── Phase 5: Token-protected weekly low-stock digest cron.
 // Fired by GitHub Actions every Monday at 05:00 UTC (07:00 SAST).
 // Uses LOW_STOCK_WEBHOOK_TOKEN secret (rotatable independently of other crons).
@@ -249,6 +284,11 @@ app.route('/admin/stock/returns', stockReturns)
 app.route('/admin/stock/damages', stockDamages)
 app.route('/admin/stock', stockAdmin)
 app.route('/admin/brands', brands)
+app.route('/admin/brand-shares', brandShares)
+app.route('/admin/brand-digest', brandDigest)
+app.route('/admin/costs', eventCosts)
+app.route('/admin/quote-link', quoteEventLink)
+app.route('/admin/audit', auditViewer)
 app.route('/admin', admin)
 app.route('/question-sheet', questionSheet)
 app.route('/print-sheets', printSheets)
@@ -327,6 +367,8 @@ app.notFound((c) => c.html(`<!DOCTYPE html>
 //                                         BACKUP_WEBHOOK_TOKEN
 //   POST /api/cron/low-stock-digest    — Monday 05:00 UTC (07:00 SAST)
 //                                         LOW_STOCK_WEBHOOK_TOKEN
+//   POST /api/cron/brand-digest        — Monday 04:00 UTC (06:00 SAST)
+//                                         BRAND_DIGEST_WEBHOOK_TOKEN
 //
 // Tokens are stored as Cloudflare Pages secrets. Bibi can also fire each one
 // manually via in-UI buttons (e.g. "Send digest now" on the alerts page).

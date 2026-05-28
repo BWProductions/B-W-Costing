@@ -374,6 +374,12 @@ stockAdmin.get('/', async (c) => {
         </a>
         <a href="/admin/stock/movements" class="btn btn-outline"><i class="fas fa-clock-rotate-left"></i> Movements</a>
         <a href="/admin/stock/summary"   class="btn btn-outline"><i class="fas fa-chart-pie"></i> Summary</a>
+        <a href="/admin/costs"           class="btn btn-outline" style="color:#22c55e;border-color:#22c55e"><i class="fas fa-coins"></i> Costs P&amp;L</a>
+        <a href="/admin/quote-link"      class="btn btn-outline" style="color:#3b82f6;border-color:#3b82f6"><i class="fas fa-link"></i> Quote Links</a>
+        <a href="/admin/brand-shares"    class="btn btn-outline" style="color:#8b5cf6;border-color:#8b5cf6"><i class="fas fa-share-nodes"></i> Brand Shares</a>
+        <a href="/admin/brand-digest"    class="btn btn-outline" style="color:#ec4899;border-color:#ec4899"><i class="fas fa-envelope"></i> Digest</a>
+        <a href="/admin/audit"           class="btn btn-outline" style="color:#6b7280;border-color:#6b7280"><i class="fas fa-clipboard-list"></i> Audit</a>
+        <a href="/field/stock-checkout"  class="btn btn-outline" style="color:#0ea5e9;border-color:#0ea5e9"><i class="fas fa-truck"></i> Field Check-Out</a>
         <a href="${csvHref}"             class="btn btn-outline"><i class="fas fa-file-csv"></i> Export CSV</a>
         <a href="/admin/stock/new"       class="btn btn-primary"><i class="fas fa-plus"></i> Add Item</a>
       </div>

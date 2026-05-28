@@ -39,10 +39,14 @@ Internal ops platform for B&W Productions CC. Built on Cloudflare Pages + Hono +
 |---|---|---|---|
 | Accounts Email Digest | `0 5 * * *`, `0 10 * * *` | 07:00, 12:00 daily | `POST /api/cron/email-digest` |
 | Weekly D1 Backup | `0 0 * * 0` | Sunday 02:00 | `POST /api/cron/backup` |
+| Low Stock Digest | `0 5 * * 1` | Monday 07:00 | `POST /api/cron/low-stock-digest` |
+| Brand Owner Digest | `0 4 * * 1` | Monday 06:00 | `POST /api/cron/brand-digest` |
 
-Both webhooks use bearer-token auth via Cloudflare Pages secrets:
+All webhooks use bearer-token auth via Cloudflare Pages secrets:
 - `CRON_WEBHOOK_TOKEN` — email digest
 - `BACKUP_WEBHOOK_TOKEN` — D1 backup
+- `LOW_STOCK_WEBHOOK_TOKEN` — low-stock digest
+- `BRAND_DIGEST_WEBHOOK_TOKEN` — brand-owner digest
 
 Tokens must match in **both** Cloudflare Pages secrets **and** GitHub repo Action secrets.
 
@@ -61,8 +65,56 @@ npm run build
 npx wrangler pages deploy dist --project-name bw-productions --branch main
 ```
 
-## Roadmap
+## Phases 9-17 (completed)
+
+### Phase 9 — Stock Returns (after event)
+- `stock_returns` + `stock_return_lines` + `stock_damages` tables (migration 0034)
+- Lifecycle: draft -> completed; on completion writes movements, updates qty_on_hand & qty_damaged, auto-creates damage records, auto-resolves matching shortages
+- UI: `/admin/stock/returns` (list, new from event, edit lines, complete, cancel)
+
+### Phase 10 — Movement Reason Taxonomy
+- 12 reason categories across 5 groups (inbound / outbound / event / loss / admin) in `src/lib/movement-reasons.ts`
+- `stock_movements.reason_category` column for filterable history
+
+### Phase 11 — Damages Management
+- `stock_damages` lifecycle: open -> approved -> written_off / recovered / cancelled
+- UI: `/admin/stock/damages` (list, detail, approve, write-off, recover, cancel)
+
+### Phase 12 — Event Cost P&L
+- `event_cost_overrides` + `cost_defaults` tables for per-event cost adjustments (migration 0035)
+- Default rates: fuel R/km, daily allowance, vehicle hire, etc.
+- UI: `/admin/costs` (monthly P&L), `/admin/costs/defaults`, `/admin/costs/:id` (per-event cost detail + overrides)
+
+### Phase 13 — Client-Facing Brand Pages
+- `brand_share_tokens` + `brand_share_views` tables (migration 0035)
+- Admin: `/admin/brand-shares` (create / revoke 128-bit share tokens per brand)
+- Public: `/public/brand/:token` — read-only, watermarked, NO internal financials, view-logged
+- View audit panel: `/admin/brand-shares/:slug/views/:id`
+
+### Phase 14 — Quote <-> Event Linker
+- `quotes.calendar_event_id` + `calendar_events.quote_id` + `calendar_events.quote_number` columns (migration 0035)
+- Two-way link manager UI at `/admin/quote-link` (orphans + linked tabs, link / unlink actions)
+- Leaves legacy `quotes.event_id` -> `events` table relationship untouched
+
+### Phase 15 — Mobile Field Stock Check-Out
+- Phone-optimised single-page UI at `/field/stock-checkout` (auth required)
+- Big-touch buttons, per-event pick lists, progress bar
+- Logs `stock_movements` (reason_category='event_dispatch') and decrements qty_on_hand on each checkout
+
+### Phase 16 — Audit Viewer + Login History
+- `login_history` table (migration 0035) capturing every login attempt (success + failure_reason + IP + UA)
+- Patched `auth.ts` to log every attempt
+- Admin viewer at `/admin/audit` (filter by user / entity / date range) + `/admin/audit/logins` (login history with 7-day stats)
+- CSV exports: `/admin/audit/export.csv`, `/admin/audit/logins.csv`
+- Restricted to founder + ops_director + finance_director
+
+### Phase 17 — Brand Owner Weekly Digest
+- `brand_digest_subscriptions` table (migration 0035) for per-brand-per-email subscriptions
+- Admin: `/admin/brand-digest` (subscribe / pause / preview HTML / test-send now)
+- Cron: `POST /api/cron/brand-digest` (Mondays 06:00 SAST via GitHub Actions)
+- Same data philosophy as public brand viewer — no internal financials
+
+## Roadmap (future)
 - **Phase 2** — Vendor verification (VAT, BEE, tax clearance, banking confirmation, expiry tracking)
-- **Phase 3** — Stock system (Excel import, hard-block over-bookings, sub-rental flagging)
-- **Phase 4** — Security polish (price masking for crew, banking masking for non-founder, optional 2FA)
+- **Phase 18** — Per-route role tightening (audit existing endpoints against PERMISSIONS matrix)
 - **WhatsApp** — Twilio integration (pending Twilio approval + business card)

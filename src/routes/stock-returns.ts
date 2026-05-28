@@ -189,7 +189,7 @@ returns.post('/new', async (c) => {
   const form = await c.req.parseBody()
   const eventId = Number(form.event_id)
   if (!eventId) return c.redirect('/admin/stock/returns')
-  const id = await createDraftForEvent(c.env.DB, eventId, { id: user.id, name: user.full_name || user.email })
+  const id = await createDraftForEvent(c.env.DB, eventId, { id: user.id, name: user.name || user.email })
   return c.redirect(`/admin/stock/returns/${id}`)
 })
 
@@ -310,7 +310,7 @@ returns.post('/:id/save', async (c) => {
   if (!r) return c.redirect('/admin/stock/returns')
 
   if (action === 'cancel') {
-    await cancelReturn(c.env.DB, id, { id: user.id, name: user.full_name || user.email })
+    await cancelReturn(c.env.DB, id, { id: user.id, name: user.name || user.email })
     return c.redirect('/admin/stock/returns')
   }
 
@@ -328,7 +328,7 @@ returns.post('/:id/save', async (c) => {
   }))
 
   try {
-    await saveReturnLines(c.env.DB, id, lines, { id: user.id, name: user.full_name || user.email })
+    await saveReturnLines(c.env.DB, id, lines, { id: user.id, name: user.name || user.email })
   } catch (e: any) {
     return c.html(layout('Save failed', `<div class="card" style="padding:24px"><h2 style="color:#ff7a66">Save failed</h2><p>${esc(e?.message || 'Unknown error')}</p><a href="/admin/stock/returns/${id}" class="btn btn-outline">Back</a></div>`, user, 'stock-admin'), 400)
   }
@@ -338,7 +338,7 @@ returns.post('/:id/save', async (c) => {
 
   if (action === 'complete') {
     try {
-      const result = await completeReturn(c.env.DB, id, { id: user.id, name: user.full_name || user.email })
+      const result = await completeReturn(c.env.DB, id, { id: user.id, name: user.name || user.email })
       const body = `
         <div style="max-width:520px;margin:48px auto">
           <div class="card" style="padding:24px;border-left:3px solid #10b981">
