@@ -273,6 +273,29 @@ stockAdmin.get('/', async (c) => {
   // Phase 7: count of open shortages for header badge
   const shortageCount = await countOpenShortages(c.env.DB)
 
+  // Phase 9: count of pending returns (past events with allocations + no completed return)
+  const pendingReturnsRow = await c.env.DB.prepare(`
+    SELECT COUNT(*) AS n FROM (
+      SELECT ce.id
+      FROM calendar_events ce
+      JOIN calendar_event_equipment cee ON cee.event_id = ce.id
+      WHERE ce.event_date <= ?
+        AND ce.status != 'cancelled'
+        AND NOT EXISTS (
+          SELECT 1 FROM stock_returns sr
+          WHERE sr.event_id = ce.id AND sr.status = 'completed'
+        )
+      GROUP BY ce.id
+    )
+  `).bind(today).first<{ n: number }>().catch(() => null)
+  const pendingReturns = pendingReturnsRow?.n ?? 0
+
+  // Phase 11: count of open damages
+  const openDamagesRow = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM stock_damages WHERE status = 'open'`
+  ).first<{ n: number }>().catch(() => null)
+  const openDamages = openDamagesRow?.n ?? 0
+
   const brandOptions = brands.map(b => `<option value="${esc(b)}" ${b === brand ? 'selected' : ''}>${esc(b)}</option>`).join('')
 
   // Preserve current filters in CSV export URL (note: CSV always exports active)
@@ -340,6 +363,12 @@ stockAdmin.get('/', async (c) => {
         <a href="/admin/stock/scan"      class="btn btn-outline" style="color:#06b6d4;border-color:#06b6d4"><i class="fas fa-barcode"></i> Stock-take</a>
         <a href="/admin/stock/import"    class="btn btn-outline" style="color:#a855f7;border-color:#a855f7"><i class="fas fa-file-import"></i> Bulk Import</a>
         <a href="/admin/brands"          class="btn btn-outline" style="color:#C9A84C;border-color:#C9A84C"><i class="fas fa-tags"></i> Brands</a>
+        <a href="/admin/stock/returns"   class="btn btn-outline" style="${pendingReturns > 0 ? 'color:#fbbf24;border-color:#fbbf24' : 'color:#9ca3af;border-color:#9ca3af'}">
+          <i class="fas fa-rotate-left"></i> Returns${pendingReturns > 0 ? ` <span style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;background:#fbbf24;color:#1a1004;border-radius:9px;font-size:11px;font-weight:700;margin-left:4px">${pendingReturns}</span>` : ''}
+        </a>
+        <a href="/admin/stock/damages"   class="btn btn-outline" style="${openDamages > 0 ? 'color:#ef4444;border-color:#ef4444' : 'color:#9ca3af;border-color:#9ca3af'}">
+          <i class="fas fa-triangle-exclamation"></i> Damages${openDamages > 0 ? ` <span style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;background:#ef4444;color:#fff;border-radius:9px;font-size:11px;font-weight:700;margin-left:4px">${openDamages}</span>` : ''}
+        </a>
         <a href="/admin/stock/shortages" class="btn btn-outline" style="${shortageCount > 0 ? 'color:#ff7a66;border-color:#ff7a66' : 'color:#9ca3af;border-color:#9ca3af'}">
           <i class="fas fa-triangle-exclamation"></i> Shortages${shortageCount > 0 ? ` <span style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;background:#ff7a66;color:#1a1004;border-radius:9px;font-size:11px;font-weight:700;margin-left:4px">${shortageCount}</span>` : ''}
         </a>

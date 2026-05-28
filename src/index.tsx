@@ -17,6 +17,8 @@ import quotes from './routes/quotes.js'
 import admin from './routes/admin.js'
 import stockAdmin from './routes/stock-admin.js'
 import brands from './routes/brands.js'
+import stockReturns from './routes/stock-returns.js'
+import stockDamages from './routes/stock-damages.js'
 import { publicLanding } from './routes/public.js'
 import account from './routes/account.js'
 import questionSheet from './routes/question-sheet.js'
@@ -243,6 +245,8 @@ app.route('/rate-card', rateCard)
 app.route('/quotes', quotes)
 // ── Master Stock Admin — mounted under /admin/stock
 //     Must be registered BEFORE the broader /admin route
+app.route('/admin/stock/returns', stockReturns)
+app.route('/admin/stock/damages', stockDamages)
 app.route('/admin/stock', stockAdmin)
 app.route('/admin/brands', brands)
 app.route('/admin', admin)
