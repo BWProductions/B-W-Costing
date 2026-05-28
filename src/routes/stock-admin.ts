@@ -24,6 +24,7 @@ import { layout } from '../lib/layout.js'
 import type { AuthUser } from '../lib/auth.js'
 import stockScan from './stock-scan.js'
 import stockAlerts from './stock-alerts.js'
+import stockBulkImport from './stock-bulk-import.js'
 
 type Env = { Bindings: { DB: D1Database; RESEND_API_KEY?: string }; Variables: { user: AuthUser } }
 
@@ -32,9 +33,11 @@ stockAdmin.use('*', requireAuth)
 
 // Phase 4: stock-take scan mode — mounted under /admin/stock/scan
 // Phase 5: low-stock alerts        — mounted under /admin/stock/alerts
-// Auth middleware above covers both. Mounted FIRST so /:id below doesn't swallow them.
+// Phase 6: bulk CSV import         — mounted under /admin/stock/import
+// Auth middleware above covers all three. Mounted FIRST so /:id below doesn't swallow them.
 stockAdmin.route('/scan', stockScan)
 stockAdmin.route('/alerts', stockAlerts)
+stockAdmin.route('/import', stockBulkImport)
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 const CUSTODY_LABELS: Record<string, string> = {
@@ -60,6 +63,8 @@ const ACTION_LABELS: Record<string, string> = {
   restore:     'Restored',
   bulk_update: 'Bulk update',
   stocktake:   'Stock-take',
+  bulk_import: 'Bulk import',
+  bulk_import_undo: 'Bulk undo',
 }
 const ACTION_COLORS: Record<string, string> = {
   create:      '#10b981',
@@ -68,6 +73,8 @@ const ACTION_COLORS: Record<string, string> = {
   restore:     '#8b5cf6',
   bulk_update: '#f59e0b',
   stocktake:   '#06b6d4',
+  bulk_import: '#a855f7',
+  bulk_import_undo: '#dc2626',
 }
 const ACTION_ICONS: Record<string, string> = {
   create:      'fa-plus-circle',
@@ -76,6 +83,8 @@ const ACTION_ICONS: Record<string, string> = {
   restore:     'fa-rotate-left',
   bulk_update: 'fa-layer-group',
   stocktake:   'fa-clipboard-check',
+  bulk_import: 'fa-file-import',
+  bulk_import_undo: 'fa-rotate-left',
 }
 
 function esc(s: any): string {
@@ -315,6 +324,7 @@ stockAdmin.get('/', async (c) => {
           <i class="fas fa-bell"></i> Alerts${alertCount > 0 ? ` <span style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;background:#dc2626;color:#fff;border-radius:9px;font-size:11px;font-weight:700;margin-left:4px">${alertCount}</span>` : ''}
         </a>
         <a href="/admin/stock/scan"      class="btn btn-outline" style="color:#06b6d4;border-color:#06b6d4"><i class="fas fa-barcode"></i> Stock-take</a>
+        <a href="/admin/stock/import"    class="btn btn-outline" style="color:#a855f7;border-color:#a855f7"><i class="fas fa-file-import"></i> Bulk Import</a>
         <a href="/admin/stock/movements" class="btn btn-outline"><i class="fas fa-clock-rotate-left"></i> Movements</a>
         <a href="/admin/stock/summary"   class="btn btn-outline"><i class="fas fa-chart-pie"></i> Summary</a>
         <a href="${csvHref}"             class="btn btn-outline"><i class="fas fa-file-csv"></i> Export CSV</a>
