@@ -17,7 +17,7 @@ export type LowStockEnv = {
 }
 
 export const DEFAULT_LOW_STOCK_THRESHOLD = 5
-export const FROM_ADDRESS = 'B&W Productions <onboarding@resend.dev>'
+export const FROM_ADDRESS = 'B&W Productions <noreply@bwproductions.co.za>'
 export const REPLY_TO_ADDRESS = 'bibi@bwproductions.co.za'
 
 export interface LowStockRow {

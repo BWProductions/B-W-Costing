@@ -244,7 +244,7 @@ export function buildBrandDigestHtml(
 
 // ─── Send orchestrator ──────────────────────────────────────────────────────
 
-const FROM_ADDRESS = 'B&W Productions <onboarding@resend.dev>'
+const FROM_ADDRESS = 'B&W Productions <noreply@bwproductions.co.za>'
 const REPLY_TO_ADDRESS = 'bibi@bwproductions.co.za'
 
 async function sendOneEmail(args: {

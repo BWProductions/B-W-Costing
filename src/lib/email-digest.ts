@@ -26,7 +26,7 @@ export const ACCOUNTS_RECIPIENTS: DigestRecipient[] = [
   'bernieb25263@gmail.com',
 ]
 
-export const FROM_ADDRESS = 'B&W Productions <onboarding@resend.dev>'
+export const FROM_ADDRESS = 'B&W Productions <noreply@bwproductions.co.za>'
 export const REPLY_TO_ADDRESS = 'bibi@bwproductions.co.za'
 export const MAX_PAYLOAD_BYTES = 20 * 1024 * 1024   // 20 MB safety ceiling (Gmail caps at 25)
 
