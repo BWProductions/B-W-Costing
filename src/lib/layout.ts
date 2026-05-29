@@ -1014,3 +1014,16 @@ export function loginPage(error?: string): string {
 </body>
 </html>`
 }
+
+// ─── Object-form shim ─────────────────────────────────────────────────────
+// Several route files (audit-viewer, brand-shares, brand-digest) were
+// authored against an object-form layout API that never existed in this
+// codebase. Rather than rewrite all nine call sites and risk breaking
+// the template literals inside, we expose a thin shim that translates
+// `layout({ title, body, user, activeNav })` → `layout(title, body, user, activeNav)`.
+//
+// To use: `import { layout } from '../lib/layout-obj.js'` OR just import this
+// named export directly:  `import { layoutObj as layout } from '../lib/layout.js'`
+export function layoutObj(opts: { title: string; body: string; user: AuthUser; activeNav?: string }): string {
+  return layout(opts.title, opts.body, opts.user, opts.activeNav)
+}

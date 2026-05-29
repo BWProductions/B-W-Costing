@@ -15,7 +15,7 @@
 import { Hono } from 'hono'
 import type { AuthUser } from '../lib/auth.js'
 import { requireAuth } from '../middleware/auth.js'
-import { layout } from '../lib/layout.js'
+import { layoutObj as layout } from '../lib/layout.js'
 import { getBrandBySlug, listBrandSummaries, getBrandDashboard } from '../lib/brand-stats.js'
 import {
   listSubscriptionsForBrand,

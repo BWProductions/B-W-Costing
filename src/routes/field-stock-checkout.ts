@@ -97,7 +97,7 @@ fieldCheckout.get('/', async (c) => {
       ce.event_date,
       ce.event_name,
       ce.status,
-      ce.location,
+      ce.address AS location,
       COUNT(DISTINCT cee.stock_item_id) AS line_count,
       COALESCE(SUM(cee.quantity), 0) AS total_qty,
       COALESCE((
@@ -106,7 +106,7 @@ fieldCheckout.get('/', async (c) => {
         WHERE sm.event_id = ce.id AND sm.reason_category = 'event_dispatch'
       ), 0) AS dispatched_qty
     FROM calendar_events ce
-    JOIN calendar_event_equipment cee ON cee.calendar_event_id = ce.id
+    JOIN calendar_event_equipment cee ON cee.event_id = ce.id
     WHERE date(ce.event_date) >= date('now', '-1 day')
       AND ce.status NOT IN ('cancelled')
     GROUP BY ce.id
@@ -167,7 +167,8 @@ fieldCheckout.get('/event/:id', async (c) => {
   const eventId = Number(c.req.param('id'))
 
   const event = await c.env.DB.prepare(`
-    SELECT * FROM calendar_events WHERE id = ?
+    SELECT id, event_date, event_name, status, address AS location
+    FROM calendar_events WHERE id = ?
   `).bind(eventId).first<{
     id: number; event_date: string; event_name: string; status: string;
     location: string | null;
@@ -192,7 +193,7 @@ fieldCheckout.get('/event/:id', async (c) => {
       ), 0) AS dispatched
     FROM calendar_event_equipment cee
     JOIN stock_items si ON si.id = cee.stock_item_id
-    WHERE cee.calendar_event_id = ?
+    WHERE cee.event_id = ?
     ORDER BY si.brand, si.description
   `).bind(eventId, eventId).all<{
     alloc_id: number; stock_item_id: number; allocated_qty: number;
@@ -271,7 +272,7 @@ fieldCheckout.post('/event/:id/checkout', async (c) => {
     SELECT cee.quantity, si.description, si.qty_on_hand
     FROM calendar_event_equipment cee
     JOIN stock_items si ON si.id = cee.stock_item_id
-    WHERE cee.calendar_event_id = ? AND cee.stock_item_id = ?
+    WHERE cee.event_id = ? AND cee.stock_item_id = ?
     LIMIT 1
   `).bind(eventId, stockItemId).first<{ quantity: number; description: string; qty_on_hand: number }>()
 
