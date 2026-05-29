@@ -1572,7 +1572,15 @@ app.get('/delivery/open/:id', async (c) => {
   const sub = await c.env.DB.prepare('SELECT * FROM field_submissions WHERE id=? AND form_type=?')
     .bind(id, 'delivery').first<any>()
   if (!sub) return c.redirect('/field/delivery')
-  if (!sub.is_draft) return c.redirect(`/field/success/${id}`)
+
+  // If the note is already signed (not a draft), only allow the three
+  // allowlisted office users to reopen it for editing. Everyone else
+  // gets bounced to the read-only success view as before.
+  const editorUser = await getEditAfterSignUser(c)
+  const isPostSignEdit = !sub.is_draft && !!editorUser
+  if (!sub.is_draft && !editorUser) {
+    return c.redirect(`/field/success/${id}`)
+  }
 
   // Parse the full form_data blob saved by the office
   let fd: any = {}
@@ -1645,10 +1653,22 @@ app.get('/delivery/open/:id', async (c) => {
       date: sub.delivery_date,
       driver: fd.driver || sub.driver
     })}
+    ${isPostSignEdit ? `
+    <div style="background:rgba(220,38,38,0.12);border:2px solid rgba(248,113,113,0.6);border-radius:12px;padding:14px 18px;margin-bottom:16px">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;color:#fca5a5;margin-bottom:6px">⚠️ Editing a Signed Delivery Note</div>
+      <div style="font-size:13px;color:#fecaca;line-height:1.5">
+        This delivery note has already been signed by the recipient. You are editing it as
+        <strong>${(editorUser!.name || editorUser!.email).replace(/</g,'&lt;')}</strong>.
+        Your changes will be logged in the audit trail. The existing signature stays attached
+        unless you re-capture it.
+      </div>
+    </div>
+    ` : `
     <div style="background:rgba(139,92,246,0.1);border:1px solid rgba(139,92,246,0.4);border-radius:12px;padding:12px 16px;margin-bottom:16px">
       <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;color:#c4b5fd;margin-bottom:4px">🗒️ Pre-loaded by Office</div>
       <div style="font-size:13px;color:var(--muted)">Review all details, adjust quantities on-site, fill any missing fields, then sign and submit.</div>
     </div>
+    `}
     <form id="deliveryForm" onsubmit="submitForm(event,'delivery')">
       <input type="hidden" name="form_type" value="delivery">
       <input type="hidden" name="form_number" value="${sub.form_number}">
@@ -3326,29 +3346,134 @@ app.post('/submit', async (c) => {
     }
 
     if (draft_id) {
-      // Update existing draft → convert to real submission
-      await c.env.DB.prepare(`
-        UPDATE field_submissions SET
-          prepared_by=?, driver=?, vehicle_reg=?, client=?, brand=?, venue=?, venue_address=?,
-          event_name=?, address=?, attention=?, contact_number=?, delivery_date=?,
-          collection_date=?, received_by=?, signature_data=?, letterhead=?, notes=?,
-          form_data=?, linked_delivery_id=?, is_draft=0
-        WHERE id=? AND is_draft=1
-      `).bind(
-        finalPreparedBy, finalDriver, finalVehicleReg,
-        client || 'South African Breweries', form_brand || '',
-        venue || '', venue_address || '', event_name || '', address || '',
-        attention || '', contact_number || '', delivery_date || '', collection_date || '',
-        received_by || '', signature_data || '', letterhead || 'sab',
-        finalNotes, JSON.stringify(body),
-        linked_delivery_id ? Number(linked_delivery_id) : null,
-        Number(draft_id)
-      ).run()
+      // ─── DETECT POST-SIGN EDIT ──────────────────────────────────────────────
+      // Read the existing record first to decide between:
+      //  (a) normal draft → finalised flow  (existing.is_draft = 1)
+      //  (b) signed-record edit by allowlisted office user  (existing.is_draft = 0)
+      // For (b) we MUST re-check the cookie server-side — never trust the form.
+      const existing = await c.env.DB.prepare(
+        'SELECT id, is_draft, prepared_by, driver, vehicle_reg, client, brand, venue, venue_address, event_name, address, attention, contact_number, delivery_date, collection_date, received_by, signature_data, letterhead, notes, form_data FROM field_submissions WHERE id=? AND form_type=?'
+      ).bind(Number(draft_id), form_type).first<any>()
+
+      if (!existing) {
+        return c.json({ success: false, error: 'Record not found' }, 404)
+      }
+
+      const isPostSignEdit = existing.is_draft === 0
+      let editor: { id: number; email: string; name: string; role: string } | null = null
+
+      if (isPostSignEdit) {
+        // Server-side re-check: only allowlisted office users may touch signed notes
+        editor = await getEditAfterSignUser(c)
+        if (!editor) {
+          return c.json({ success: false, error: 'Not authorised to edit a signed delivery note' }, 403)
+        }
+      }
+
+      // If the user didn't re-capture a signature on a post-sign edit, KEEP the original
+      const effectiveSig = (isPostSignEdit && (!signature_data || signature_data.length < 50))
+        ? (existing.signature_data || '')
+        : (signature_data || '')
+
+      if (isPostSignEdit) {
+        // UPDATE without the WHERE is_draft=1 guard — record stays signed (is_draft=0)
+        await c.env.DB.prepare(`
+          UPDATE field_submissions SET
+            prepared_by=?, driver=?, vehicle_reg=?, client=?, brand=?, venue=?, venue_address=?,
+            event_name=?, address=?, attention=?, contact_number=?, delivery_date=?,
+            collection_date=?, received_by=?, signature_data=?, letterhead=?, notes=?,
+            form_data=?, linked_delivery_id=?
+          WHERE id=?
+        `).bind(
+          finalPreparedBy, finalDriver, finalVehicleReg,
+          client || 'South African Breweries', form_brand || '',
+          venue || '', venue_address || '', event_name || '', address || '',
+          attention || '', contact_number || '', delivery_date || '', collection_date || '',
+          received_by || '', effectiveSig, letterhead || 'sab',
+          finalNotes, JSON.stringify(body),
+          linked_delivery_id ? Number(linked_delivery_id) : null,
+          Number(draft_id)
+        ).run()
+      } else {
+        // Normal flow: draft → signed
+        await c.env.DB.prepare(`
+          UPDATE field_submissions SET
+            prepared_by=?, driver=?, vehicle_reg=?, client=?, brand=?, venue=?, venue_address=?,
+            event_name=?, address=?, attention=?, contact_number=?, delivery_date=?,
+            collection_date=?, received_by=?, signature_data=?, letterhead=?, notes=?,
+            form_data=?, linked_delivery_id=?, is_draft=0
+          WHERE id=? AND is_draft=1
+        `).bind(
+          finalPreparedBy, finalDriver, finalVehicleReg,
+          client || 'South African Breweries', form_brand || '',
+          venue || '', venue_address || '', event_name || '', address || '',
+          attention || '', contact_number || '', delivery_date || '', collection_date || '',
+          received_by || '', signature_data || '', letterhead || 'sab',
+          finalNotes, JSON.stringify(body),
+          linked_delivery_id ? Number(linked_delivery_id) : null,
+          Number(draft_id)
+        ).run()
+      }
       submissionId = Number(draft_id)
 
       // Delete old line items — re-insert fresh
       await c.env.DB.prepare('DELETE FROM field_line_items WHERE submission_id=?').bind(submissionId).run()
       await c.env.DB.prepare('DELETE FROM field_suggested_items WHERE submission_id=?').bind(submissionId).run()
+
+      // ─── AUDIT TRAIL for post-sign edits ────────────────────────────────────
+      // Diff the columns we care about and write one row to audit_log so the
+      // change is traceable forever (who edited what, when, from-value → to-value).
+      if (isPostSignEdit && editor) {
+        try {
+          const newValues: Record<string, any> = {
+            prepared_by: finalPreparedBy,
+            driver: finalDriver,
+            vehicle_reg: finalVehicleReg,
+            client: client || 'South African Breweries',
+            brand: form_brand || '',
+            venue: venue || '',
+            venue_address: venue_address || '',
+            event_name: event_name || '',
+            address: address || '',
+            attention: attention || '',
+            contact_number: contact_number || '',
+            delivery_date: delivery_date || '',
+            collection_date: collection_date || '',
+            received_by: received_by || '',
+            letterhead: letterhead || 'sab',
+            notes: finalNotes
+          }
+          const changes: Record<string, { from: any; to: any }> = {}
+          for (const k of Object.keys(newValues)) {
+            const oldV = (existing[k] === null || existing[k] === undefined) ? '' : String(existing[k])
+            const newV = String(newValues[k] ?? '')
+            if (oldV !== newV) changes[k] = { from: oldV, to: newV }
+          }
+          // Always note if signature was re-captured
+          if (signature_data && signature_data.length >= 50 && signature_data !== existing.signature_data) {
+            changes['signature_data'] = { from: '[previous signature]', to: '[re-captured signature]' }
+          }
+
+          const ip = c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || ''
+          const ua = c.req.header('user-agent') || ''
+
+          await c.env.DB.prepare(`
+            INSERT INTO audit_log (user_id, user_email, action, entity_type, entity_id, field_changes, reason, ip_address, user_agent)
+            VALUES (?, ?, 'update', 'field_submission', ?, ?, ?, ?, ?)
+          `).bind(
+            editor.id,
+            editor.email,
+            submissionId,
+            JSON.stringify(changes),
+            'Post-sign edit by office user',
+            ip,
+            ua
+          ).run()
+        } catch (auditErr: any) {
+          // Don't fail the request if audit logging breaks — just log to console
+          console.error('audit_log write failed:', auditErr?.message || auditErr)
+        }
+      }
     } else {
       // Insert new submission
       const result = await c.env.DB.prepare(`
@@ -4136,6 +4261,41 @@ const ADMIN_PINS: Record<string, string> = {
 
 // Roles in the main app that auto-grant field-admin access (no PIN required)
 const FIELD_ADMIN_AUTO_ROLES = ['founder', 'ops_director']
+
+// ─── EDIT-AFTER-SIGN ALLOWLIST ────────────────────────────────────────────
+// These specific users can edit delivery notes EVEN AFTER they've been signed.
+// Per Bibi's directive: only the three named office staff.
+// Anyone else hitting /field/delivery/open/:id on a signed note gets bounced
+// to the read-only success page as before.
+//
+// Email matching is case-insensitive. Add new addresses here as the office
+// team grows; no DB schema needed.
+const EDIT_AFTER_SIGN_EMAILS = new Set<string>([
+  'bibi@bwproductions.co.za',         // Bernie Burness (Founder)
+  'info@bwproductions.co.za',         // Bibi Burness (Founder)
+  'marketing@bwproductions.co.za',    // Shane' (Office Star) — Ops Director
+].map(e => e.toLowerCase()))
+
+/**
+ * Returns the AuthUser if the current request's session belongs to a user
+ * allowed to edit signed delivery notes. Returns null otherwise.
+ * Always-on, never throws — safe to call from any handler.
+ */
+async function getEditAfterSignUser(c: any): Promise<{ id: number; email: string; name: string; role: string } | null> {
+  const cookie = c.req.header('cookie')
+  if (!cookie) return null
+  const token = getCookieValue(cookie, 'bw_session')
+  if (!token) return null
+  try {
+    const user = await verifySessionToken(token)
+    if (!user) return null
+    const email = (user.email || '').toLowerCase()
+    if (EDIT_AFTER_SIGN_EMAILS.has(email)) {
+      return user as any
+    }
+  } catch { /* ignore — treat as not allowed */ }
+  return null
+}
 
 async function getAdminSession(c: any): Promise<string | null> {
   const cookie = c.req.header('cookie') || ''
@@ -5107,6 +5267,12 @@ app.get('/success/:id', async (c) => {
   const sub = await c.env.DB.prepare('SELECT * FROM field_submissions WHERE id=?').bind(id).first<any>()
   if (!sub) return c.html(fieldPage('Not found', '<div class="field-wrap"><p style="color:var(--muted);text-align:center;padding:40px">Submission not found.</p></div>'))
 
+  // If the viewer is one of the allowlisted office staff AND this is a signed
+  // delivery note, surface an "Edit (Office)" button so they don't have to
+  // know the /open/:id URL. Anyone else won't even see the button.
+  const editorUser = await getEditAfterSignUser(c)
+  const canEditAfterSign = !!editorUser && sub.form_type === 'delivery' && !sub.is_draft
+
   const lines = await c.env.DB.prepare('SELECT * FROM field_line_items WHERE submission_id=? ORDER BY sort_order').bind(id).all<any>()
   const others = await c.env.DB.prepare('SELECT * FROM field_suggested_items WHERE submission_id=?').bind(id).all<any>()
 
@@ -5377,6 +5543,20 @@ app.get('/success/:id', async (c) => {
         <svg width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
         📤 Send to WhatsApp
       </a>
+
+      ${canEditAfterSign ? `
+      <!-- Office Edit (post-sign) — visible only to allowlisted office users -->
+      <a href="/field/delivery/open/${id}"
+         style="display:flex;align-items:center;justify-content:center;gap:10px;
+                padding:14px;margin-top:8px;border-radius:10px;text-decoration:none;
+                background:rgba(220,38,38,0.1);border:1.5px solid rgba(248,113,113,0.55);
+                color:#fca5a5;font-size:15px;font-weight:700">
+        🔒 Edit Signed Delivery Note (Office Only)
+      </a>
+      <div style="font-size:11px;color:var(--muted);text-align:center;margin-top:-2px;margin-bottom:4px">
+        Logged in as ${(editorUser!.name || editorUser!.email).replace(/</g,'&lt;')} · Changes are audit-logged
+      </div>
+      ` : ''}
 
       ${sub.form_type === 'delivery' ? `
       <!-- Update Quantities -->
