@@ -1,0 +1,37 @@
+name: Brand Owner Digest
+
+# Weekly stock digest for external brand owners.
+# 04:00 UTC Monday = 06:00 SAST Monday
+on:
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+jobs:
+  fire-brand-digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fire brand digest webhook
+        env:
+          TOKEN: ${{ secrets.BRAND_DIGEST_WEBHOOK_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::BRAND_DIGEST_WEBHOOK_TOKEN secret is not set."
+            exit 1
+          fi
+          set -e
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://bwprodsystem.co.za/api/cron/brand-digest" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"reason":"github-actions-weekly"}')
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          STATUS=$(echo "$RESPONSE" | tail -n1)
+          echo "Status: $STATUS"
+          echo "Response: $BODY"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Brand digest webhook returned $STATUS"
+            exit 1
+          fi
+          echo "Brand digest fired successfully."
