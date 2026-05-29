@@ -118,3 +118,66 @@ npx wrangler pages deploy dist --project-name bw-productions --branch main
 - **Phase 2** — Vendor verification (VAT, BEE, tax clearance, banking confirmation, expiry tracking)
 - **Phase 18** — Per-route role tightening (audit existing endpoints against PERMISSIONS matrix)
 - **WhatsApp** — Twilio integration (pending Twilio approval + business card)
+
+## Pending Spec Notes (Bibi's Backlog)
+_Captured during sessions but parked for later — usually awaiting input from the
+warehouse team or a follow-up product decision. Don't start these without
+re-confirming the spec with Bibi._
+
+### 1. Flight-case packaging logic (lights & similar)
+**Trigger:** Stock count Monday (after which Bibi will send the full inventory list).
+
+Certain stock items leave the warehouse only as flight cases, never as loose
+units. The stock sheet must use this exact wording:
+- "1 flight case including 6 PAR cans"
+- "1 flight case including 8 PAR cans"
+- "1 flight case including 4 LED tubes"
+- "1 flight case including 6 LED tubes"
+- "1 flight case including 8 LED tubes"
+
+Confirmed items + valid box sizes so far:
+- **PAR cans** (uplighting): 6 or 8 per flight case
+- **LED tubes**: 4, 6, or 8 per flight case
+
+Rule: always even numbers, never odd. Mixed counting is OK on the same item
+(e.g. 1 case of 8 + 1 case of 6 = 14 PAR cans).
+
+**Still TBC:** Full inventory list of which items are flight-cased, with
+their valid box sizes. Coming from warehouse team after Monday's stock count.
+
+### 2. Companion-item auto-suggest (delivery notes + quotes)
+When certain items are added, the system suggests related kit so we don't
+arrive on site with half a setup. Confirmed pairings to wire up:
+
+| Trigger item | Suggests |
+|---|---|
+| Umbrella | Umbrella base (concrete or rubber) |
+| Heater | Gas bottle |
+| Dance floor | Trolley |
+
+**More pairings to add later:** Bibi will list more as they come to mind.
+
+**UX decisions (locked in):**
+- **Delivery notes** — soft yellow banner with quick-add buttons (Option A)
+- **Quotes** — hard modal that blocks proceeding until answered (Option B)
+
+### 3. File attachments via Cloudflare R2
+We already use R2 for auto-generated delivery note PDFs. Plan to extend to
+user-uploaded attachments on:
+- Delivery notes (photos of packed flight cases, damage evidence)
+- Quotes (signed PO scans, client brief PDFs, floorplans)
+- Calendar events (venue floorplans, supplier contracts, insurance certs)
+- Suppliers (BEE certs, banking confirmation letters, sample work)
+
+R2 supports any file size up to 5 TB per object; PDFs and photos at typical
+sizes (1-10 MB) cost roughly $1.50/month per 10,000 attachments.
+
+### 4. Delivery-edit-after-sign — completed 2026-05-29
+Three named office users can re-open signed delivery notes for correction:
+- Bibi (info@bwproductions.co.za)
+- Bernie (bibi@bwproductions.co.za)
+- Shane' (marketing@bwproductions.co.za)
+
+Everyone else — including other founders — gets read-only success view.
+All post-sign edits write a diffed audit_log row (who, when, field-level
+from→to). See `EDIT_AFTER_SIGN_EMAILS` in `src/routes/field.ts`.
