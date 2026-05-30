@@ -4,6 +4,7 @@
 
 import { Hono } from 'hono'
 import { verifySessionToken, getCookieValue } from '../lib/auth.js'
+import { parseEventName, parseVenue } from '../lib/event-name-parser.js'
 
 type Env = { Bindings: {
   DB: D1Database
@@ -3203,18 +3204,28 @@ app.post('/draft/save', async (c) => {
     const finalPreparedBy = prepared_by || 'Shane'
     const num = await nextFormNumber(c.env.DB, form_type || 'delivery')
 
+    // ─── Parse + clean event_name and venue ─────────────────────────────────
+    // Strips brand names ("Castle Lite"), form-type noise ("music bus") from
+    // event_name; extracts STP outlet code from venue while keeping it visible.
+    // See src/lib/event-name-parser.ts for full rules.
+    const parsedEvent = parseEventName(event_name)
+    const parsedVenue = parseVenue(venue)
+    const cleanEventName = parsedEvent.event_name
+    const cleanVenue = parsedVenue.venue
+    const stpNumber = parsedVenue.stp_number
+
     const result = await c.env.DB.prepare(`
       INSERT INTO field_submissions
         (form_type, form_number, prepared_by, driver, vehicle_reg, client, brand, venue, venue_address,
          event_name, address, attention, contact_number, delivery_date, collection_date,
-         letterhead, notes, form_data, is_draft)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+         letterhead, notes, form_data, stp_number, is_draft)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
     `).bind(
       form_type || 'delivery', num, finalPreparedBy, driver || '',
       vehicle_reg || '', client || 'South African Breweries',
-      form_brand || '', venue || '', venue_address || '', event_name || '', address || '',
+      form_brand || '', cleanVenue, venue_address || '', cleanEventName, address || '',
       attention || '', contact_number || '', delivery_date || '', collection_date || '',
-      letterhead || 'sab', notes || '', JSON.stringify(body)
+      letterhead || 'sab', notes || '', JSON.stringify(body), stpNumber
     ).run()
 
     // Learn the venue (upsert into the directory) — non-blocking; ignore errors
@@ -3293,6 +3304,21 @@ app.post('/submit', async (c) => {
     const finalNotes = has_damage === 'yes' && damage_notes
       ? `⚠️ DAMAGE REPORTED: ${damage_notes}${notes ? '\n\nAdditional notes: ' + notes : ''}`
       : (notes || '')
+
+    // ─── Parse + clean event_name and venue ─────────────────────────────────
+    // Strips brand names ("Castle Lite") and form-type noise ("music bus")
+    // from event_name; extracts STP outlet code from venue while keeping it
+    // visible. See src/lib/event-name-parser.ts for full rules.
+    //
+    // NOTE: For musicbus_inspection / dj_inspection forms, the event_name is
+    // hardcoded server-side (e.g. "Music Bus Inspection") so the parser would
+    // be re-stripping it on every save — skip cleanup for those form types.
+    const skipParse = form_type === 'musicbus_inspection' || form_type === 'dj_inspection'
+    const parsedEvent = skipParse ? null : parseEventName(event_name)
+    const parsedVenue = skipParse ? null : parseVenue(venue)
+    const cleanEventName = parsedEvent ? parsedEvent.event_name : (event_name || '')
+    const cleanVenue = parsedVenue ? parsedVenue.venue : (venue || '')
+    const stpNumber = parsedVenue ? parsedVenue.stp_number : null
 
     let submissionId: number
 
@@ -3382,16 +3408,17 @@ app.post('/submit', async (c) => {
             prepared_by=?, driver=?, vehicle_reg=?, client=?, brand=?, venue=?, venue_address=?,
             event_name=?, address=?, attention=?, contact_number=?, delivery_date=?,
             collection_date=?, received_by=?, signature_data=?, letterhead=?, notes=?,
-            form_data=?, linked_delivery_id=?
+            form_data=?, linked_delivery_id=?, stp_number=?
           WHERE id=?
         `).bind(
           finalPreparedBy, finalDriver, finalVehicleReg,
           client || 'South African Breweries', form_brand || '',
-          venue || '', venue_address || '', event_name || '', address || '',
+          cleanVenue, venue_address || '', cleanEventName, address || '',
           attention || '', contact_number || '', delivery_date || '', collection_date || '',
           received_by || '', effectiveSig, letterhead || 'sab',
           finalNotes, JSON.stringify(body),
           linked_delivery_id ? Number(linked_delivery_id) : null,
+          stpNumber,
           Number(draft_id)
         ).run()
       } else {
@@ -3401,16 +3428,17 @@ app.post('/submit', async (c) => {
             prepared_by=?, driver=?, vehicle_reg=?, client=?, brand=?, venue=?, venue_address=?,
             event_name=?, address=?, attention=?, contact_number=?, delivery_date=?,
             collection_date=?, received_by=?, signature_data=?, letterhead=?, notes=?,
-            form_data=?, linked_delivery_id=?, is_draft=0
+            form_data=?, linked_delivery_id=?, stp_number=?, is_draft=0
           WHERE id=? AND is_draft=1
         `).bind(
           finalPreparedBy, finalDriver, finalVehicleReg,
           client || 'South African Breweries', form_brand || '',
-          venue || '', venue_address || '', event_name || '', address || '',
+          cleanVenue, venue_address || '', cleanEventName, address || '',
           attention || '', contact_number || '', delivery_date || '', collection_date || '',
           received_by || '', signature_data || '', letterhead || 'sab',
           finalNotes, JSON.stringify(body),
           linked_delivery_id ? Number(linked_delivery_id) : null,
+          stpNumber,
           Number(draft_id)
         ).run()
       }
@@ -3480,16 +3508,17 @@ app.post('/submit', async (c) => {
         INSERT INTO field_submissions
           (form_type, form_number, prepared_by, driver, vehicle_reg, client, brand, venue, venue_address,
            event_name, address, attention, contact_number, delivery_date, collection_date,
-           received_by, signature_data, letterhead, notes, form_data, linked_delivery_id, is_draft)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
+           received_by, signature_data, letterhead, notes, form_data, linked_delivery_id, stp_number, is_draft)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
       `).bind(
         form_type, form_number, finalPreparedBy, finalDriver,
         finalVehicleReg, client || 'South African Breweries',
-        form_brand || '', venue || '', venue_address || '', event_name || '', address || '',
+        form_brand || '', cleanVenue, venue_address || '', cleanEventName, address || '',
         attention || '', contact_number || '', delivery_date || '', collection_date || '',
         received_by || '', signature_data || '', letterhead || 'sab',
         finalNotes, JSON.stringify(body),
-        linked_delivery_id ? Number(linked_delivery_id) : null
+        linked_delivery_id ? Number(linked_delivery_id) : null,
+        stpNumber
       ).run()
       submissionId = result.meta.last_row_id as number
     }
@@ -3682,7 +3711,7 @@ app.get('/p/preview/:token{[a-f0-9]{16,64}}', async (c) => {
   }
 
   const sub = await c.env.DB.prepare(`
-    SELECT id, form_number, form_type, brand, client, event_name, venue,
+    SELECT id, form_number, form_type, brand, client, event_name, venue, stp_number,
            attention, received_by, contact_number, prepared_by, driver,
            vehicle_reg, delivery_date, collection_date, created_at
     FROM field_submissions WHERE id = ?
@@ -3817,6 +3846,7 @@ app.get('/p/preview/:token{[a-f0-9]{16,64}}', async (c) => {
           ${sub.brand ? `<div><dt>Brand</dt><dd>${escHtml(sub.brand)}</dd></div>` : ''}
           ${sub.client ? `<div><dt>Client</dt><dd>${escHtml(sub.client)}</dd></div>` : ''}
           ${sub.venue && !isVehicle ? `<div><dt>Venue</dt><dd>${escHtml(sub.venue)}</dd></div>` : ''}
+          ${sub.stp_number && !isVehicle ? `<div><dt>STP Outlet</dt><dd>${escHtml(sub.stp_number)}</dd></div>` : ''}
           ${sub.vehicle_reg && isVehicle ? `<div><dt>Vehicle</dt><dd>${escHtml(sub.vehicle_reg)}</dd></div>` : ''}
           ${sub.driver ? `<div><dt>Driver</dt><dd>${escHtml(sub.driver)}</dd></div>` : ''}
           ${sub.prepared_by ? `<div><dt>${isVehicle ? 'Inspected by' : 'Prepared by'}</dt><dd>${escHtml(sub.prepared_by)}</dd></div>` : ''}
