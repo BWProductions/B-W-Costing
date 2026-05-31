@@ -456,6 +456,7 @@ app.get('/', requireAuth, async (c) => {
       <a href="/field/admin/people" class="btn btn-secondary"><i class="fas fa-users"></i> Manage People</a>
       <a href="/field/admin/items" class="btn btn-secondary"><i class="fas fa-boxes"></i> Manage Items</a>
       <a href="/field/admin/damages" class="btn btn-secondary" style="border-color:rgba(239,68,68,0.4)"><i class="fas fa-exclamation-triangle"></i> B&W Damages</a>
+      <a href="/field/admin/discrepancies" class="btn btn-secondary" style="border-color:rgba(239,68,68,0.4)"><i class="fas fa-balance-scale-right"></i> Discrepancy Report</a>
     </div>
 
     <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;padding:12px;background:rgba(34,211,238,0.06);border:1px solid rgba(34,211,238,0.25);border-radius:10px">
@@ -3885,6 +3886,175 @@ app.get('/email-digest', requireAuth, async (c) => {
       }
     </script>`
   return c.html(layout('Accounts Email Digest', body, user, 'field-admin'))
+})
+
+// ─── DISCREPANCY REPORT ───────────────────────────────────────────────────────
+// Lists every COLLECTION note line where the qty the crew physically counted on
+// site differs from the qty originally delivered (expected_quantity). This is the
+// back-office twin of the live on-site short-warning banner. NOT to be confused
+// with the Shortlist (which is a request for MORE kit to be delivered on site).
+app.get('/discrepancies', requireAuth, async (c) => {
+  const user = c.get('user' as any) as any
+
+  // Pull collection-note lines where counted != delivered. We join back to the
+  // submission for context (venue/event/date/who signed) and to the linked
+  // delivery via form_data->linked_delivery_id is messy, so we rely on the
+  // collection note's own fields which were copied across at collect time.
+  const rows = await c.env.DB.prepare(`
+    SELECT
+      li.id            AS line_id,
+      li.item_name     AS item_name,
+      li.quantity      AS counted,
+      li.expected_quantity AS delivered,
+      li.condition     AS condition,
+      li.comments      AS comments,
+      fs.id            AS sub_id,
+      fs.form_number   AS form_number,
+      fs.venue         AS venue,
+      fs.event_name    AS event_name,
+      fs.brand         AS brand,
+      fs.collection_date AS collection_date,
+      fs.received_by   AS received_by,
+      fs.prepared_by   AS prepared_by,
+      fs.created_at    AS created_at
+    FROM field_line_items li
+    JOIN field_submissions fs ON fs.id = li.submission_id
+    WHERE fs.form_type = 'collection'
+      AND li.expected_quantity IS NOT NULL
+      AND li.quantity <> li.expected_quantity
+      AND COALESCE(fs.is_draft, 0) = 0
+    ORDER BY fs.created_at DESC, li.sort_order ASC
+  `).all<any>()
+
+  const list = rows.results || []
+  const shortCount = list.filter((r: any) => Number(r.counted) < Number(r.delivered)).length
+  const overCount  = list.filter((r: any) => Number(r.counted) > Number(r.delivered)).length
+
+  // Group lines by collection note for a clean card-per-note layout
+  const byNote: Record<string, any[]> = {}
+  for (const r of list) {
+    (byNote[r.form_number] = byNote[r.form_number] || []).push(r)
+  }
+
+  const esc = (s: any) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+
+  const cards = Object.keys(byNote).map(fn => {
+    const lines = byNote[fn]
+    const head = lines[0]
+    const lineRows = lines.map((r: any) => {
+      const counted = Number(r.counted)
+      const delivered = Number(r.delivered)
+      const diff = counted - delivered
+      const isShort = diff < 0
+      const colour = isShort ? '#ef4444' : '#f59e0b'
+      const label = isShort ? `SHORT ${Math.abs(diff)}` : `OVER ${diff}`
+      return `
+        <tr style="border-top:1px solid rgba(255,255,255,0.06)">
+          <td style="padding:8px 10px;font-weight:600">${esc(r.item_name)}</td>
+          <td style="padding:8px 10px;text-align:center">${delivered}</td>
+          <td style="padding:8px 10px;text-align:center">${counted}</td>
+          <td style="padding:8px 10px;text-align:center">
+            <span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:800;
+                         color:${colour};background:${colour}22;border:1px solid ${colour}66">${label}</span>
+          </td>
+          <td style="padding:8px 10px;color:#9aa4b2;font-size:13px">${esc(r.comments || r.condition || '')}</td>
+        </tr>`
+    }).join('')
+    return `
+      <div style="background:#11161d;border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:18px;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:baseline;margin-bottom:10px">
+          <div>
+            <a href="/field/admin/submission/${head.sub_id}" style="font-size:17px;font-weight:800;color:#fff;text-decoration:none">${esc(fn)}</a>
+            <span style="color:#9aa4b2;font-size:14px;margin-left:8px">${esc(head.event_name || '')}${head.venue ? ' · ' + esc(head.venue) : ''}</span>
+          </div>
+          <div style="color:#9aa4b2;font-size:13px">
+            ${head.collection_date ? '📅 ' + esc(head.collection_date) : ''}
+            ${head.received_by ? ' · ✍️ ' + esc(head.received_by) : ''}
+          </div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:14px">
+          <thead>
+            <tr style="color:#9aa4b2;font-size:12px;text-transform:uppercase;letter-spacing:0.05em">
+              <th style="text-align:left;padding:6px 10px">Item</th>
+              <th style="text-align:center;padding:6px 10px">Delivered</th>
+              <th style="text-align:center;padding:6px 10px">Counted</th>
+              <th style="text-align:center;padding:6px 10px">Variance</th>
+              <th style="text-align:left;padding:6px 10px">Note / Condition</th>
+            </tr>
+          </thead>
+          <tbody>${lineRows}</tbody>
+        </table>
+      </div>`
+  }).join('')
+
+  const body = `
+    <div style="max-width:1000px;margin:0 auto;padding:8px 0 40px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:8px">
+        <h1 style="font-size:24px;font-weight:800;color:#fff;margin:0">⚖️ Discrepancy Report</h1>
+        <a href="/field/admin/discrepancies/export.csv"
+           style="background:#1f6feb;color:#fff;text-decoration:none;padding:9px 16px;border-radius:8px;font-weight:700;font-size:14px">⬇️ Export CSV</a>
+      </div>
+      <p style="color:#9aa4b2;font-size:14px;margin:0 0 18px;line-height:1.5">
+        Every <strong>collection</strong> where the crew's physical count didn't match what was delivered.
+        Short counts mean kit may still be on site, lost, or stolen — over counts usually mean a counting slip
+        or extra kit picked up. (This is separate from the <a href="/field/shortlist" style="color:#58a6ff">Shortlist</a>,
+        which is a request for more kit to be delivered.)
+      </p>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">
+        <div style="flex:1;min-width:140px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.4);border-radius:12px;padding:14px">
+          <div style="font-size:30px;font-weight:800;color:#fca5a5">${shortCount}</div>
+          <div style="font-size:13px;color:#9aa4b2">short lines</div>
+        </div>
+        <div style="flex:1;min-width:140px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.4);border-radius:12px;padding:14px">
+          <div style="font-size:30px;font-weight:800;color:#fcd34d">${overCount}</div>
+          <div style="font-size:13px;color:#9aa4b2">over lines</div>
+        </div>
+        <div style="flex:1;min-width:140px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:14px">
+          <div style="font-size:30px;font-weight:800;color:#fff">${Object.keys(byNote).length}</div>
+          <div style="font-size:13px;color:#9aa4b2">affected collection notes</div>
+        </div>
+      </div>
+      ${list.length === 0
+        ? `<div style="text-align:center;padding:50px 20px;color:#9aa4b2;background:#11161d;border:1px solid rgba(255,255,255,0.08);border-radius:14px">
+             ✅ No discrepancies. Every collected count matched what was delivered.
+           </div>`
+        : cards}
+    </div>`
+
+  return c.html(layout('Discrepancy Report', body, user, 'field-admin'))
+})
+
+// CSV export of the discrepancy report
+app.get('/discrepancies/export.csv', requireAuth, async (c) => {
+  const rows = await c.env.DB.prepare(`
+    SELECT fs.form_number, fs.collection_date, fs.event_name, fs.venue, fs.brand,
+           fs.received_by, li.item_name, li.expected_quantity AS delivered,
+           li.quantity AS counted, li.condition, li.comments
+    FROM field_line_items li
+    JOIN field_submissions fs ON fs.id = li.submission_id
+    WHERE fs.form_type = 'collection'
+      AND li.expected_quantity IS NOT NULL
+      AND li.quantity <> li.expected_quantity
+      AND COALESCE(fs.is_draft, 0) = 0
+    ORDER BY fs.created_at DESC, li.sort_order ASC
+  `).all<any>()
+
+  const q = (v: any) => '"' + String(v ?? '').replace(/"/g, '""') + '"'
+  const header = ['Collection Note','Collection Date','Event','Venue','Brand','Received By','Item','Delivered','Counted','Variance','Condition','Comments']
+  const lines = [header.map(q).join(',')]
+  for (const r of (rows.results || [])) {
+    const variance = Number(r.counted) - Number(r.delivered)
+    lines.push([
+      r.form_number, r.collection_date, r.event_name, r.venue, r.brand, r.received_by,
+      r.item_name, r.delivered, r.counted, variance, r.condition, r.comments
+    ].map(q).join(','))
+  }
+  return new Response(lines.join('\n'), {
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="discrepancy-report.csv"'
+    }
+  })
 })
 
 export default app
