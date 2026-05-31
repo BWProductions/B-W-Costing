@@ -41,12 +41,14 @@ Internal ops platform for B&W Productions CC. Built on Cloudflare Pages + Hono +
 | Weekly D1 Backup | `0 0 * * 0` | Sunday 02:00 | `POST /api/cron/backup` |
 | Low Stock Digest | `0 5 * * 1` | Monday 07:00 | `POST /api/cron/low-stock-digest` |
 | Brand Owner Digest | `0 4 * * 1` | Monday 06:00 | `POST /api/cron/brand-digest` |
+| Uncollected Delivery Alert | `0 6 * * *` | 08:00 daily | `POST /api/cron/uncollected-alert` |
 
 All webhooks use bearer-token auth via Cloudflare Pages secrets:
 - `CRON_WEBHOOK_TOKEN` — email digest
 - `BACKUP_WEBHOOK_TOKEN` — D1 backup
 - `LOW_STOCK_WEBHOOK_TOKEN` — low-stock digest
 - `BRAND_DIGEST_WEBHOOK_TOKEN` — brand-owner digest
+- `UNCOLLECTED_WEBHOOK_TOKEN` — uncollected-delivery alert
 
 Tokens must match in **both** Cloudflare Pages secrets **and** GitHub repo Action secrets.
 
@@ -171,6 +173,27 @@ user-uploaded attachments on:
 
 R2 supports any file size up to 5 TB per object; PDFs and photos at typical
 sizes (1-10 MB) cost roughly $1.50/month per 10,000 attachments.
+
+### Collection workflow upgrades — completed 2026-05-31
+Keeps "Smart Collect" (one-tap pre-filled Collection Note from a signed Delivery
+Note) but adds three things so crews must physically verify kit, not tick boxes:
+
+1. **Quantities blanked on collection** — the Collection Note pre-fills item
+   names/brands/conditions but NOT quantities (placeholder "Count it"). The crew
+   must physically count and type each qty. The delivered qty is carried silently
+   as `data-expected-qty` for comparison.
+2. **Live on-site short-warning banner** — as they type a count, a red banner
+   lists any item that's short ("delivered 6, counted 5 → short 1") so they can
+   check the site *before they leave*. `field_line_items.expected_quantity`
+   (migration 0036) persists the delivered figure alongside the counted `quantity`.
+3. **Discrepancy Report** (`/field/admin/discrepancies` + `/export.csv`) — back
+   office view of every collection where counted ≠ delivered (short or over),
+   grouped per note. NOT the Shortlist — Shortlist = request for MORE kit on site.
+4. **5-day uncollected-delivery alert** — `POST /api/cron/uncollected-alert`
+   (daily 08:00 SAST). If a delivery is 5+ days past its collection date with no
+   signed Collection Note, emails Bernie (`bibi@bwproductions.co.za`) + Marketing
+   (`marketing@bwproductions.co.za`) **once** (guarded by
+   `field_submissions.uncollected_alert_sent_at`). See `src/lib/uncollected.ts`.
 
 ### 4. Delivery-edit-after-sign — completed 2026-05-29
 Three named office users can re-open signed delivery notes for correction:

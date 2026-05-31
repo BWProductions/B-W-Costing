@@ -19,5 +19,8 @@ CREATE INDEX IF NOT EXISTS idx_field_line_items_expected
 -- delivery note. NULL = never alerted; a timestamp = the alert has been sent.
 ALTER TABLE field_submissions ADD COLUMN uncollected_alert_sent_at TEXT;
 
+-- Index for the uncollected-delivery scan. We index only columns guaranteed to
+-- exist here (collection_status is created/managed elsewhere in production), to
+-- keep this migration safe on both fresh and existing databases.
 CREATE INDEX IF NOT EXISTS idx_field_submissions_uncollected
-  ON field_submissions(form_type, collection_status, uncollected_alert_sent_at);
+  ON field_submissions(form_type, uncollected_alert_sent_at);
