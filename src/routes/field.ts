@@ -4061,9 +4061,13 @@ app.get('/collect-from/:id', async (c) => {
     return _li
   })
 
-  // Serialise delivery items for JS pre-fill
+  // Serialise delivery items for JS pre-fill.
+  // NOTE (Bibi's directive): we pre-fill the item NAME, brand and condition, but we
+  // DELIBERATELY leave the quantity BLANK. The person on site must physically count
+  // and type the qty. `expectedQty` is the delivered amount, carried only so we can
+  // flag any disparity (collected != delivered) on the disparity / shortlist view.
   const preItemsJson = JSON.stringify((delLines.results || []).map((li: any) => ({
-    qty: li.quantity, item: li.item_name, brand: li.brand || '', condition: li.condition || 'Checked'
+    expectedQty: li.quantity, item: li.item_name, brand: li.brand || '', condition: li.condition || 'Checked'
   })))
 
   const vDesc = VEHICLES.find(v => v.reg === del.vehicle_reg)
@@ -4262,10 +4266,23 @@ app.get('/collect-from/:id', async (c) => {
         for (var i = 0; i < itemSel.options.length; i++) {
           if (itemSel.options[i].value === pi.item) { itemSel.selectedIndex = i; found = true; break }
         }
-        if (!found) { itemSel.options[0] = new Option(pi.item, pi.item, true, true) }
+        if (!found) {
+          // Item isn't in the standard dropdown — append it as a new option
+          // and select it. (Using add() avoids the indexed-property error you
+          // get from assigning to options[0] on some browsers.)
+          var opt = new Option(pi.item, pi.item, true, true)
+          itemSel.add(opt)
+          itemSel.value = pi.item
+        }
       }
       var qtySel = document.querySelector('[name="li_qty_'+id+'"]')
-      if (qtySel) qtySel.value = pi.qty
+      if (qtySel) {
+        // Bibi's rule: do NOT pre-fill the quantity. They must count it themselves.
+        qtySel.value = ''
+        // Stash the delivered ("expected") qty so we can flag disparities later.
+        qtySel.setAttribute('data-expected-qty', pi.expectedQty)
+        qtySel.setAttribute('placeholder', 'Count it')
+      }
       var brandSel = document.querySelector('[name="li_brand_'+id+'"]')
       if (brandSel && pi.brand) {
         for (var j = 0; j < brandSel.options.length; j++) {
