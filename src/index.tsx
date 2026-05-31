@@ -6,6 +6,7 @@ import { serveStatic } from 'hono/cloudflare-workers'
 import { runDigest } from './lib/email-digest.js'
 import { runBackup } from './lib/backup.js'
 import { runLowStockDigest } from './lib/low-stock.js'
+import { runUncollectedAlert } from './lib/uncollected.js'
 import auth from './routes/auth.js'
 import dashboard from './routes/dashboard.js'
 import fleet from './routes/fleet.js'
@@ -264,6 +265,28 @@ app.post('/api/cron/low-stock-digest', async (c) => {
     reason: body.reason || 'cron-webhook',
     skipIfEmpty: body.skipIfEmpty !== false,
     dashboardUrl: 'https://bwprodsystem.co.za/admin/stock/alerts',
+  })
+  if (!result.ok) return c.json(result, 500)
+  return c.json(result)
+})
+
+// 5-day uncollected-delivery alert → emails Bernie + Marketing (one-time per delivery).
+// Fired daily by GitHub Actions; the lib's one-time guard means most days send nothing.
+app.post('/api/cron/uncollected-alert', async (c) => {
+  const env = c.env as any
+  const auth = c.req.header('authorization') || ''
+  const token = auth.replace(/^Bearer\s+/i, '').trim()
+  const expected = (env.UNCOLLECTED_WEBHOOK_TOKEN || '').trim()
+  if (!token || !expected || token !== expected) {
+    return c.json({ ok: false, error: 'unauthorized' }, 401)
+  }
+  let body: any = {}
+  try { body = await c.req.json() } catch { /* empty body is fine */ }
+  const result = await runUncollectedAlert(env, {
+    reason: body.reason || 'cron-webhook',
+    dryRun: body.dryRun === true,
+    testRecipients: Array.isArray(body.testRecipients) ? body.testRecipients : undefined,
+    baseUrl: 'https://bwprodsystem.co.za',
   })
   if (!result.ok) return c.json(result, 500)
   return c.json(result)

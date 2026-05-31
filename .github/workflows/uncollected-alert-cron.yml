@@ -1,0 +1,39 @@
+name: Uncollected Delivery Alert
+
+# Emails Bernie + Marketing once per delivery when a delivery is 5+ days past its
+# collection date with no signed Collection Note. Runs daily; the one-time guard
+# in the app means most days will send nothing.
+# 06:00 UTC daily = 08:00 SAST daily.
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  fire-uncollected-alert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fire uncollected-delivery alert webhook
+        env:
+          TOKEN: ${{ secrets.UNCOLLECTED_WEBHOOK_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::UNCOLLECTED_WEBHOOK_TOKEN secret is not set."
+            exit 1
+          fi
+          set -e
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://bwprodsystem.co.za/api/cron/uncollected-alert" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"reason":"github-actions-daily"}')
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          STATUS=$(echo "$RESPONSE" | tail -n1)
+          echo "Status: $STATUS"
+          echo "Response: $BODY"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Uncollected-delivery alert webhook returned $STATUS"
+            exit 1
+          fi
+          echo "Uncollected-delivery alert fired successfully."

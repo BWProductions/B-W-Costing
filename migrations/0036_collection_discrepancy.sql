@@ -14,3 +14,10 @@ ALTER TABLE field_line_items ADD COLUMN expected_quantity INTEGER;
 -- counted != delivered). Partial-index syntax kept simple for D1/SQLite.
 CREATE INDEX IF NOT EXISTS idx_field_line_items_expected
   ON field_line_items(submission_id, expected_quantity);
+
+-- Marker so the "5-day uncollected delivery" alert only ever fires ONCE per
+-- delivery note. NULL = never alerted; a timestamp = the alert has been sent.
+ALTER TABLE field_submissions ADD COLUMN uncollected_alert_sent_at TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_field_submissions_uncollected
+  ON field_submissions(form_type, collection_status, uncollected_alert_sent_at);
