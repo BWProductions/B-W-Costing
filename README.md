@@ -41,7 +41,7 @@ Internal ops platform for B&W Productions CC. Built on Cloudflare Pages + Hono +
 | Weekly D1 Backup | `0 0 * * 0` | Sunday 02:00 | `POST /api/cron/backup` |
 | Low Stock Digest | `0 5 * * 1` | Monday 07:00 | `POST /api/cron/low-stock-digest` |
 | Brand Owner Digest | `0 4 * * 1` | Monday 06:00 | `POST /api/cron/brand-digest` |
-| Uncollected Delivery Alert | `0 6 * * *` | 08:00 daily | `POST /api/cron/uncollected-alert` |
+| Uncollected Delivery Alert | `5 10 * * *`, `0 14 * * *` | 12:05 + 16:00 daily | `POST /api/cron/uncollected-alert` |
 
 All webhooks use bearer-token auth via Cloudflare Pages secrets:
 - `CRON_WEBHOOK_TOKEN` — email digest
@@ -190,7 +190,7 @@ Note) but adds three things so crews must physically verify kit, not tick boxes:
    office view of every collection where counted ≠ delivered (short or over),
    grouped per note. NOT the Shortlist — Shortlist = request for MORE kit on site.
 4. **5-day uncollected-delivery alert** — `POST /api/cron/uncollected-alert`
-   (daily 08:00 SAST). If a delivery is 5+ days past its collection date with no
+   (12:05 + 16:00 SAST daily). If a delivery is 5+ days past its collection date with no
    signed Collection Note, emails Bernie (`bibi@bwproductions.co.za`) + Marketing
    (`marketing@bwproductions.co.za`) **once** (guarded by
    `field_submissions.uncollected_alert_sent_at`). See `src/lib/uncollected.ts`.

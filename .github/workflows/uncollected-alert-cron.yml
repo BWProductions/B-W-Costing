@@ -1,12 +1,16 @@
 name: Uncollected Delivery Alert
 
 # Emails Bernie + Marketing once per delivery when a delivery is 5+ days past its
-# collection date with no signed Collection Note. Runs daily; the one-time guard
-# in the app means most days will send nothing.
-# 06:00 UTC daily = 08:00 SAST daily.
+# collection date with no signed Collection Note. The one-time guard in the app
+# means most runs send nothing; the second run catches anything that crossed the
+# 5-day line during the day.
+# Twice daily — staggered so no job ever overlaps another:
+#   10:05 UTC = 12:05 SAST (midday)   — :05 avoids the 12:00 Accounts Digest
+#   14:00 UTC = 16:00 SAST (4pm)
 on:
   schedule:
-    - cron: '0 6 * * *'
+    - cron: '5 10 * * *'
+    - cron: '0 14 * * *'
   workflow_dispatch:
 
 jobs:
