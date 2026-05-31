@@ -3258,9 +3258,9 @@ app.post('/draft/save', async (c) => {
         const li = line_items[i]
         if (!li.item_name) continue
         await c.env.DB.prepare(`
-          INSERT INTO field_line_items (submission_id, item_name, quantity, brand, condition, comments, sort_order)
-          VALUES (?,?,?,?,?,?,?)
-        `).bind(draftId, li.item_name, li.quantity || 1, li.brand || form_brand || '', li.condition || 'Checked', li.comments || '', i).run()
+          INSERT INTO field_line_items (submission_id, item_name, quantity, expected_quantity, brand, condition, comments, sort_order)
+          VALUES (?,?,?,?,?,?,?,?)
+        `).bind(draftId, li.item_name, li.quantity || 1, (li.expected_quantity ?? null), li.brand || form_brand || '', li.condition || 'Checked', li.comments || '', i).run()
       }
     }
 
@@ -3558,9 +3558,9 @@ app.post('/submit', async (c) => {
         const li = line_items[i]
         if (!li.item_name) continue
         await c.env.DB.prepare(`
-          INSERT INTO field_line_items (submission_id, item_name, quantity, brand, condition, comments, sort_order)
-          VALUES (?,?,?,?,?,?,?)
-        `).bind(submissionId, li.item_name, li.quantity || 1, li.brand || form_brand || '', li.condition || 'Checked', li.comments || '', i).run()
+          INSERT INTO field_line_items (submission_id, item_name, quantity, expected_quantity, brand, condition, comments, sort_order)
+          VALUES (?,?,?,?,?,?,?,?)
+        `).bind(submissionId, li.item_name, li.quantity || 1, (li.expected_quantity ?? null), li.brand || form_brand || '', li.condition || 'Checked', li.comments || '', i).run()
       }
     }
 
@@ -4165,7 +4165,13 @@ app.get('/collect-from/:id', async (c) => {
         <div class="section-title">Items Being Collected</div>
         <div style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);
                     border-radius:8px;padding:10px 14px;font-size:13px;color:#fcd34d;margin-bottom:14px">
-          📋 Pre-loaded from ${del.form_number} — confirm, adjust conditions, or remove items not being collected.
+          📋 Pre-loaded from ${del.form_number} — item names are filled in, but <strong>quantities are blank on purpose</strong>. Count each item physically and type what you actually have. If your count is short, a warning will pop up so you can check on site before you leave.
+        </div>
+        <!-- Live discrepancy banner: appears in real time when a counted qty is short of what was delivered -->
+        <div id="discrepancyBanner" style="display:none;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.5);
+                    border-radius:10px;padding:12px 16px;margin-bottom:14px">
+          <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;color:#fca5a5;margin-bottom:6px">⚠️ Short on collection — check the site before you leave</div>
+          <div id="discrepancyList" style="font-size:14px;color:#fecaca;line-height:1.5"></div>
         </div>
         <div class="line-items-wrap" id="lineItems"></div>
         <button type="button" class="add-line-btn" onclick="addLineItem()"><i class="fas fa-plus"></i> Add Item</button>
@@ -4279,9 +4285,13 @@ app.get('/collect-from/:id', async (c) => {
       if (qtySel) {
         // Bibi's rule: do NOT pre-fill the quantity. They must count it themselves.
         qtySel.value = ''
-        // Stash the delivered ("expected") qty so we can flag disparities later.
+        // Stash the delivered ("expected") qty + item name so we can flag disparities.
         qtySel.setAttribute('data-expected-qty', pi.expectedQty)
+        qtySel.setAttribute('data-item-name', pi.item)
         qtySel.setAttribute('placeholder', 'Count it')
+        // Live short-warning: recheck every time they type / change the count.
+        qtySel.addEventListener('input', recalcDiscrepancies)
+        qtySel.addEventListener('change', recalcDiscrepancies)
       }
       var brandSel = document.querySelector('[name="li_brand_'+id+'"]')
       if (brandSel && pi.brand) {
@@ -4292,6 +4302,40 @@ app.get('/collect-from/:id', async (c) => {
       if (pi.condition) setCond(id, pi.condition)
     })
   })
+
+  // ── Live discrepancy check ──────────────────────────────────────────────
+  // Compares each counted qty against the qty that was delivered (data-expected-qty)
+  // and shows a red banner listing every item where the count is SHORT. This fires
+  // in real time so the crew notice on site, while they can still go and look.
+  function recalcDiscrepancies() {
+    var qtyInputs = document.querySelectorAll('#lineItems input[type="number"][data-expected-qty]')
+    var shorts = []
+    for (var i = 0; i < qtyInputs.length; i++) {
+      var inp = qtyInputs[i]
+      var expected = parseInt(inp.getAttribute('data-expected-qty') || '0', 10)
+      var raw = (inp.value || '').trim()
+      if (raw === '') { inp.style.borderColor = ''; continue } // not counted yet — don't nag
+      var counted = parseInt(raw, 10)
+      if (isNaN(counted)) continue
+      var name = inp.getAttribute('data-item-name') || 'item'
+      if (counted < expected) {
+        var missing = expected - counted
+        shorts.push('<div>• <strong>' + name + '</strong> — delivered ' + expected + ', counted ' + counted + ' → <strong>short ' + missing + '</strong></div>')
+        inp.style.borderColor = '#ef4444'
+      } else {
+        inp.style.borderColor = (counted > expected) ? '#f59e0b' : '#10b981'
+      }
+    }
+    var banner = document.getElementById('discrepancyBanner')
+    var list = document.getElementById('discrepancyList')
+    if (shorts.length) {
+      list.innerHTML = shorts.join('') +
+        '<div style="margin-top:8px;font-size:13px;color:#fca5a5">Is the missing kit still on site, or genuinely short/lost? Check now — this gets logged on the Discrepancy Report either way.</div>'
+      banner.style.display = 'block'
+    } else {
+      banner.style.display = 'none'
+    }
+  }
   </script>`
 
   return c.html(fieldPage(`Collection — ${del.form_number}`, body))
@@ -6163,9 +6207,14 @@ function submitScript(formType: string): string {
       const id = div.id.replace('li_','')
       const item = form.querySelector('[name="li_item_'+id+'"]')?.value
       if (!item) return
+      const qtyEl = form.querySelector('[name="li_qty_'+id+'"]')
+      // expected_quantity is only present on collection notes (set from the
+      // linked delivery). For all other forms it stays null.
+      const expectedAttr = qtyEl ? qtyEl.getAttribute('data-expected-qty') : null
       lineItems.push({
         item_name: item,
-        quantity: parseInt(form.querySelector('[name="li_qty_'+id+'"]')?.value || '1'),
+        quantity: parseInt(qtyEl?.value || '1'),
+        expected_quantity: (expectedAttr === null || expectedAttr === '') ? null : parseInt(expectedAttr),
         brand: form.querySelector('[name="li_brand_'+id+'"]')?.value || '',
         condition: form.querySelector('[name="li_cond_val_'+id+'"]')?.value || 'Checked',
         comments: form.querySelector('[name="li_comment_'+id+'"]')?.value || ''
