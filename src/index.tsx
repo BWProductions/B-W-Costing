@@ -142,7 +142,12 @@ class WagesUiInjector {
   const WAGES_HOME_PATH = '/wages'
   const LOGOUT_PATH = '/wages/logout'
 
-  const normalize = (value) => (value || '').replace(/\s+/g, ' ').trim()
+  const normalize = (value) => String(value || '')
+    .split(String.fromCharCode(10)).join(' ')
+    .split(String.fromCharCode(13)).join(' ')
+    .split(String.fromCharCode(9)).join(' ')
+    .replace(/  +/g, ' ')
+    .trim()
   const elementText = (el) => normalize(el?.textContent || (el instanceof HTMLInputElement ? el.value : ''))
   const actionElements = () => Array.from(document.querySelectorAll('a, button, input[type="submit"], input[type="button"]'))
   const textMatches = (el, regex) => regex.test(elementText(el))
@@ -163,10 +168,14 @@ class WagesUiInjector {
   }
 
   function parseFlexibleDate(value) {
-    const cleaned = normalize(value).replace(/\//g, '-')
-    const match = cleaned.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-    if (!match) return null
-    const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
+    const cleaned = normalize(value).split('/').join('-')
+    const parts = cleaned.split('-')
+    if (parts.length !== 3) return null
+    const year = Number(parts[0])
+    const month = Number(parts[1])
+    const day = Number(parts[2])
+    if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null
+    const date = new Date(Date.UTC(year, month - 1, day))
     return Number.isNaN(date.getTime()) ? null : date
   }
 
@@ -227,7 +236,9 @@ class WagesUiInjector {
 
   function fixSwitchPerson() {
     actionElements().forEach((el) => {
-      if (!textMatches(el, /^‹?\s*switch person$/i)) return
+      let label = elementText(el)
+      if (label.startsWith('‹')) label = label.slice(1).trim()
+      if (label.toLowerCase() !== 'switch person') return
       if (el instanceof HTMLAnchorElement) el.href = WAGES_HOME_PATH
       if (!once(el, 'SwitchPerson')) return
       el.addEventListener('click', (event) => {
