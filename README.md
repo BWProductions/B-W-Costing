@@ -25,6 +25,16 @@ Internal ops platform for B&W Productions CC. Built on Cloudflare Pages + Hono +
 - **Music Bus** — separate fleet sub-app at `/musicbus`
 - **Dispatch TV** — token-protected big-screen warehouse view (60s refresh)
 - **Admin** — user management, exports, role permissions, **database backups** (founder-only)
+- **Wages / Timesheets** — public worker flow at `/wages` with PIN login, week picker, draft/final shift submission, and safe-proxy UI fixes layered in the worker
+
+## Latest wages/timesheet fixes
+- Worker PIN access itself remained online; recent failed logins were traced to regenerated worker PINs on 2026-09-09 plus a broken/awkward shared-device switch-person flow.
+- Added safe-proxy UI enhancement injection on `/wages*` pages so fixes can be layered without changing the upstream wage app directly.
+- Added a working **Return to Dashboard** action to wages pages and login/switch-person screens.
+- Rewired **Switch person** to force a wages logout request first, then return to `/wages` for the next worker on shared devices.
+- Added UI styling hooks for **Add Shift**, **Save Shift Temporarily**, **Miss Shift**, and bulk **Final Submission** selection.
+- Added a **Last payroll** helper and removed client-side week input locking so the previous payroll week can still be opened when claims are needed.
+- Added hiding for the visible **Next Overnight Shift** prompt in the worker wages flow.
 
 ## Phase 1 Foundation (completed)
 - `company_settings` table — single-row company details (legal name, VAT, registration, address, contact)
