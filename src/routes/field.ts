@@ -848,6 +848,10 @@ function teamCrewSection(): string {
     custom.style.display = sel.value === '__other__' ? 'block' : 'none'
     if (sel.value !== '__other__') custom.value = ''
   }
+
+  // Populate the team picker immediately on first render so office/driver users
+  // can add team members without having to change the driver field first.
+  try { refreshTeamPicker() } catch (e) {}
   </script>`
 }
 
