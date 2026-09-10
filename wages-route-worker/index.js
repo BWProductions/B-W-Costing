@@ -1,15 +1,7 @@
-import { Hono } from 'hono'
-
-type Bindings = {
-  ANTHROPIC_API_KEY?: string
-}
-
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
 
-const app = new Hono<{ Bindings: Bindings }>()
-
 class DashboardButtonInjector {
-  element(element: Element) {
+  element(element) {
     element.append(
       '<a class="btn btn-outline btn-sm" href="/"><i class="fas fa-gauge-high"></i> Dashboard</a>',
       { html: true },
@@ -18,7 +10,7 @@ class DashboardButtonInjector {
 }
 
 class TeamPickerInitInjector {
-  element(element: Element) {
+  element(element) {
     element.append(
       `<script>
 (function () {
@@ -70,37 +62,30 @@ Return exactly this JSON structure:
 }`
 }
 
-async function handleAiExtract(c: any) {
+async function handleAiExtract(request, env) {
   try {
-    const body = await c.req.json()
+    const body = await request.json()
     const images = Array.isArray(body?.images) ? body.images : []
-    const apiKey = (c.env.ANTHROPIC_API_KEY || '').trim()
+    const apiKey = (env.ANTHROPIC_API_KEY || '').trim()
 
     if (!apiKey) {
-      return c.json({ success: false, error: 'ANTHROPIC_API_KEY is not configured on this deployment.' }, 500)
+      return Response.json({ success: false, error: 'ANTHROPIC_API_KEY is not configured on this deployment.' }, { status: 500 })
     }
-
     if (!images.length) {
-      return c.json({ success: false, error: 'No images provided' }, 400)
+      return Response.json({ success: false, error: 'No images provided' }, { status: 400 })
     }
 
-    const imageBlocks = images
-      .map((dataUrl: string) => {
-        const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/)
-        if (!match) return null
-        return {
-          type: 'image',
-          source: {
-            type: 'base64',
-            media_type: match[1],
-            data: match[2],
-          },
-        }
-      })
-      .filter(Boolean)
+    const imageBlocks = images.map((dataUrl) => {
+      const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/)
+      if (!match) return null
+      return {
+        type: 'image',
+        source: { type: 'base64', media_type: match[1], data: match[2] },
+      }
+    }).filter(Boolean)
 
     if (!imageBlocks.length) {
-      return c.json({ success: false, error: 'Images must be base64 data URLs.' }, 400)
+      return Response.json({ success: false, error: 'Images must be base64 data URLs.' }, { status: 400 })
     }
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -113,36 +98,30 @@ async function handleAiExtract(c: any) {
       body: JSON.stringify({
         model: 'claude-opus-4-7',
         max_tokens: 4096,
-        messages: [
-          {
-            role: 'user',
-            content: [...imageBlocks, { type: 'text', text: buildPrompt() }],
-          },
-        ],
+        messages: [{ role: 'user', content: [...imageBlocks, { type: 'text', text: buildPrompt() }] }],
       }),
     })
 
     if (!response.ok) {
       const err = await response.text()
-      return c.json({ success: false, error: 'Claude API error: ' + err }, 500)
+      return Response.json({ success: false, error: 'Claude API error: ' + err }, { status: 500 })
     }
 
-    const aiResult: any = await response.json()
+    const aiResult = await response.json()
     const text = aiResult.content?.[0]?.text || ''
     const jsonMatch = text.match(/\{[\s\S]*\}/)
-
     if (!jsonMatch) {
-      return c.json({ success: false, error: 'Could not parse AI response', raw: text }, 500)
+      return Response.json({ success: false, error: 'Could not parse AI response', raw: text }, { status: 500 })
     }
 
     const extracted = JSON.parse(jsonMatch[0])
-    return c.json({ success: true, data: extracted })
-  } catch (err: any) {
-    return c.json({ success: false, error: err?.message || 'Unknown AI extract error' }, 500)
+    return Response.json({ success: true, data: extracted })
+  } catch (err) {
+    return Response.json({ success: false, error: err?.message || 'Unknown AI extract error' }, { status: 500 })
   }
 }
 
-function rewriteHeaders(response: Response, browserOrigin: string) {
+function rewriteHeaders(response, browserOrigin) {
   const headers = new Headers(response.headers)
   const location = headers.get('location')
   if (location && location.startsWith(ORIGIN)) {
@@ -151,18 +130,18 @@ function rewriteHeaders(response: Response, browserOrigin: string) {
   return headers
 }
 
-async function proxyRequest(c: any) {
-  const incomingUrl = new URL(c.req.url)
+async function proxyRequest(request) {
+  const incomingUrl = new URL(request.url)
   const upstreamUrl = new URL(incomingUrl.pathname + incomingUrl.search, ORIGIN)
-  const upstreamHeaders = new Headers(c.req.raw.headers)
+  const upstreamHeaders = new Headers(request.headers)
   upstreamHeaders.set('host', new URL(ORIGIN).host)
   upstreamHeaders.set('x-forwarded-host', incomingUrl.host)
   upstreamHeaders.set('x-forwarded-proto', incomingUrl.protocol.replace(':', ''))
 
   const upstreamRequest = new Request(upstreamUrl.toString(), {
-    method: c.req.raw.method,
+    method: request.method,
     headers: upstreamHeaders,
-    body: ['GET', 'HEAD'].includes(c.req.raw.method) ? undefined : c.req.raw.body,
+    body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
     redirect: 'manual',
   })
 
@@ -175,14 +154,13 @@ async function proxyRequest(c: any) {
   })
 
   const contentType = headers.get('content-type') || ''
-  if (c.req.raw.method !== 'GET' || !contentType.includes('text/html')) {
+  if (request.method !== 'GET' || !contentType.includes('text/html')) {
     return baseResponse
   }
 
   const path = incomingUrl.pathname
   const needsWagesButton = path === '/admin/wages'
   const needsTeamInit = path === '/field/preload' || path === '/field/delivery/new'
-
   if (!needsWagesButton && !needsTeamInit) {
     return baseResponse
   }
@@ -193,8 +171,15 @@ async function proxyRequest(c: any) {
   return rewriter.transform(baseResponse)
 }
 
-app.get('/health', (c) => c.json({ status: 'ok', mode: 'safe-proxy', origin: ORIGIN }))
-app.post('/field/ai-extract', handleAiExtract)
-app.all('*', proxyRequest)
-
-export default app
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url)
+    if (url.pathname === '/health') {
+      return Response.json({ status: 'ok', mode: 'safe-proxy-worker', origin: ORIGIN })
+    }
+    if (url.pathname === '/field/ai-extract' && request.method === 'POST') {
+      return handleAiExtract(request, env)
+    }
+    return proxyRequest(request)
+  },
+}
