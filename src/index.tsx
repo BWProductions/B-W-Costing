@@ -544,13 +544,31 @@ function rewriteHeaders(response: Response, browserOrigin: string) {
   return headers
 }
 
+function rewriteRequestHeaders(rawHeaders: Headers, incomingUrl: URL, upstreamUrl: URL) {
+  const upstreamHeaders = new Headers(rawHeaders)
+  upstreamHeaders.set('host', upstreamUrl.host)
+  upstreamHeaders.set('x-forwarded-host', incomingUrl.host)
+  upstreamHeaders.set('x-forwarded-proto', incomingUrl.protocol.replace(':', ''))
+
+  const incomingOrigin = incomingUrl.origin
+  const upstreamOrigin = upstreamUrl.origin
+  const originHeader = upstreamHeaders.get('origin')
+  if (originHeader === incomingOrigin) {
+    upstreamHeaders.set('origin', upstreamOrigin)
+  }
+
+  const refererHeader = upstreamHeaders.get('referer')
+  if (refererHeader?.startsWith(incomingOrigin)) {
+    upstreamHeaders.set('referer', upstreamOrigin + refererHeader.slice(incomingOrigin.length))
+  }
+
+  return upstreamHeaders
+}
+
 async function proxyRequest(c: any) {
   const incomingUrl = new URL(c.req.url)
   const upstreamUrl = new URL(incomingUrl.pathname + incomingUrl.search, ORIGIN)
-  const upstreamHeaders = new Headers(c.req.raw.headers)
-  upstreamHeaders.set('host', new URL(ORIGIN).host)
-  upstreamHeaders.set('x-forwarded-host', incomingUrl.host)
-  upstreamHeaders.set('x-forwarded-proto', incomingUrl.protocol.replace(':', ''))
+  const upstreamHeaders = rewriteRequestHeaders(c.req.raw.headers, incomingUrl, upstreamUrl)
 
   const upstreamRequest = new Request(upstreamUrl.toString(), {
     method: c.req.raw.method,
