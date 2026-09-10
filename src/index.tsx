@@ -138,7 +138,7 @@ class WagesUiInjector {
   if (window.__bwWagesEnhancerLoaded) return
   window.__bwWagesEnhancerLoaded = true
 
-  const DASHBOARD_PATH = '/'
+  const DASHBOARD_PATH = '/admin/wages'
   const WAGES_HOME_PATH = '/wages'
   const LOGOUT_PATH = '/wages/logout'
 
