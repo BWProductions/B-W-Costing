@@ -339,7 +339,7 @@ label[for="bw-missed-work-date"] {
 
   function parseFlexibleDate(value) {
     const cleaned = normalize(value)
-    const match = cleaned.match(/(\d{4})[-\/](\d{2})[-\/](\d{2})/)
+    const match = cleaned.match(/(\\d{4})[-\\/](\\d{2})[-\\/](\\d{2})/)
     if (!match) return null
     const year = Number(match[1])
     const month = Number(match[2])
@@ -420,7 +420,7 @@ label[for="bw-missed-work-date"] {
     }
   }
 
-  const isAddShiftAction = (text) => /^\+?\s*add( a)? shift$/i.test(text) || /^add current shift$/i.test(text) || /^\+?\s*add current shift$/i.test(text)
+  const isAddShiftAction = (text) => /^\\+?\\s*add( a)? shift$/i.test(text) || /^add current shift$/i.test(text) || /^\\+?\\s*add current shift$/i.test(text)
 
   function isWagesHomePage() {
     if (!window.location.pathname.startsWith('/wages')) return false
@@ -858,14 +858,14 @@ label[for="bw-missed-work-date"] {
 
   function isMissedShiftModeActive(scope, form) {
     const candidates = Array.from((scope || form).querySelectorAll('button, a, div, span, p, strong, label'))
-    const statusNode = candidates.find((node) => /^missed shift:\s*on$/i.test(elementText(node)))
+    const statusNode = candidates.find((node) => /^missed shift:\\s*on$/i.test(elementText(node)))
     if (statusNode) {
       statusNode.classList.add('bw-miss-shift-status')
       setStoredMissedMode(true)
       return true
     }
 
-    const explicitCurrentNode = candidates.find((node) => /^missed shift:\s*off$/i.test(elementText(node)))
+    const explicitCurrentNode = candidates.find((node) => /^missed shift:\\s*off$/i.test(elementText(node)))
     if (explicitCurrentNode) {
       setStoredMissedMode(false)
       return false
