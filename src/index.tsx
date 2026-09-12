@@ -278,6 +278,7 @@ label[for="bw-missed-work-date"] {
   const LOGOUT_PATH = '/wages/logout'
   const CLAIM_WEEK_STORAGE_KEY = 'bwWagesClaimWeekStart'
   const MISSED_MODE_STORAGE_KEY = 'bwWagesMissedShiftMode'
+  const ACTIVE_STAFF_PROFILE_KEY = 'bwWagesActiveStaffProfile'
   const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
   const FALLBACK_WORK_TYPE_OPTIONS = ['Normal', 'House', 'House/Garden', 'Warehouse Team', 'Team Assistance', 'Music Bus']
   const COMMON_VENUE_SUGGESTIONS = ['Warehouse', 'Garden', 'Work with the Team', 'House', 'Music Bus', 'Ellis Park', 'FNB Stadium', 'Loftus', 'Inanda Club', 'Supersport Park', 'SAB HQ', 'DHL Stadium']
@@ -918,18 +919,68 @@ label[for="bw-missed-work-date"] {
     return consumeStoredMissedMode()
   }
 
+  function persistActiveStaffProfile(profile) {
+    if (!profile) return
+    try {
+      window.sessionStorage.setItem(ACTIVE_STAFF_PROFILE_KEY, JSON.stringify(profile))
+    } catch (err) {}
+  }
+
+  function getStoredActiveStaffProfile() {
+    try {
+      const raw = window.sessionStorage.getItem(ACTIVE_STAFF_PROFILE_KEY)
+      if (!raw) return null
+      const parsed = JSON.parse(raw)
+      if (!parsed || !Array.isArray(parsed.options)) return null
+      return parsed
+    } catch (err) {
+      return null
+    }
+  }
+
+  function detectAndPersistActiveStaffProfile() {
+    const currentUrl = new URL(window.location.href)
+    const directStaffId = normalize(currentUrl.searchParams.get('staff'))
+    if (directStaffId) {
+      const profileById = STAFF_WORK_TYPE_PROFILES.find((profile) => profile.ids.includes(directStaffId))
+      if (profileById) {
+        persistActiveStaffProfile(profileById)
+        return profileById
+      }
+    }
+
+    const headingText = normalize(document.querySelector('main h1, .shell h1, h1')?.textContent || '').toLowerCase()
+    const hiMatch = headingText.match(/^hi\s+(.+)$/i)
+    if (hiMatch) {
+      const headingName = normalize(hiMatch[1]).toLowerCase()
+      const profileByHeading = STAFF_WORK_TYPE_PROFILES.find((profile) => profile.names.some((name) => headingName.includes(name) || name.includes(headingName)))
+      if (profileByHeading) {
+        persistActiveStaffProfile(profileByHeading)
+        return profileByHeading
+      }
+    }
+
+    const bodyText = elementText(document.body).toLowerCase()
+    const profileByBody = STAFF_WORK_TYPE_PROFILES.find((profile) => profile.names.some((name) => bodyText.includes(name)))
+    if (profileByBody) {
+      persistActiveStaffProfile(profileByBody)
+      return profileByBody
+    }
+
+    return getStoredActiveStaffProfile()
+  }
+
   function resolveStaffWorkTypeProfile(form) {
     const idFields = Array.from(form.querySelectorAll('input[name="staff_id"], input[name="person_id"], input[name="worker_id"], input[name="employee_id"], select[name="staff_id"], select[name="person_id"], select[name="worker_id"], select[name="employee_id"]'))
     const idValues = idFields.map((field) => normalize(field.value || field.getAttribute('value') || ''))
     for (const profile of STAFF_WORK_TYPE_PROFILES) {
-      if (profile.ids.some((id) => idValues.includes(id))) return profile
+      if (profile.ids.some((id) => idValues.includes(id))) {
+        persistActiveStaffProfile(profile)
+        return profile
+      }
     }
 
-    const bodyText = elementText(document.body).toLowerCase()
-    for (const profile of STAFF_WORK_TYPE_PROFILES) {
-      if (profile.names.some((name) => bodyText.includes(name))) return profile
-    }
-    return null
+    return detectAndPersistActiveStaffProfile()
   }
 
   function resolveWorkTypeOptions(form) {
@@ -1278,6 +1329,7 @@ label[for="bw-missed-work-date"] {
   function runEnhancements() {
     if (!window.location.pathname.startsWith('/wages')) return
     consumeMissedQueryFlag()
+    detectAndPersistActiveStaffProfile()
     removeStaffDashboardAccess()
     fixSwitchPerson()
     decorateButtons()
