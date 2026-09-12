@@ -466,7 +466,7 @@ label[for="bw-missed-work-date"] {
             document.documentElement.classList.add('bw-missed-mode')
             document.body.classList.add('bw-missed-mode')
             const pageHeading = document.querySelector('main h1, .shell h1, h1')
-            if (pageHeading) pageHeading.textContent = 'Add a MissShift'
+            if (pageHeading) pageHeading.textContent = 'Add a missed shift'
             const pageSubtitle = Array.from(document.querySelectorAll('main p, .shell p, p')).find((node) => /save it temporarily while you work|final submission|current shift|missed shift/i.test(elementText(node)))
             if (pageSubtitle) pageSubtitle.textContent = 'You are capturing a missed shift. Fill in the exact date worked and complete the details below.'
           })
@@ -502,7 +502,7 @@ label[for="bw-missed-work-date"] {
       missButton = document.createElement('button')
       missButton.type = 'button'
       missButton.className = 'btn bw-miss-shift-btn bw-home-miss-shift-btn'
-      missButton.textContent = 'Add a MissShift'
+      missButton.textContent = 'Add a missed shift'
       stack.appendChild(missButton)
     }
 
@@ -823,7 +823,7 @@ label[for="bw-missed-work-date"] {
   function ensureMissedShiftHeading(scope, form, isActive) {
     const pageHeading = document.querySelector('main h1, .shell h1, h1')
     if (pageHeading) {
-      pageHeading.textContent = isActive ? 'Add a MissShift' : 'Add a current shift'
+      pageHeading.textContent = isActive ? 'Add a missed shift' : 'Add a current shift'
     }
 
     const pageSubtitle = Array.from(document.querySelectorAll('main p, .shell p, p')).find((node) => /save it temporarily while you work|final submission|current shift|missed shift/i.test(elementText(node)))
@@ -838,7 +838,7 @@ label[for="bw-missed-work-date"] {
       if (!banner) {
         banner = document.createElement('div')
         banner.className = 'bw-missed-mode-banner'
-        banner.textContent = 'MissShift page — select the date you missed'
+        banner.textContent = 'Missed shift page — select the date you missed'
         form.insertBefore(banner, form.firstChild)
       }
     } else if (banner) {
@@ -1241,7 +1241,7 @@ label[for="bw-missed-work-date"] {
     removeStaffDashboardAccess()
     fixSwitchPerson()
     decorateButtons()
-    ensureFrontPageMissShiftButton()
+    document.querySelectorAll('.bw-home-miss-shift-btn').forEach((node) => node.remove())
     document.querySelectorAll('.bw-period-tools, .bw-last-payroll-btn').forEach((node) => node.remove())
     moveAddShiftNearSaveTemporary()
     unlockPayrollWeekPicker()
