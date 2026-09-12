@@ -30,11 +30,16 @@ Internal ops platform for B&W Productions CC. Built on Cloudflare Pages + Hono +
 ## Latest wages/timesheet fixes
 - Worker PIN access itself remained online; recent failed logins were traced to regenerated worker PINs on 2026-09-09 plus a broken/awkward shared-device switch-person flow.
 - Added safe-proxy UI enhancement injection on `/wages*` pages so fixes can be layered without changing the upstream wage app directly.
-- Added a working **Return to Dashboard** action to wages pages and login/switch-person screens.
 - Rewired **Switch person** to force a wages logout request first, then return to `/wages` for the next worker on shared devices.
 - Added UI styling hooks for **Add Shift**, **Save Shift Temporarily**, **Miss Shift**, and bulk **Final Submission** selection.
-- Added a **Last payroll** helper and removed client-side week input locking so the previous payroll week can still be opened when claims are needed.
+- Updated the worker wages styling so the primary **Add current shift** action stays dark like the approved mock-up, the worker-facing **Save Shift Temporarily** action is yellow, and the front-page **Add a missed Shift** action stays bold red.
+- Forced proxied HTML responses under the safe-proxy flow to return `Cache-Control: no-store` headers so worker-facing wages UI changes show on normal refresh instead of only after a hard refresh.
+- Removed the old staff-side **Return to Dashboard** action; dashboard access remains admin-only at `/admin/wages`.
+- Removed the unapproved **Last payroll** helper / worker guidance copy while still unlocking the payroll week picker safely.
+- Missed-shift date selection now uses a rolling range from the previous payroll week's Saturday through the current payroll's live date window, so staff can choose the physical **Date worked** they actually missed instead of only seeing Saturday/Monday catch-up dates.
+- The missed-shift form now restores the worker-facing heading as **Add a MissShift**, makes the **Date worked** control larger, restores the work-type dropdown breakdown (including House / Garden, Warehouse Team, Team Assistance, and Music Bus cases), and adds venue/event suggestion dropdown support for the free-text venue field.
 - Added hiding for the visible **Next Overnight Shift** prompt in the worker wages flow.
+- Missed-shift forms now enforce and persist the required claim metadata: payroll week being claimed against, exact work date, venue, work type / role, description, start time, finish time, previous-payroll flag, backend-only system review notes for overlap/conflict review, and a backend manual review item when overlaps or possible already-claimed entries exist.
 
 ## Phase 1 Foundation (completed)
 - `company_settings` table — single-row company details (legal name, VAT, registration, address, contact)

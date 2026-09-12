@@ -49,30 +49,51 @@ class WagesUiInjector {
 .bw-shift-actions-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
 .bw-shift-actions-row .btn { width: auto; flex: 1 1 220px; }
 .bw-add-shift-btn {
-  background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%) !important;
+  background: linear-gradient(135deg, #111827 0%, #0f172a 100%) !important;
   color: #fff !important;
   border: 0 !important;
-  box-shadow: 0 10px 24px rgba(109, 40, 217, 0.22) !important;
-  transition: transform .15s ease, box-shadow .15s ease, background .15s ease !important;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.22) !important;
+  transition: transform .15s ease, box-shadow .15s ease, filter .15s ease !important;
 }
 .bw-add-shift-btn:hover,
 .bw-add-shift-btn:focus-visible,
 .bw-add-shift-btn:active,
 .bw-add-shift-btn.bw-is-selected {
-  background: linear-gradient(135deg, #14b8a6 0%, #0f766e 100%) !important;
+  background: linear-gradient(135deg, #111827 0%, #0f172a 100%) !important;
   color: #fff !important;
-  box-shadow: 0 12px 28px rgba(15, 118, 110, 0.28) !important;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.3) !important;
+  filter: brightness(1.04);
   transform: translateY(-1px);
 }
 .bw-save-temp-btn {
-  background: #fff !important;
-  border: 2px solid #8b6914 !important;
-  color: #8b6914 !important;
+  background: linear-gradient(135deg, #facc15 0%, #f59e0b 100%) !important;
+  border: 2px solid #d97706 !important;
+  color: #111827 !important;
+  box-shadow: 0 10px 24px rgba(245, 158, 11, 0.24) !important;
+}
+.bw-save-temp-btn:hover,
+.bw-save-temp-btn:focus-visible,
+.bw-save-temp-btn:active {
+  background: linear-gradient(135deg, #fde047 0%, #f59e0b 100%) !important;
+  color: #111827 !important;
+  box-shadow: 0 12px 28px rgba(245, 158, 11, 0.3) !important;
 }
 .bw-miss-shift-btn {
-  background: #fff1f1 !important;
-  border: 2px solid #d65a5a !important;
-  color: #9d1c1c !important;
+  background: linear-gradient(180deg, #ff1e1e 0%, #f60000 100%) !important;
+  border: 2px solid #b30000 !important;
+  color: #fff !important;
+  box-shadow: 0 14px 28px rgba(179, 0, 0, 0.22) !important;
+}
+.bw-home-miss-shift-btn {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  padding: 18px 20px;
+  border-radius: 18px;
+  font-size: 18px;
+  font-weight: 800;
+  text-align: center;
+  text-decoration: none;
 }
 .bw-final-submit-panel {
   display: grid;
@@ -128,6 +149,112 @@ class WagesUiInjector {
   width: auto !important;
   min-width: 150px;
 }
+.bw-missed-shift-panel {
+  display: grid;
+  gap: 12px;
+  margin: 18px 0;
+  padding: 18px;
+  border-radius: 18px;
+  border: 2px solid rgba(214, 90, 90, 0.25);
+  background: #fff8f8;
+}
+.bw-missed-shift-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.bw-missed-shift-field {
+  display: grid;
+  gap: 6px;
+}
+.bw-missed-shift-field label {
+  font-size: 14px;
+  font-weight: 700;
+  color: #6b1020;
+}
+.bw-missed-shift-field input,
+.bw-missed-shift-field select,
+.bw-missed-shift-field textarea {
+  width: 100%;
+}
+.bw-readonly-field {
+  background: #f8fafc !important;
+  color: #475569 !important;
+}
+.bw-field-shell,
+.bw-date-worked-wrap {
+  display: grid;
+  gap: 8px;
+}
+body.bw-missed-mode,
+html.bw-missed-mode {
+  background: #fff4f4 !important;
+}
+body.bw-missed-mode main,
+body.bw-missed-mode .shell {
+  background: linear-gradient(180deg, #fff7f7 0%, #fff1f1 100%) !important;
+}
+body.bw-missed-mode .card,
+body.bw-missed-mode .form-card,
+body.bw-missed-mode .shift,
+body.bw-missed-mode form {
+  border-color: rgba(185, 28, 28, 0.22) !important;
+  box-shadow: 0 14px 32px rgba(185, 28, 28, 0.08) !important;
+}
+body.bw-missed-mode .bw-miss-shift-btn {
+  background: linear-gradient(135deg, #b91c1c 0%, #dc2626 100%) !important;
+  border-color: #b91c1c !important;
+  color: #fff !important;
+  box-shadow: 0 12px 28px rgba(185, 28, 28, 0.22) !important;
+}
+body.bw-missed-mode .bw-miss-shift-status {
+  display: none !important;
+}
+.bw-missed-mode-banner {
+  display: none;
+  margin: 0 0 18px;
+  padding: 14px 18px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #7f1d1d 0%, #b91c1c 100%);
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  box-shadow: 0 16px 30px rgba(127, 29, 29, 0.16);
+}
+body.bw-missed-mode .bw-missed-mode-banner {
+  display: block;
+}
+.bw-date-worked-wrap label,
+.bw-field-shell label,
+label[for="bw-missed-work-date"] {
+  font-size: 15px;
+  font-weight: 800;
+  color: #6b1020;
+}
+.bw-visible-work-date,
+.bw-work-date-field {
+  min-height: 54px !important;
+  padding: 12px 14px !important;
+  border-radius: 14px !important;
+  font-size: 18px !important;
+  font-weight: 700 !important;
+}
+.bw-restored-select {
+  min-height: 48px !important;
+  padding: 10px 12px !important;
+  border-radius: 12px !important;
+}
+.bw-hidden-restored-source {
+  position: absolute !important;
+  left: -9999px !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+.bw-hidden-original-label {
+  display: none !important;
+}
 @media (max-width: 560px) {
   .bw-final-submit-panel__row { align-items: stretch; }
   .bw-final-submit-go, .bw-last-payroll-btn { width: 100% !important; }
@@ -141,6 +268,19 @@ class WagesUiInjector {
   const DASHBOARD_PATH = '/admin/wages'
   const WAGES_HOME_PATH = '/wages'
   const LOGOUT_PATH = '/wages/logout'
+  const CLAIM_WEEK_STORAGE_KEY = 'bwWagesClaimWeekStart'
+  const MISSED_MODE_STORAGE_KEY = 'bwWagesMissedShiftMode'
+  const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+  const FALLBACK_WORK_TYPE_OPTIONS = ['Normal', 'House', 'House/Garden', 'Warehouse Team', 'Team Assistance', 'Music Bus']
+  const COMMON_VENUE_SUGGESTIONS = ['Warehouse', 'Garden', 'Work with the Team', 'House', 'Music Bus', 'Ellis Park', 'FNB Stadium', 'Loftus', 'Inanda Club', 'Supersport Park', 'SAB HQ', 'DHL Stadium']
+  const STAFF_WORK_TYPE_PROFILES = [
+    { ids: ['1'], names: ['givemore chifetete kuziwa', 'givemore'], options: ['House', 'Team Assistance'] },
+    { ids: ['2'], names: ['takavaudza chokuda', 'takavaudza', 'takka'], options: ['House/Garden', 'Warehouse Team'] },
+    { ids: ['5'], names: ['bhekizitha maphosa', 'bheki'], options: ['Music Bus', 'Normal'] },
+    { ids: ['7'], names: ['john simbarashe mhlanga', 'jay'], options: ['Music Bus', 'Normal'] },
+    { ids: ['12'], names: ['brian ndlovu', 'sipho'], options: ['Music Bus', 'Normal'] },
+    { ids: ['15'], names: ['joshua motsamai nteo', 'joshua'], options: ['Music Bus', 'Normal'] },
+  ]
 
   const normalize = (value) => String(value || '')
     .split(String.fromCharCode(10)).join(' ')
@@ -148,8 +288,21 @@ class WagesUiInjector {
     .split(String.fromCharCode(9)).join(' ')
     .replace(/  +/g, ' ')
     .trim()
-  const elementText = (el) => normalize(el?.textContent || (el instanceof HTMLInputElement ? el.value : ''))
-  const actionElements = () => Array.from(document.querySelectorAll('a, button, input[type="submit"], input[type="button"]'))
+  const elementText = (el) => normalize((el instanceof HTMLElement ? el.innerText : el?.textContent) || (el instanceof HTMLInputElement ? el.value : ''))
+  const uniqueLabels = (values) => {
+    const seen = new Set()
+    const output = []
+    values.forEach((value) => {
+      const label = normalize(value)
+      if (!label) return
+      const key = label.toLowerCase()
+      if (seen.has(key)) return
+      seen.add(key)
+      output.push(label)
+    })
+    return output
+  }
+  const actionElements = () => Array.from(document.querySelectorAll('a, button, input[type="submit"], input[type="button"], [role="button"], .btn'))
   const textMatches = (el, regex) => regex.test(elementText(el))
   const once = (el, key) => {
     const marker = 'bwBound' + key
@@ -168,12 +321,12 @@ class WagesUiInjector {
   }
 
   function parseFlexibleDate(value) {
-    const cleaned = normalize(value).split('/').join('-')
-    const parts = cleaned.split('-')
-    if (parts.length !== 3) return null
-    const year = Number(parts[0])
-    const month = Number(parts[1])
-    const day = Number(parts[2])
+    const cleaned = normalize(value)
+    const match = cleaned.match(/(\d{4})[-\/](\d{2})[-\/](\d{2})/)
+    if (!match) return null
+    const year = Number(match[1])
+    const month = Number(match[2])
+    const day = Number(match[3])
     if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null
     const date = new Date(Date.UTC(year, month - 1, day))
     return Number.isNaN(date.getTime()) ? null : date
@@ -200,38 +353,23 @@ class WagesUiInjector {
     return topnav
   }
 
-  function ensureReturnToDashboard() {
-    const topnav = ensureTopNav()
-    if (!topnav) return
+  function removeStaffDashboardAccess() {
+    document.querySelectorAll('.bw-return-dashboard').forEach((el) => el.remove())
 
-    const signOutLink = actionElements().find((el) => textMatches(el, /^sign out$/i))
-    if (signOutLink) {
-      if (signOutLink instanceof HTMLInputElement) signOutLink.value = 'Return to Dashboard'
-      else signOutLink.textContent = 'Return to Dashboard'
-      signOutLink.classList.add('bw-return-dashboard')
-      if (signOutLink instanceof HTMLAnchorElement) signOutLink.href = DASHBOARD_PATH
-      if (once(signOutLink, 'ReturnDash')) {
-        signOutLink.addEventListener('click', (event) => {
-          event.preventDefault()
-          void logoutThenRedirect(DASHBOARD_PATH)
-        })
+    actionElements().forEach((el) => {
+      const label = elementText(el)
+      if (!/^return to dashboard$/i.test(label)) return
+      if (el instanceof HTMLInputElement) {
+        el.value = 'Sign Out'
+      } else {
+        el.textContent = 'Sign Out'
       }
-      return
-    }
+      el.classList.remove('bw-return-dashboard')
+      if (el instanceof HTMLAnchorElement) el.href = LOGOUT_PATH
+    })
 
-    if (!topnav.querySelector('.bw-return-dashboard')) {
-      const link = document.createElement('a')
-      link.href = DASHBOARD_PATH
-      link.className = 'bw-return-dashboard'
-      link.textContent = 'Return to Dashboard'
-      link.addEventListener('click', (event) => {
-        const onWagesPage = window.location.pathname.startsWith('/wages')
-        if (!onWagesPage) return
-        event.preventDefault()
-        void logoutThenRedirect(DASHBOARD_PATH)
-      })
-      topnav.appendChild(link)
-    }
+    const topnav = ensureTopNav()
+    if (topnav && !topnav.children.length) topnav.remove()
   }
 
   function fixSwitchPerson() {
@@ -248,26 +386,109 @@ class WagesUiInjector {
     })
   }
 
+  function setStoredMissedMode(active) {
+    try {
+      if (active) window.sessionStorage.setItem(MISSED_MODE_STORAGE_KEY, 'pending')
+      else window.sessionStorage.removeItem(MISSED_MODE_STORAGE_KEY)
+    } catch (err) {}
+  }
+
+  function consumeStoredMissedMode() {
+    try {
+      const active = window.sessionStorage.getItem(MISSED_MODE_STORAGE_KEY) === 'pending'
+      if (active) window.sessionStorage.removeItem(MISSED_MODE_STORAGE_KEY)
+      return active
+    } catch (err) {
+      return false
+    }
+  }
+
+  const isAddShiftAction = (text) => /^\+?\s*add( a)? shift$/i.test(text) || /^add current shift$/i.test(text) || /^\+?\s*add current shift$/i.test(text)
+
+  function isWagesHomePage() {
+    if (!window.location.pathname.startsWith('/wages')) return false
+    if (actionElements().some((el) => /save shift temporarily/i.test(elementText(el)))) return false
+    const bodyText = elementText(document.body)
+    return /view payroll week/i.test(bodyText) && /finally submitted hours this payroll week/i.test(bodyText)
+  }
+
   function decorateButtons() {
+    const onShiftEntryPage = actionElements().some((el) => /save shift temporarily/i.test(elementText(el)))
+
     actionElements().forEach((el) => {
       const text = elementText(el)
-      if (/^add( a)? shift$/i.test(text)) {
+      if (isAddShiftAction(text)) {
         el.classList.add('bw-add-shift-btn')
+        if (!el.dataset.bwDefaultLabel) el.dataset.bwDefaultLabel = text || 'Add Current Shift'
+        if (el instanceof HTMLInputElement) el.value = 'Add Current Shift'
+        else if (text) el.textContent = 'Add Current Shift'
         if (once(el, 'AddShiftState')) {
           const markSelected = () => el.classList.add('bw-is-selected')
           const clearSelected = () => el.classList.remove('bw-is-selected')
-          el.addEventListener('click', markSelected)
+          el.addEventListener('click', () => {
+            if (window.__bwLaunchMode === 'missed') {
+              setStoredMissedMode(true)
+              window.__bwLaunchMode = ''
+            } else {
+              setStoredMissedMode(false)
+            }
+            markSelected()
+          })
           el.addEventListener('focus', markSelected)
           el.addEventListener('blur', clearSelected)
         }
       }
       if (/save shift temporarily/i.test(text)) el.classList.add('bw-save-temp-btn')
-      if (/miss(ed)? shift/i.test(text)) el.classList.add('bw-miss-shift-btn')
+      if (onShiftEntryPage && /miss(ed)? shift|missshift/i.test(text)) {
+        el.classList.add('bw-miss-shift-btn')
+        if (once(el, 'MissShiftMode')) {
+          el.addEventListener('click', () => {
+            setStoredMissedMode(true)
+            document.documentElement.classList.add('bw-missed-mode')
+            document.body.classList.add('bw-missed-mode')
+            const pageHeading = document.querySelector('main h1, .shell h1, h1')
+            if (pageHeading) pageHeading.textContent = 'Add a missed shift'
+            const pageSubtitle = Array.from(document.querySelectorAll('main p, .shell p, p')).find((node) => /save it temporarily while you work|final submission|current shift|missed shift/i.test(elementText(node)))
+            if (pageSubtitle) pageSubtitle.textContent = 'You are capturing a missed shift. Fill in the exact date worked and complete the details below.'
+          })
+        }
+      }
+    })
+  }
+
+  function ensureFrontPageMissShiftButton() {
+    if (!isWagesHomePage()) {
+      document.querySelectorAll('.bw-home-miss-shift-btn').forEach((node) => node.remove())
+      return
+    }
+
+    const addButton = actionElements().find((el) => isAddShiftAction(elementText(el)) && !el.closest('form'))
+    if (!addButton) return
+
+    let missButton = document.querySelector('.bw-home-miss-shift-btn')
+    if (!missButton) {
+      missButton = document.createElement('button')
+      missButton.type = 'button'
+      missButton.className = 'btn bw-miss-shift-btn bw-home-miss-shift-btn'
+      missButton.textContent = 'Add a missed Shift'
+      addButton.insertAdjacentElement('afterend', missButton)
+    }
+
+    if (!once(missButton, 'FrontPageMissShift')) return
+    missButton.addEventListener('click', (event) => {
+      event.preventDefault()
+      setStoredMissedMode(true)
+      if (addButton instanceof HTMLAnchorElement && addButton.href) {
+        window.location.href = addButton.href
+        return
+      }
+      window.__bwLaunchMode = 'missed'
+      addButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
     })
   }
 
   function moveAddShiftNearSaveTemporary() {
-    const addButton = actionElements().find((el) => /^add( a)? shift$/i.test(elementText(el)))
+    const addButton = actionElements().find((el) => isAddShiftAction(elementText(el)))
     const saveButton = actionElements().find((el) => /save shift temporarily/i.test(elementText(el)))
     if (!addButton || !saveButton) return
 
@@ -286,37 +507,572 @@ class WagesUiInjector {
     if (!row.contains(addButton)) row.appendChild(addButton)
   }
 
-  function unlockPayrollWeekPicker() {
-    const labels = Array.from(document.querySelectorAll('label')).filter((label) => /view payroll week/i.test(elementText(label)))
-    labels.forEach((label) => {
+  function findPayrollWeekField() {
+    const labels = Array.from(document.querySelectorAll('label')).filter((label) => elementText(label).toLowerCase() === 'view payroll week')
+    for (const label of labels) {
       const container = label.parentElement || label.closest('.period-filter') || label.parentElement
-      const field = container?.querySelector('input') || document.querySelector('input[type="date"], input[name*="week" i], input[id*="week" i]')
-      if (!field) return
-      field.disabled = false
-      field.readOnly = false
-      field.removeAttribute('max')
-      field.removeAttribute('min')
+      const field = container?.querySelector('input')
+      if (field) return field
+    }
+    return document.querySelector('input[name="payroll_week_start"], input[id="payroll_week_start"], input[type="date"], input[name*="week"], input[id*="week"]')
+  }
 
-      const filter = field.closest('.period-filter') || container
-      if (!filter || filter.querySelector('.bw-period-tools')) return
+  function unlockPayrollWeekPicker() {
+    const field = findPayrollWeekField()
+    if (!field) return
+    field.disabled = false
+    field.readOnly = false
+    field.removeAttribute('max')
+    field.removeAttribute('min')
 
-      const viewButton = Array.from(filter.querySelectorAll('button, a, input[type="submit"]')).find((el) => /view week/i.test(elementText(el)))
-      const tools = document.createElement('div')
-      tools.className = 'bw-period-tools'
-      const lastWeekButton = document.createElement('button')
-      lastWeekButton.type = 'button'
-      lastWeekButton.className = 'btn btn-outline bw-last-payroll-btn'
-      lastWeekButton.textContent = 'Last payroll'
-      lastWeekButton.addEventListener('click', () => {
-        const current = parseFlexibleDate(field.value) || parseFlexibleDate(field.getAttribute('value') || '') || new Date()
-        const previous = new Date(current.getTime())
-        previous.setUTCDate(previous.getUTCDate() - 7)
-        field.value = formatForInput(previous, field.type !== 'date' && field.value.includes('/'))
-        if (viewButton instanceof HTMLInputElement) viewButton.click()
-        else viewButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    const filter = field.closest('.period-filter') || field.parentElement
+    filter?.querySelectorAll('.bw-period-tools, .bw-last-payroll-btn').forEach((node) => node.remove())
+  }
+
+  function startOfPayrollWeek(date) {
+    const copy = new Date(date.getTime())
+    const offset = (copy.getUTCDay() + 1) % 7
+    copy.setUTCDate(copy.getUTCDate() - offset)
+    return copy
+  }
+
+  function endOfPayrollWeek(date) {
+    const copy = startOfPayrollWeek(date)
+    copy.setUTCDate(copy.getUTCDate() + 6)
+    return copy
+  }
+
+  function setStoredClaimWeek(value) {
+    if (!value) return
+    try { window.sessionStorage.setItem(CLAIM_WEEK_STORAGE_KEY, value) } catch (err) {}
+    try { window.localStorage.setItem(CLAIM_WEEK_STORAGE_KEY, value) } catch (err) {}
+  }
+
+  function getStoredClaimWeek() {
+    try {
+      const sessionValue = window.sessionStorage.getItem(CLAIM_WEEK_STORAGE_KEY)
+      if (sessionValue) return sessionValue
+    } catch (err) {}
+    try {
+      return window.localStorage.getItem(CLAIM_WEEK_STORAGE_KEY) || ''
+    } catch (err) {
+      return ''
+    }
+  }
+
+  function utcToday() {
+    const now = new Date()
+    return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
+  }
+
+  function resolveClaimWeekStart(field, hiddenField) {
+    const current = parseFlexibleDate(field?.value || field?.getAttribute('value') || hiddenField?.value || getStoredClaimWeek()) || utcToday()
+    return formatForInput(startOfPayrollWeek(current), false)
+  }
+
+  function buildDateRange(startDate, endDate) {
+    const dates = []
+    const cursor = new Date(startDate.getTime())
+    while (cursor.getTime() <= endDate.getTime()) {
+      dates.push({
+        value: formatForInput(cursor, false),
+        label: WEEKDAY_LABELS[cursor.getUTCDay()] + ' — ' + formatForInput(cursor, false),
       })
-      tools.appendChild(lastWeekButton)
-      filter.appendChild(tools)
+      cursor.setUTCDate(cursor.getUTCDate() + 1)
+    }
+    return dates
+  }
+
+  function getMissedShiftWindow(activePayrollWeekStart) {
+    const currentPayrollStart = parseFlexibleDate(activePayrollWeekStart) || startOfPayrollWeek(utcToday())
+    const previousPayrollStart = new Date(currentPayrollStart.getTime())
+    previousPayrollStart.setUTCDate(previousPayrollStart.getUTCDate() - 7)
+    const today = utcToday()
+    const rangeEnd = new Date(today.getTime())
+    if (formatForInput(today, false) === formatForInput(currentPayrollStart, false)) {
+      rangeEnd.setUTCDate(rangeEnd.getUTCDate() - 1)
+    }
+    if (rangeEnd.getTime() < previousPayrollStart.getTime()) {
+      rangeEnd.setTime(endOfPayrollWeek(previousPayrollStart).getTime())
+    }
+    return {
+      currentPayrollStart,
+      previousPayrollStart,
+      rangeEnd,
+      dates: buildDateRange(previousPayrollStart, rangeEnd),
+    }
+  }
+
+  function rewriteMissedShiftRestrictionText(scope, activePayrollWeekStart) {
+    Array.from(scope.querySelectorAll('small, p, div, span, label')).forEach((node) => {
+      const text = elementText(node)
+      if (!/missed hrs last week can only be captured on a saturday or monday only|catch-up entries can only be captured on this week's saturday or monday date|choose date worked and select the physical date missed/i.test(text)) return
+      node.style.display = 'none'
+    })
+  }
+
+  function widenMissedShiftDateChoices(workDateField, activePayrollWeekStart) {
+    const windowConfig = getMissedShiftWindow(activePayrollWeekStart)
+    if (workDateField instanceof HTMLSelectElement) {
+      const current = parseFlexibleDate(workDateField.value || workDateField.selectedOptions?.[0]?.textContent || '')
+      const currentValue = current ? formatForInput(current, false) : ''
+      const placeholderText = workDateField.dataset.bwPlaceholderText || 'Date worked — select exact date missed'
+      workDateField.dataset.bwPlaceholderText = placeholderText
+      workDateField.innerHTML = ''
+      const placeholder = document.createElement('option')
+      placeholder.value = ''
+      placeholder.textContent = placeholderText
+      workDateField.appendChild(placeholder)
+      windowConfig.dates.forEach((entry) => {
+        const option = document.createElement('option')
+        option.value = entry.value
+        option.textContent = entry.label
+        workDateField.appendChild(option)
+      })
+      workDateField.value = windowConfig.dates.some((entry) => entry.value === currentValue) ? currentValue : ''
+      return
+    }
+    if (workDateField instanceof HTMLInputElement && workDateField.type === 'date') {
+      workDateField.min = formatForInput(windowConfig.previousPayrollStart, false)
+      workDateField.max = formatForInput(windowConfig.rangeEnd, false)
+    }
+  }
+
+  function ensureHelperText(field, key, text) {
+    if (!field || field.dataset['bwHelper' + key] === '1') return
+    field.dataset['bwHelper' + key] = '1'
+    const helper = document.createElement('small')
+    helper.className = 'field-help'
+    helper.textContent = text
+    field.insertAdjacentElement('afterend', helper)
+  }
+
+  function ensureHiddenField(form, name) {
+    let field = form.querySelector('input[name="' + name + '"]')
+    if (field) return field
+    field = document.createElement('input')
+    field.type = 'hidden'
+    field.name = name
+    form.appendChild(field)
+    return field
+  }
+
+  function firstField(form, selectors) {
+    for (const selector of selectors) {
+      const field = form.querySelector(selector)
+      if (field) return field
+    }
+    return null
+  }
+
+  function setRequired(field, helperKey, helperText) {
+    if (!field) return
+    field.required = true
+    field.setAttribute('aria-required', 'true')
+    if (helperText) ensureHelperText(field, helperKey, helperText)
+  }
+
+  function isMissedShiftForm(form) {
+    if (form.dataset.bwMissedShiftForm === '1') return true
+    if (/miss(ed)? shift|missed hrs last week|previous payroll|claim(ed)? against/i.test(elementText(form))) {
+      form.dataset.bwMissedShiftForm = '1'
+      return true
+    }
+    const scopedCard = form.closest('.card, .form-card, .shift, section, article, div')
+    if (!scopedCard) return false
+    const hasMissAction = Array.from(scopedCard.querySelectorAll('a, button, input[type="submit"], input[type="button"]')).some((el) => /miss(ed)? shift/i.test(elementText(el)))
+    if (hasMissAction) form.dataset.bwMissedShiftForm = '1'
+    return hasMissAction
+  }
+
+  function removeBrokenMissedShiftPanel(form) {
+    form.querySelectorAll('.bw-missed-shift-panel').forEach((panel) => panel.remove())
+    form.querySelectorAll('input[name="payroll_week_claim_display"], input[name="missed_previous_week_display"], textarea[name="payroll_week_claim_display"], textarea[name="missed_previous_week_display"]').forEach((field) => field.remove())
+  }
+
+  function ensureDateWorkedLabel(workDateField) {
+    if (!workDateField) return
+    if (workDateField.id && document.querySelector('label[for="' + workDateField.id + '"]')) return
+    const previousLabel = workDateField.previousElementSibling
+    if (previousLabel && /date worked/i.test(elementText(previousLabel))) return
+    const label = document.createElement('label')
+    if (!workDateField.id) workDateField.id = 'bw-missed-work-date'
+    label.setAttribute('for', workDateField.id)
+    label.textContent = 'Date worked'
+    workDateField.insertAdjacentElement('beforebegin', label)
+  }
+
+  function removeDateWorkedHelperText(workDateField) {
+    if (!workDateField) return
+    const nextNode = workDateField.nextElementSibling
+    if (nextNode && /missed shifts must use the exact historical work date/i.test(elementText(nextNode))) {
+      nextNode.remove()
+    }
+  }
+
+  function isVisibleWorkDateField(field) {
+    if (!field) return false
+    if (field instanceof HTMLInputElement && field.type === 'hidden') return false
+    const rects = typeof field.getClientRects === 'function' ? field.getClientRects() : []
+    return rects.length > 0
+  }
+
+  function ensureVisibleWorkDateField(form, anchorField) {
+    let visibleField = firstField(form, [
+      'select[name="work_date"]',
+      'select[id="work_date"]',
+      'select[id="work-date"]',
+      'input[name="work_date"]:not([type="hidden"])',
+      'input[id="work_date"]:not([type="hidden"])',
+      'input[id="work-date"]:not([type="hidden"])',
+      'input[type="date"]'
+    ])
+    const hiddenField = firstField(form, ['input[name="work_date"]', 'input[id="work_date"]', 'input[id="work-date"]'])
+
+    if (isVisibleWorkDateField(visibleField)) return { visibleField, hiddenField: hiddenField || visibleField }
+
+    let wrapper = form.querySelector('.bw-date-worked-wrap')
+    if (!wrapper) {
+      wrapper = document.createElement('div')
+      wrapper.className = 'bw-date-worked-wrap'
+      const label = document.createElement('label')
+      label.textContent = 'Date worked'
+      const field = document.createElement('input')
+      field.type = 'date'
+      field.name = 'bw_visible_work_date'
+      field.className = 'bw-visible-work-date'
+      wrapper.appendChild(label)
+      wrapper.appendChild(field)
+      if (anchorField) anchorField.insertAdjacentElement('beforebegin', wrapper)
+      else form.insertBefore(wrapper, form.firstChild)
+      visibleField = field
+    } else {
+      visibleField = wrapper.querySelector('input, select')
+    }
+
+    const syncedHidden = hiddenField || ensureHiddenField(form, 'work_date')
+    if (visibleField && syncedHidden && visibleField !== syncedHidden && once(visibleField, 'WorkDateMirror')) {
+      if (syncedHidden.value && !visibleField.value) visibleField.value = syncedHidden.value
+      const syncToHidden = () => { syncedHidden.value = visibleField.value || '' }
+      visibleField.addEventListener('input', syncToHidden)
+      visibleField.addEventListener('change', syncToHidden)
+    }
+
+    return { visibleField, hiddenField: syncedHidden }
+  }
+
+  function emphasizeDateWorkedField(workDateField) {
+    if (!workDateField) return
+    workDateField.classList.add('bw-work-date-field')
+    const wrapper = workDateField.closest('.bw-date-worked-wrap')
+    if (wrapper) wrapper.classList.add('bw-field-shell')
+  }
+
+  function ensureMissedShiftHeading(scope, form, isActive) {
+    const pageHeading = document.querySelector('main h1, .shell h1, h1')
+    if (pageHeading) {
+      pageHeading.textContent = isActive ? 'Add a missed shift' : 'Add a current shift'
+    }
+
+    const pageSubtitle = Array.from(document.querySelectorAll('main p, .shell p, p')).find((node) => /save it temporarily while you work|final submission|current shift|missed shift/i.test(elementText(node)))
+    if (pageSubtitle) {
+      pageSubtitle.textContent = isActive
+        ? 'You are on the missed shift page. Fill in the exact date worked and complete the details below.'
+        : 'Save it temporarily while you work, or continue to Final Submission when every detail is correct.'
+    }
+
+    let banner = form.querySelector('.bw-missed-mode-banner')
+    if (isActive) {
+      if (!banner) {
+        banner = document.createElement('div')
+        banner.className = 'bw-missed-mode-banner'
+        banner.textContent = 'Missed shift page — select the date you missed'
+        form.insertBefore(banner, form.firstChild)
+      }
+    } else if (banner) {
+      banner.remove()
+    }
+
+    const textTargets = Array.from((scope || form).querySelectorAll('h1, h2, h3, h4, legend, .eyebrow, .title, .bw-missed-heading')).filter((node) => /miss ?shift|missshift/i.test(elementText(node)))
+    textTargets.forEach((node) => {
+      if (node === pageHeading) return
+      if (isActive) return
+      node.remove()
+    })
+
+    document.documentElement.classList.toggle('bw-missed-mode', !!isActive)
+    document.body.classList.toggle('bw-missed-mode', !!isActive)
+  }
+
+  function isMissedShiftModeActive(scope, form) {
+    const candidates = Array.from((scope || form).querySelectorAll('button, a, div, span, p, strong, label'))
+    const statusNode = candidates.find((node) => /^missed shift:\s*on$/i.test(elementText(node)))
+    if (statusNode) {
+      statusNode.classList.add('bw-miss-shift-status')
+      setStoredMissedMode(true)
+      return true
+    }
+
+    const explicitCurrentNode = candidates.find((node) => /^missed shift:\s*off$/i.test(elementText(node)))
+    if (explicitCurrentNode) {
+      setStoredMissedMode(false)
+      return false
+    }
+
+    const currentShiftHeading = document.querySelector('main h1, .shell h1, h1')
+    if (currentShiftHeading && /add a current shift/i.test(elementText(currentShiftHeading))) {
+      setStoredMissedMode(false)
+      return false
+    }
+
+    return consumeStoredMissedMode()
+  }
+
+  function resolveStaffWorkTypeProfile(form) {
+    const idFields = Array.from(form.querySelectorAll('input[name="staff_id"], input[name="person_id"], input[name="worker_id"], input[name="employee_id"], select[name="staff_id"], select[name="person_id"], select[name="worker_id"], select[name="employee_id"]'))
+    const idValues = idFields.map((field) => normalize(field.value || field.getAttribute('value') || ''))
+    for (const profile of STAFF_WORK_TYPE_PROFILES) {
+      if (profile.ids.some((id) => idValues.includes(id))) return profile
+    }
+
+    const bodyText = elementText(document.body).toLowerCase()
+    for (const profile of STAFF_WORK_TYPE_PROFILES) {
+      if (profile.names.some((name) => bodyText.includes(name))) return profile
+    }
+    return null
+  }
+
+  function resolveWorkTypeOptions(form) {
+    const profile = resolveStaffWorkTypeProfile(form)
+    if (profile?.options?.length) return uniqueLabels(profile.options)
+    if (profile) return ['Normal']
+    return uniqueLabels(FALLBACK_WORK_TYPE_OPTIONS)
+  }
+
+  function repopulateSelect(select, options, placeholderText) {
+    const currentValue = normalize(select.value || '')
+    const signature = placeholderText + '|' + options.join('|')
+    const needsRebuild = select.dataset.bwOptionsSignature !== signature || select.options.length !== options.length + 1
+
+    if (needsRebuild) {
+      select.innerHTML = ''
+      const placeholder = document.createElement('option')
+      placeholder.value = ''
+      placeholder.textContent = placeholderText
+      select.appendChild(placeholder)
+      options.forEach((optionLabel) => {
+        const option = document.createElement('option')
+        option.value = optionLabel
+        option.textContent = optionLabel
+        select.appendChild(option)
+      })
+      select.dataset.bwOptionsSignature = signature
+    }
+
+    if (options.some((optionLabel) => optionLabel.toLowerCase() === currentValue.toLowerCase())) {
+      select.value = currentValue
+    }
+  }
+
+  function hideOriginalFieldArtifacts(form, field) {
+    if (!field) return
+    field.classList.add('bw-hidden-restored-source')
+    if (field.id) {
+      form.querySelectorAll('label[for="' + field.id + '"]').forEach((label) => label.classList.add('bw-hidden-original-label'))
+    }
+    const previousLabel = field.previousElementSibling
+    if (previousLabel instanceof HTMLLabelElement) previousLabel.classList.add('bw-hidden-original-label')
+    const previousHeading = field.parentElement?.previousElementSibling
+    if (previousHeading instanceof HTMLLabelElement) previousHeading.classList.add('bw-hidden-original-label')
+  }
+
+  function buildSyncedSelect(form, name, anchorField, options, labelText, placeholderText) {
+    let wrapper = form.querySelector('.bw-' + name.replace(/_/g, '-') + '-wrap')
+    let select = wrapper?.querySelector('select')
+    const hiddenField = ensureHiddenField(form, name)
+
+    if (!wrapper) {
+      wrapper = document.createElement('div')
+      wrapper.className = 'bw-field-shell bw-' + name.replace(/_/g, '-') + '-wrap'
+      const label = document.createElement('label')
+      label.textContent = labelText
+      select = document.createElement('select')
+      select.className = 'bw-restored-select'
+      wrapper.appendChild(label)
+      wrapper.appendChild(select)
+      if (anchorField) anchorField.insertAdjacentElement('beforebegin', wrapper)
+      else form.insertBefore(wrapper, form.firstChild)
+    }
+
+    repopulateSelect(select, options, placeholderText)
+    if (hiddenField.value && !select.value) select.value = hiddenField.value
+    if (once(select, 'MirrorSelect' + name)) {
+      const syncToHidden = () => { hiddenField.value = select.value || '' }
+      select.addEventListener('input', syncToHidden)
+      select.addEventListener('change', syncToHidden)
+    }
+    return select
+  }
+
+  function restoreWorkTypeField(form, workTypeField, anchorField) {
+    const options = resolveWorkTypeOptions(form)
+    if (workTypeField instanceof HTMLSelectElement) {
+      repopulateSelect(workTypeField, options, 'Select work type')
+      workTypeField.classList.add('bw-restored-select')
+      return workTypeField
+    }
+    if (workTypeField instanceof HTMLInputElement) {
+      const originalField = workTypeField
+      const select = buildSyncedSelect(form, originalField.name || 'work_type', originalField, options, 'Work type / role', 'Select work type')
+      if (originalField.value && !select.value) select.value = originalField.value
+      if (once(originalField, 'SourceToSelectWorkType')) {
+        const syncToSource = () => { originalField.value = select.value || '' }
+        select.addEventListener('input', syncToSource)
+        select.addEventListener('change', syncToSource)
+      }
+      originalField.required = false
+      hideOriginalFieldArtifacts(form, originalField)
+      return select
+    }
+    return buildSyncedSelect(form, 'work_type', anchorField, options, 'Work type / role', 'Select work type')
+  }
+
+  function ensureVenueSuggestions(venueField, workTypeOptions) {
+    if (!(venueField instanceof HTMLInputElement)) return
+    const suggestions = uniqueLabels([
+      workTypeOptions.includes('Warehouse Team') ? 'Warehouse' : '',
+      workTypeOptions.includes('House/Garden') ? 'Garden' : '',
+      workTypeOptions.includes('Team Assistance') ? 'Work with the Team' : '',
+      workTypeOptions.includes('House') ? 'House' : '',
+      workTypeOptions.includes('Music Bus') ? 'Music Bus' : '',
+      ...COMMON_VENUE_SUGGESTIONS,
+    ])
+    const listId = 'bw-venue-suggestions'
+    let dataList = document.getElementById(listId)
+    if (!(dataList instanceof HTMLDataListElement)) {
+      dataList = document.createElement('datalist')
+      dataList.id = listId
+      document.body.appendChild(dataList)
+    }
+    dataList.innerHTML = ''
+    suggestions.forEach((label) => {
+      const option = document.createElement('option')
+      option.value = label
+      dataList.appendChild(option)
+    })
+    venueField.setAttribute('list', listId)
+    if (!venueField.placeholder || /warehouse or event venue/i.test(venueField.placeholder)) {
+      venueField.placeholder = 'Venue / event location'
+    }
+  }
+
+  function syncMissedShiftMetadata(payload) {
+    const activePayrollWeekStart = resolveClaimWeekStart(payload.claimWeekField, payload.claimWeekHidden)
+    const windowConfig = getMissedShiftWindow(activePayrollWeekStart)
+    setStoredClaimWeek(activePayrollWeekStart)
+    widenMissedShiftDateChoices(payload.workDateField, activePayrollWeekStart)
+    rewriteMissedShiftRestrictionText(payload.scope, activePayrollWeekStart)
+
+    const workDate = parseFlexibleDate(payload.workDateField.value || payload.workDateField.getAttribute('value') || '')
+    const selectedClaimWeek = workDate && workDate.getTime() < windowConfig.currentPayrollStart.getTime()
+      ? formatForInput(windowConfig.previousPayrollStart, false)
+      : formatForInput(windowConfig.currentPayrollStart, false)
+    payload.claimWeekHidden.value = selectedClaimWeek
+    const isPrevious = !!(workDate && workDate.getTime() < windowConfig.currentPayrollStart.getTime())
+    payload.previousPayrollHidden.value = isPrevious ? '1' : '0'
+
+    const reviewBits = []
+    if (payload.claimWeekHidden.value) reviewBits.push('Claimed against payroll week ' + payload.claimWeekHidden.value + '.')
+    if (workDate) reviewBits.push('Exact work date ' + formatForInput(workDate, false) + '.')
+    if (payload.venueField?.value) reviewBits.push('Venue ' + payload.venueField.value + '.')
+    if (payload.workTypeField?.value) reviewBits.push('Work type / role ' + payload.workTypeField.value + '.')
+    if (payload.descriptionField?.value) reviewBits.push('Description ' + payload.descriptionField.value + '.')
+    if (payload.startField?.value || payload.endField?.value) reviewBits.push('Captured time ' + (payload.startField?.value || '??') + '-' + (payload.endField?.value || '??') + '.')
+    reviewBits.push('Belongs to previous payroll: ' + (isPrevious ? 'Yes.' : 'No.'))
+    reviewBits.push('Do not block staff entry. Do not auto-call it duplicate. Create backend manual overlap review only where an existing entry conflicts.')
+    payload.reviewNoteHidden.value = reviewBits.join(' ')
+  }
+
+  function bindMissedShiftMetadata(payload) {
+    const watched = [payload.claimWeekField, payload.workDateField, payload.venueField, payload.workTypeField, payload.descriptionField, payload.startField, payload.endField]
+    watched.forEach((field, index) => {
+      if (!field || field.dataset['bwMissedWatch' + index] === '1') return
+      field.dataset['bwMissedWatch' + index] = '1'
+      field.addEventListener('input', () => syncMissedShiftMetadata(payload))
+      field.addEventListener('change', () => syncMissedShiftMetadata(payload))
+    })
+    if (once(payload.form, 'MissedShiftSync')) {
+      payload.form.addEventListener('submit', () => syncMissedShiftMetadata(payload))
+    }
+    syncMissedShiftMetadata(payload)
+  }
+
+  function enhanceMissedShiftForms() {
+    const claimWeekField = findPayrollWeekField()
+    if (claimWeekField) {
+      const syncStoredWeek = () => {
+        const claimWeekStart = resolveClaimWeekStart(claimWeekField, null)
+        if (claimWeekStart) setStoredClaimWeek(claimWeekStart)
+      }
+      if (once(claimWeekField, 'ClaimWeekPersist')) {
+        claimWeekField.addEventListener('input', syncStoredWeek)
+        claimWeekField.addEventListener('change', syncStoredWeek)
+      }
+      syncStoredWeek()
+    }
+
+    Array.from(document.querySelectorAll('form')).forEach((form) => {
+      removeBrokenMissedShiftPanel(form)
+      if (!isMissedShiftForm(form)) return
+
+      const scope = form.closest('.card, .form-card, .shift, section, article, div') || form
+      const venueField = firstField(form, ['input[name="outlet_venue"]', 'input[name="venue_name"]', 'input[name="venue"]', 'input[id="outlet_venue"]', 'input[id="venue_name"]', 'input[id="venue"]'])
+      const workDateBinding = ensureVisibleWorkDateField(form, venueField)
+      const workDateField = workDateBinding.visibleField
+      const descriptionField = firstField(form, ['textarea[name="work_description"]', 'input[name="work_description"]', 'textarea[name="details"]', 'input[name="details"]', 'textarea'])
+      const rawWorkTypeField = firstField(form, ['select[name="work_type"]', 'input[name="work_type"]', 'select[name="role_worked"]', 'input[name="role_worked"]'])
+      const workTypeField = restoreWorkTypeField(form, rawWorkTypeField, descriptionField || venueField || workDateField)
+      const startField = firstField(form, ['input[name="start_time"]', 'input[name="start"]', 'input[id="start_time"]', 'input[id="start-time"]', 'input[type="time"]'])
+      const endField = firstField(form, ['input[name="end_time"]', 'input[name="finish_time"]', 'input[name="finish"]', 'input[id="end_time"]', 'input[id="finish_time"]'])
+
+      if (!workDateField || !startField || !endField) return
+
+      const isMissedModeActive = isMissedShiftModeActive(scope, form)
+      ensureMissedShiftHeading(scope, form, isMissedModeActive)
+      emphasizeDateWorkedField(workDateField)
+      ensureDateWorkedLabel(workDateField)
+      removeDateWorkedHelperText(workDateField)
+      form.querySelectorAll('.field-help').forEach((node) => node.remove())
+      ensureVenueSuggestions(venueField, resolveWorkTypeOptions(form))
+      setRequired(workDateField, 'WorkDate', '')
+      setRequired(venueField, 'Venue', '')
+      setRequired(workTypeField, 'WorkType', '')
+      setRequired(descriptionField, 'Description', '')
+      setRequired(startField, 'StartTime', '')
+      setRequired(endField, 'EndTime', '')
+
+      workDateField.removeAttribute('max')
+      workDateField.removeAttribute('min')
+
+      const claimWeekHidden = ensureHiddenField(form, 'payroll_week_start')
+      const previousPayrollHidden = ensureHiddenField(form, 'missed_previous_week')
+      const reviewNoteHidden = ensureHiddenField(form, 'payroll_note')
+      const workDateHidden = workDateBinding.hiddenField || ensureHiddenField(form, 'work_date')
+
+      bindMissedShiftMetadata({
+        form,
+        scope,
+        claimWeekField,
+        claimWeekHidden,
+        workDateField: workDateField || workDateHidden,
+        venueField,
+        workTypeField,
+        descriptionField,
+        startField,
+        endField,
+        previousPayrollHidden,
+        reviewNoteHidden,
+      })
     })
   }
 
@@ -420,11 +1176,14 @@ class WagesUiInjector {
 
   function runEnhancements() {
     if (!window.location.pathname.startsWith('/wages')) return
-    ensureReturnToDashboard()
+    removeStaffDashboardAccess()
     fixSwitchPerson()
     decorateButtons()
+    ensureFrontPageMissShiftButton()
+    document.querySelectorAll('.bw-period-tools, .bw-last-payroll-btn').forEach((node) => node.remove())
     moveAddShiftNearSaveTemporary()
     unlockPayrollWeekPicker()
+    enhanceMissedShiftForms()
     hideOvernightPrompt()
     addBulkFinalSubmission()
   }
@@ -590,13 +1349,21 @@ async function proxyRequest(c: any) {
 
   const upstreamResponse = await fetch(upstreamRequest)
   const headers = rewriteHeaders(upstreamResponse, incomingUrl.origin)
+  const contentType = headers.get('content-type') || ''
+
+  if (['GET', 'HEAD'].includes(c.req.raw.method) && contentType.includes('text/html')) {
+    headers.set('cache-control', 'no-store, no-cache, must-revalidate, max-age=0')
+    headers.set('pragma', 'no-cache')
+    headers.set('expires', '0')
+    headers.set('surrogate-control', 'no-store')
+  }
+
   const baseResponse = new Response(upstreamResponse.body, {
     status: upstreamResponse.status,
     statusText: upstreamResponse.statusText,
     headers,
   })
 
-  const contentType = headers.get('content-type') || ''
   if (c.req.raw.method !== 'GET' || !contentType.includes('text/html')) {
     return baseResponse
   }
