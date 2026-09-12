@@ -921,24 +921,44 @@ label[for="bw-missed-work-date"] {
 
   function persistActiveStaffProfile(profile) {
     if (!profile) return
+    const serialized = JSON.stringify(profile)
     try {
-      window.sessionStorage.setItem(ACTIVE_STAFF_PROFILE_KEY, JSON.stringify(profile))
+      window.sessionStorage.setItem(ACTIVE_STAFF_PROFILE_KEY, serialized)
+    } catch (err) {}
+    try {
+      window.localStorage.setItem(ACTIVE_STAFF_PROFILE_KEY, serialized)
     } catch (err) {}
   }
 
   function getStoredActiveStaffProfile() {
-    try {
-      const raw = window.sessionStorage.getItem(ACTIVE_STAFF_PROFILE_KEY)
-      if (!raw) return null
-      const parsed = JSON.parse(raw)
-      if (!parsed || !Array.isArray(parsed.options)) return null
-      return parsed
-    } catch (err) {
-      return null
+    const readStored = (storage) => {
+      try {
+        const raw = storage.getItem(ACTIVE_STAFF_PROFILE_KEY)
+        if (!raw) return null
+        const parsed = JSON.parse(raw)
+        if (!parsed || !Array.isArray(parsed.options)) return null
+        return parsed
+      } catch (err) {
+        return null
+      }
     }
+    return readStored(window.sessionStorage) || readStored(window.localStorage)
+  }
+
+  function bindStaffPickerPersistence() {
+    Array.from(document.querySelectorAll('a.person[href*="/wages/login?staff="]')).forEach((link) => {
+      if (!(link instanceof HTMLAnchorElement) || !once(link, 'PersistStaffChoice')) return
+      link.addEventListener('click', () => {
+        const staffId = normalize(new URL(link.href, window.location.origin).searchParams.get('staff'))
+        const profile = STAFF_WORK_TYPE_PROFILES.find((entry) => entry.ids.includes(staffId))
+        if (profile) persistActiveStaffProfile(profile)
+      })
+    })
   }
 
   function detectAndPersistActiveStaffProfile() {
+    bindStaffPickerPersistence()
+
     const currentUrl = new URL(window.location.href)
     const directStaffId = normalize(currentUrl.searchParams.get('staff'))
     if (directStaffId) {
@@ -958,13 +978,6 @@ label[for="bw-missed-work-date"] {
         persistActiveStaffProfile(profileByHeading)
         return profileByHeading
       }
-    }
-
-    const bodyText = elementText(document.body).toLowerCase()
-    const profileByBody = STAFF_WORK_TYPE_PROFILES.find((profile) => profile.names.some((name) => bodyText.includes(name)))
-    if (profileByBody) {
-      persistActiveStaffProfile(profileByBody)
-      return profileByBody
     }
 
     return getStoredActiveStaffProfile()
