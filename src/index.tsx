@@ -813,6 +813,14 @@ label[for="bw-missed-work-date"] {
       visibleField = wrapper.querySelector('input, select')
     }
 
+    Array.from(form.querySelectorAll('select[name="work_date"], select[id="work_date"], select[id="work-date"]'))
+      .filter((field) => field !== visibleField)
+      .forEach((field) => {
+        const previousLabel = field.previousElementSibling
+        if (previousLabel && /date worked/i.test(elementText(previousLabel))) previousLabel.remove()
+        field.remove()
+      })
+
     const syncedHidden = hiddenField || ensureHiddenField(form, 'work_date')
     if (visibleField && syncedHidden && visibleField !== syncedHidden && once(visibleField, 'WorkDateMirror')) {
       if (syncedHidden.value && !visibleField.value) visibleField.value = syncedHidden.value
