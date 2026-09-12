@@ -771,17 +771,28 @@ label[for="bw-missed-work-date"] {
 
   function ensureVisibleWorkDateField(form, anchorField) {
     let visibleField = firstField(form, [
-      'select[name="work_date"]',
-      'select[id="work_date"]',
-      'select[id="work-date"]',
       'input[name="work_date"]:not([type="hidden"])',
       'input[id="work_date"]:not([type="hidden"])',
       'input[id="work-date"]:not([type="hidden"])',
-      'input[type="date"]'
+      'input[type="date"]',
+      'select[name="work_date"]',
+      'select[id="work_date"]',
+      'select[id="work-date"]'
     ])
     const hiddenField = firstField(form, ['input[name="work_date"]', 'input[id="work_date"]', 'input[id="work-date"]'])
 
-    if (isVisibleWorkDateField(visibleField)) return { visibleField, hiddenField: hiddenField || visibleField }
+    if (isVisibleWorkDateField(visibleField)) {
+      if (visibleField instanceof HTMLInputElement && visibleField.type === 'date') {
+        Array.from(form.querySelectorAll('select[name="work_date"], select[id="work_date"], select[id="work-date"]'))
+          .filter((field) => field !== visibleField && isVisibleWorkDateField(field))
+          .forEach((field) => {
+            const previousLabel = field.previousElementSibling
+            if (previousLabel && /date worked/i.test(elementText(previousLabel))) previousLabel.remove()
+            field.remove()
+          })
+      }
+      return { visibleField, hiddenField: hiddenField || visibleField }
+    }
 
     let wrapper = form.querySelector('.bw-date-worked-wrap')
     if (!wrapper) {
