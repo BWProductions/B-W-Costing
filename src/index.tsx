@@ -821,6 +821,33 @@ label[for="bw-missed-work-date"] {
       })
   }
 
+  function removeLegacyTopDateWorkedBlock(scope, keepField) {
+    if (!(keepField instanceof HTMLElement) || !scope) return
+    const keepWrapper = keepField.closest('.bw-date-worked-wrap, .bw-field-shell')
+    const nodes = Array.from(scope.querySelectorAll('label, strong, h3, h4, div, p'))
+    nodes
+      .filter((node) => /^date worked$/i.test(elementText(node)))
+      .forEach((labelNode) => {
+        if (!(labelNode instanceof HTMLElement)) return
+        if (keepWrapper?.contains(labelNode)) return
+        const relation = labelNode.compareDocumentPosition(keepField)
+        if (!(relation & Node.DOCUMENT_POSITION_FOLLOWING)) return
+
+        const candidateField = labelNode.parentElement?.querySelector('select, input[type="date"], input[name*="date"], input[id*="date"], [role="combobox"]')
+        if (!candidateField || candidateField === keepField) return
+        if (keepWrapper && candidateField instanceof Node && keepWrapper.contains(candidateField)) return
+
+        const parentBlock = labelNode.parentElement
+        if (parentBlock instanceof HTMLElement && !parentBlock.contains(keepField)) {
+          parentBlock.remove()
+          return
+        }
+
+        labelNode.remove()
+        if (candidateField instanceof HTMLElement && !candidateField.contains(keepField)) candidateField.remove()
+      })
+  }
+
   function ensureVisibleWorkDateField(form, anchorField, preferCalendarInput) {
     let visibleField = firstField(form, [
       'input[name="work_date"]:not([type="hidden"])',
@@ -1217,8 +1244,9 @@ label[for="bw-missed-work-date"] {
       const isMissedModeActive = isMissedShiftModeActive(scope, form)
       const workDateBinding = ensureVisibleWorkDateField(form, venueField, isMissedModeActive)
       const workDateField = workDateBinding.visibleField
-      removeTopMissedShiftDateSelector(form, workDateField)
-      removeDuplicateWorkDateControls(form, workDateField)
+      removeTopMissedShiftDateSelector(scope, workDateField)
+      removeDuplicateWorkDateControls(scope, workDateField)
+      removeLegacyTopDateWorkedBlock(scope, workDateField)
       const descriptionField = firstField(form, ['textarea[name="work_description"]', 'input[name="work_description"]', 'textarea[name="details"]', 'input[name="details"]', 'textarea'])
       const rawWorkTypeField = firstField(form, ['select[name="work_type"]', 'input[name="work_type"]', 'select[name="role_worked"]', 'input[name="role_worked"]'])
       const workTypeField = restoreWorkTypeField(form, rawWorkTypeField, descriptionField || venueField || workDateField)
