@@ -792,7 +792,7 @@ label[for="bw-missed-work-date"] {
 
   function removeTopMissedShiftDateSelector(scope, keepField) {
     if (!(keepField instanceof HTMLInputElement) || keepField.type !== 'date' || !scope) return
-    Array.from(scope.querySelectorAll('select'))
+    Array.from(scope.querySelectorAll('select[name="work_date"], select[id="work_date"], select[id="work-date"]'))
       .filter((field) => isVisibleWorkDateField(field) && field !== keepField)
       .forEach((field) => {
         const previousLabel = field.previousElementSibling
