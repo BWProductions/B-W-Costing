@@ -34,6 +34,8 @@ Internal ops platform for B&W Productions CC. Built on Cloudflare Pages + Hono +
 - Added UI styling hooks for **Add Shift**, **Save Shift Temporarily**, **Miss Shift**, and bulk **Final Submission** selection.
 - Updated the worker wages styling so the primary **Add current shift** action stays dark like the approved mock-up, the worker-facing **Save Shift Temporarily** action is yellow, and the front-page **Add a missed Shift** action stays bold red.
 - Forced proxied HTML responses under the safe-proxy flow to return `Cache-Control: no-store` headers so worker-facing wages UI changes show on normal refresh instead of only after a hard refresh.
+- Tightened the logged-in wages dashboard detection so the worker now reinserts the red **Add a MissShift** button directly under **+ Add a shift** even when hidden upstream actions exist on the page.
+- The MissShift launch now carries an explicit `bw_missed=1` handoff into the add-shift screen, and the form enhancer now recognizes standard shift-entry forms during that launch so the date picker is widened to the intended missed-shift range instead of falling back to the old Saturday/Monday-only options.
 - Removed the old staff-side **Return to Dashboard** action; dashboard access remains admin-only at `/admin/wages`.
 - Removed the unapproved **Last payroll** helper / worker guidance copy while still unlocking the payroll week picker safely.
 - Missed-shift date selection now uses a rolling range from the previous payroll week's Saturday through the current payroll's live date window, so staff can choose the physical **Date worked** they actually missed instead of only seeing Saturday/Monday catch-up dates.

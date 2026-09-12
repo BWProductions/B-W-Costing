@@ -84,10 +84,18 @@ class WagesUiInjector {
   color: #fff !important;
   box-shadow: 0 14px 28px rgba(179, 0, 0, 0.22) !important;
 }
+.bw-home-shift-stack {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+.bw-home-shift-stack .btn {
+  width: 100% !important;
+}
 .bw-home-miss-shift-btn {
   display: block;
   width: 100%;
-  margin-top: 14px;
+  margin-top: 0;
   padding: 18px 20px;
   border-radius: 18px;
   font-size: 18px;
@@ -289,6 +297,14 @@ label[for="bw-missed-work-date"] {
     .replace(/  +/g, ' ')
     .trim()
   const elementText = (el) => normalize((el instanceof HTMLElement ? el.innerText : el?.textContent) || (el instanceof HTMLInputElement ? el.value : ''))
+  const isVisibleElement = (el) => {
+    if (!(el instanceof HTMLElement)) return true
+    if (el.hidden) return false
+    const style = window.getComputedStyle(el)
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false
+    const rect = el.getBoundingClientRect()
+    return rect.width > 0 && rect.height > 0
+  }
   const uniqueLabels = (values) => {
     const seen = new Set()
     const output = []
@@ -303,6 +319,7 @@ label[for="bw-missed-work-date"] {
     return output
   }
   const actionElements = () => Array.from(document.querySelectorAll('a, button, input[type="submit"], input[type="button"], [role="button"], .btn'))
+  const visibleActionElements = () => actionElements().filter((el) => isVisibleElement(el))
   const textMatches = (el, regex) => regex.test(elementText(el))
   const once = (el, key) => {
     const marker = 'bwBound' + key
@@ -407,9 +424,11 @@ label[for="bw-missed-work-date"] {
 
   function isWagesHomePage() {
     if (!window.location.pathname.startsWith('/wages')) return false
-    if (actionElements().some((el) => /save shift temporarily/i.test(elementText(el)))) return false
+    const addButton = visibleActionElements().find((el) => isAddShiftAction(elementText(el)) && !el.closest('form'))
+    if (!addButton) return false
+    if (visibleActionElements().some((el) => /save shift temporarily/i.test(elementText(el)))) return false
     const bodyText = elementText(document.body)
-    return /view payroll week/i.test(bodyText) && /finally submitted hours this payroll week/i.test(bodyText)
+    return /view payroll week/i.test(bodyText) || /finally submitted hours this payroll week/i.test(bodyText)
   }
 
   function decorateButtons() {
@@ -447,7 +466,7 @@ label[for="bw-missed-work-date"] {
             document.documentElement.classList.add('bw-missed-mode')
             document.body.classList.add('bw-missed-mode')
             const pageHeading = document.querySelector('main h1, .shell h1, h1')
-            if (pageHeading) pageHeading.textContent = 'Add a missed shift'
+            if (pageHeading) pageHeading.textContent = 'Add a MissShift'
             const pageSubtitle = Array.from(document.querySelectorAll('main p, .shell p, p')).find((node) => /save it temporarily while you work|final submission|current shift|missed shift/i.test(elementText(node)))
             if (pageSubtitle) pageSubtitle.textContent = 'You are capturing a missed shift. Fill in the exact date worked and complete the details below.'
           })
@@ -459,19 +478,32 @@ label[for="bw-missed-work-date"] {
   function ensureFrontPageMissShiftButton() {
     if (!isWagesHomePage()) {
       document.querySelectorAll('.bw-home-miss-shift-btn').forEach((node) => node.remove())
+      document.querySelectorAll('.bw-home-shift-stack').forEach((node) => {
+        if (!node.querySelector('.bw-home-miss-shift-btn') && !node.children.length) node.remove()
+      })
       return
     }
 
-    const addButton = actionElements().find((el) => isAddShiftAction(elementText(el)) && !el.closest('form'))
+    const addButton = visibleActionElements().find((el) => isAddShiftAction(elementText(el)) && !el.closest('form'))
     if (!addButton) return
 
-    let missButton = document.querySelector('.bw-home-miss-shift-btn')
+    let stack = document.querySelector('.bw-home-shift-stack')
+    if (!(stack instanceof HTMLElement)) {
+      stack = document.createElement('div')
+      stack.className = 'bw-home-shift-stack'
+      addButton.parentElement?.insertBefore(stack, addButton)
+      stack.appendChild(addButton)
+    } else if (!stack.contains(addButton)) {
+      stack.prepend(addButton)
+    }
+
+    let missButton = stack.querySelector('.bw-home-miss-shift-btn')
     if (!missButton) {
       missButton = document.createElement('button')
       missButton.type = 'button'
       missButton.className = 'btn bw-miss-shift-btn bw-home-miss-shift-btn'
-      missButton.textContent = 'Add a missed Shift'
-      addButton.insertAdjacentElement('afterend', missButton)
+      missButton.textContent = 'Add a MissShift'
+      stack.appendChild(missButton)
     }
 
     if (!once(missButton, 'FrontPageMissShift')) return
@@ -479,7 +511,9 @@ label[for="bw-missed-work-date"] {
       event.preventDefault()
       setStoredMissedMode(true)
       if (addButton instanceof HTMLAnchorElement && addButton.href) {
-        window.location.href = addButton.href
+        const targetUrl = new URL(addButton.href, window.location.origin)
+        targetUrl.searchParams.set('bw_missed', '1')
+        window.location.href = targetUrl.toString()
         return
       }
       window.__bwLaunchMode = 'missed'
@@ -638,6 +672,24 @@ label[for="bw-missed-work-date"] {
     }
   }
 
+  function consumeMissedQueryFlag() {
+    const currentUrl = new URL(window.location.href)
+    if (currentUrl.searchParams.get('bw_missed') !== '1') return false
+    setStoredMissedMode(true)
+    currentUrl.searchParams.delete('bw_missed')
+    const nextUrl = currentUrl.pathname + currentUrl.search + currentUrl.hash
+    window.history.replaceState({}, document.title, nextUrl)
+    return true
+  }
+
+  function peekStoredMissedMode() {
+    try {
+      return window.sessionStorage.getItem(MISSED_MODE_STORAGE_KEY) === 'pending'
+    } catch (err) {
+      return false
+    }
+  }
+
   function ensureHelperText(field, key, text) {
     if (!field || field.dataset['bwHelper' + key] === '1') return
     field.dataset['bwHelper' + key] = '1'
@@ -771,7 +823,7 @@ label[for="bw-missed-work-date"] {
   function ensureMissedShiftHeading(scope, form, isActive) {
     const pageHeading = document.querySelector('main h1, .shell h1, h1')
     if (pageHeading) {
-      pageHeading.textContent = isActive ? 'Add a missed shift' : 'Add a current shift'
+      pageHeading.textContent = isActive ? 'Add a MissShift' : 'Add a current shift'
     }
 
     const pageSubtitle = Array.from(document.querySelectorAll('main p, .shell p, p')).find((node) => /save it temporarily while you work|final submission|current shift|missed shift/i.test(elementText(node)))
@@ -786,7 +838,7 @@ label[for="bw-missed-work-date"] {
       if (!banner) {
         banner = document.createElement('div')
         banner.className = 'bw-missed-mode-banner'
-        banner.textContent = 'Missed shift page — select the date you missed'
+        banner.textContent = 'MissShift page — select the date you missed'
         form.insertBefore(banner, form.firstChild)
       }
     } else if (banner) {
@@ -1007,6 +1059,13 @@ label[for="bw-missed-work-date"] {
     syncMissedShiftMetadata(payload)
   }
 
+  function looksLikeShiftEntryForm(form) {
+    const startField = firstField(form, ['input[name="start_time"]', 'input[name="start"]', 'input[id="start_time"]', 'input[id="start-time"]', 'input[type="time"]'])
+    const endField = firstField(form, ['input[name="end_time"]', 'input[name="finish_time"]', 'input[name="finish"]', 'input[id="end_time"]', 'input[id="finish_time"]'])
+    const workDateField = firstField(form, ['select[name="work_date"]', 'select[id="work_date"]', 'select[id="work-date"]', 'input[name="work_date"]', 'input[id="work_date"]', 'input[id="work-date"]', 'input[type="date"]'])
+    return !!(startField && endField && workDateField)
+  }
+
   function enhanceMissedShiftForms() {
     const claimWeekField = findPayrollWeekField()
     if (claimWeekField) {
@@ -1021,9 +1080,11 @@ label[for="bw-missed-work-date"] {
       syncStoredWeek()
     }
 
+    const pendingMissedMode = peekStoredMissedMode()
+
     Array.from(document.querySelectorAll('form')).forEach((form) => {
       removeBrokenMissedShiftPanel(form)
-      if (!isMissedShiftForm(form)) return
+      if (!isMissedShiftForm(form) && !(pendingMissedMode && looksLikeShiftEntryForm(form))) return
 
       const scope = form.closest('.card, .form-card, .shift, section, article, div') || form
       const venueField = firstField(form, ['input[name="outlet_venue"]', 'input[name="venue_name"]', 'input[name="venue"]', 'input[id="outlet_venue"]', 'input[id="venue_name"]', 'input[id="venue"]'])
@@ -1176,6 +1237,7 @@ label[for="bw-missed-work-date"] {
 
   function runEnhancements() {
     if (!window.location.pathname.startsWith('/wages')) return
+    consumeMissedQueryFlag()
     removeStaffDashboardAccess()
     fixSwitchPerson()
     decorateButtons()
