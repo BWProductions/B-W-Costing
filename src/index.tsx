@@ -263,6 +263,9 @@ label[for="bw-missed-work-date"] {
 .bw-hidden-original-label {
   display: none !important;
 }
+.bw-hidden-work-date-control {
+  display: none !important;
+}
 @media (max-width: 560px) {
   .bw-final-submit-panel__row { align-items: stretch; }
   .bw-final-submit-go, .bw-last-payroll-btn { width: 100% !important; }
@@ -859,6 +862,25 @@ label[for="bw-missed-work-date"] {
     if (wrapper) wrapper.classList.add('bw-field-shell')
   }
 
+  function resolveMissedShiftSaturday(activePayrollWeekStart) {
+    const currentPayrollStart = parseFlexibleDate(activePayrollWeekStart) || startOfPayrollWeek(utcToday())
+    const saturday = new Date(currentPayrollStart.getTime())
+    saturday.setUTCDate(saturday.getUTCDate() - 2)
+    return formatForInput(saturday, false)
+  }
+
+  function hideMissedShiftDateWorkedControl(form, workDateField) {
+    if (!workDateField) return
+    workDateField.classList.add('bw-hidden-work-date-control')
+    const wrapper = workDateField.closest('.bw-date-worked-wrap, .bw-field-shell')
+    if (wrapper instanceof HTMLElement) wrapper.classList.add('bw-hidden-work-date-control')
+    if (workDateField.id) {
+      form.querySelectorAll('label[for="' + workDateField.id + '"]').forEach((label) => label.classList.add('bw-hidden-work-date-control'))
+    }
+    const previousLabel = workDateField.previousElementSibling
+    if (previousLabel instanceof HTMLLabelElement) previousLabel.classList.add('bw-hidden-work-date-control')
+  }
+
   function ensureMissedShiftHeading(scope, form, isActive) {
     const pageHeading = document.querySelector('main h1, .shell h1, h1')
     if (pageHeading) {
@@ -1125,9 +1147,15 @@ label[for="bw-missed-work-date"] {
     const windowConfig = getMissedShiftWindow(activePayrollWeekStart)
     setStoredClaimWeek(activePayrollWeekStart)
     widenMissedShiftDateChoices(payload.workDateField, activePayrollWeekStart)
+    if (payload.hideWorkDateControl) {
+      const saturdayValue = resolveMissedShiftSaturday(activePayrollWeekStart)
+      if (payload.workDateField) payload.workDateField.value = saturdayValue
+      if (payload.workDateHidden && payload.workDateHidden !== payload.workDateField) payload.workDateHidden.value = saturdayValue
+      hideMissedShiftDateWorkedControl(payload.form, payload.workDateField)
+    }
     rewriteMissedShiftRestrictionText(payload.scope, activePayrollWeekStart)
 
-    const workDate = parseFlexibleDate(payload.workDateField.value || payload.workDateField.getAttribute('value') || '')
+    const workDate = parseFlexibleDate(payload.workDateField.value || payload.workDateField.getAttribute('value') || payload.workDateHidden?.value || '')
     const selectedClaimWeek = workDate && workDate.getTime() < windowConfig.currentPayrollStart.getTime()
       ? formatForInput(windowConfig.previousPayrollStart, false)
       : formatForInput(windowConfig.currentPayrollStart, false)
@@ -1204,8 +1232,10 @@ label[for="bw-missed-work-date"] {
 
       const isMissedModeActive = isMissedShiftModeActive(scope, form)
       ensureMissedShiftHeading(scope, form, isMissedModeActive)
-      emphasizeDateWorkedField(workDateField)
-      ensureDateWorkedLabel(workDateField)
+      if (!isMissedModeActive) {
+        emphasizeDateWorkedField(workDateField)
+        ensureDateWorkedLabel(workDateField)
+      }
       removeDateWorkedHelperText(workDateField)
       form.querySelectorAll('.field-help').forEach((node) => node.remove())
       ensureVenueSuggestions(venueField, resolveWorkTypeOptions(form))
@@ -1230,6 +1260,8 @@ label[for="bw-missed-work-date"] {
         claimWeekField,
         claimWeekHidden,
         workDateField: workDateField || workDateHidden,
+        workDateHidden,
+        hideWorkDateControl: isMissedModeActive,
         venueField,
         workTypeField,
         descriptionField,
