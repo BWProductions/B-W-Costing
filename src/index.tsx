@@ -769,6 +769,17 @@ label[for="bw-missed-work-date"] {
     return rects.length > 0
   }
 
+  function removeDuplicateWorkDateControls(scope, keepField) {
+    if (!scope) return
+    Array.from(scope.querySelectorAll('select[name="work_date"], select[id="work_date"], select[id="work-date"]'))
+      .filter((field) => field !== keepField)
+      .forEach((field) => {
+        const previousLabel = field.previousElementSibling
+        if (previousLabel && /date worked/i.test(elementText(previousLabel))) previousLabel.remove()
+        field.remove()
+      })
+  }
+
   function ensureVisibleWorkDateField(form, anchorField) {
     let visibleField = firstField(form, [
       'input[name="work_date"]:not([type="hidden"])',
@@ -812,14 +823,6 @@ label[for="bw-missed-work-date"] {
     } else {
       visibleField = wrapper.querySelector('input, select')
     }
-
-    Array.from(form.querySelectorAll('select[name="work_date"], select[id="work_date"], select[id="work-date"]'))
-      .filter((field) => field !== visibleField)
-      .forEach((field) => {
-        const previousLabel = field.previousElementSibling
-        if (previousLabel && /date worked/i.test(elementText(previousLabel))) previousLabel.remove()
-        field.remove()
-      })
 
     const syncedHidden = hiddenField || ensureHiddenField(form, 'work_date')
     if (visibleField && syncedHidden && visibleField !== syncedHidden && once(visibleField, 'WorkDateMirror')) {
@@ -1109,6 +1112,7 @@ label[for="bw-missed-work-date"] {
       const venueField = firstField(form, ['input[name="outlet_venue"]', 'input[name="venue_name"]', 'input[name="venue"]', 'input[id="outlet_venue"]', 'input[id="venue_name"]', 'input[id="venue"]'])
       const workDateBinding = ensureVisibleWorkDateField(form, venueField)
       const workDateField = workDateBinding.visibleField
+      removeDuplicateWorkDateControls(scope, workDateField)
       const descriptionField = firstField(form, ['textarea[name="work_description"]', 'input[name="work_description"]', 'textarea[name="details"]', 'input[name="details"]', 'textarea'])
       const rawWorkTypeField = firstField(form, ['select[name="work_type"]', 'input[name="work_type"]', 'select[name="role_worked"]', 'input[name="role_worked"]'])
       const workTypeField = restoreWorkTypeField(form, rawWorkTypeField, descriptionField || venueField || workDateField)
