@@ -1188,6 +1188,10 @@ label[for="bw-missed-work-date"] {
     return !!(startField && endField && workDateField)
   }
 
+  function resolveMissedShiftScope(form) {
+    return form.closest('.card, .form-card, .shift, section, article, main, .shell') || form
+  }
+
   function enhanceMissedShiftForms() {
     const claimWeekField = findPayrollWeekField()
     if (claimWeekField) {
@@ -1208,7 +1212,7 @@ label[for="bw-missed-work-date"] {
       removeBrokenMissedShiftPanel(form)
       if (!isMissedShiftForm(form) && !(pendingMissedMode && looksLikeShiftEntryForm(form))) return
 
-      const scope = form.closest('.card, .form-card, .shift, section, article, div') || form
+      const scope = resolveMissedShiftScope(form)
       const venueField = firstField(form, ['input[name="outlet_venue"]', 'input[name="venue_name"]', 'input[name="venue"]', 'input[id="outlet_venue"]', 'input[id="venue_name"]', 'input[id="venue"]'])
       const isMissedModeActive = isMissedShiftModeActive(scope, form)
       const workDateBinding = ensureVisibleWorkDateField(form, venueField, isMissedModeActive)
