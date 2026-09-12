@@ -789,6 +789,21 @@ label[for="bw-missed-work-date"] {
       })
   }
 
+  function removeTopMissedShiftDateSelector(scope, keepField) {
+    if (!(keepField instanceof HTMLInputElement) || keepField.type !== 'date' || !scope) return
+    Array.from(scope.querySelectorAll('select'))
+      .filter((field) => isVisibleWorkDateField(field) && field !== keepField)
+      .forEach((field) => {
+        const previousLabel = field.previousElementSibling
+        if (previousLabel && /date worked/i.test(elementText(previousLabel))) previousLabel.remove()
+        const parent = field.parentElement
+        field.remove()
+        if (parent && !parent.contains(keepField) && !parent.querySelector('input, select, textarea, button, a')) {
+          parent.remove()
+        }
+      })
+  }
+
   function ensureVisibleWorkDateField(form, anchorField) {
     let visibleField = firstField(form, [
       'input[name="work_date"]:not([type="hidden"])',
@@ -1112,6 +1127,7 @@ label[for="bw-missed-work-date"] {
       const venueField = firstField(form, ['input[name="outlet_venue"]', 'input[name="venue_name"]', 'input[name="venue"]', 'input[id="outlet_venue"]', 'input[id="venue_name"]', 'input[id="venue"]'])
       const workDateBinding = ensureVisibleWorkDateField(form, venueField)
       const workDateField = workDateBinding.visibleField
+      removeTopMissedShiftDateSelector(scope, workDateField)
       removeDuplicateWorkDateControls(scope, workDateField)
       const descriptionField = firstField(form, ['textarea[name="work_description"]', 'input[name="work_description"]', 'textarea[name="details"]', 'input[name="details"]', 'textarea'])
       const rawWorkTypeField = firstField(form, ['select[name="work_type"]', 'input[name="work_type"]', 'select[name="role_worked"]', 'input[name="role_worked"]'])
