@@ -771,12 +771,22 @@ label[for="bw-missed-work-date"] {
     return rects.length > 0
   }
 
+  function isLegacyWorkDateSelect(field) {
+    if (!(field instanceof HTMLSelectElement)) return false
+    if (/^work_?date$/i.test(normalize(field.name || field.id || ''))) return true
+    const previousLabel = field.previousElementSibling
+    if (previousLabel && /date worked/i.test(elementText(previousLabel))) return true
+    const wrapperLabel = field.closest('.bw-date-worked-wrap, .bw-field-shell')?.querySelector('label')
+    if (wrapperLabel && /date worked/i.test(elementText(wrapperLabel))) return true
+    return Array.from(field.options).some((option) => /\d{4}[-/]\d{2}[-/]\d{2}/.test(normalize(option.value || option.textContent || '')))
+  }
+
   function removeDuplicateWorkDateControls(scope, keepField) {
     if (!scope) return
-    Array.from(scope.querySelectorAll('select[name="work_date"], select[id="work_date"], select[id="work-date"]'))
-      .filter((field) => field !== keepField)
+    Array.from(scope.querySelectorAll('select'))
+      .filter((field) => field !== keepField && isLegacyWorkDateSelect(field))
       .forEach((field) => {
-        const shell = field.closest('.bw-date-worked-wrap, .bw-field-shell')
+        const shell = field.closest('.bw-date-worked-wrap')
         if (shell instanceof HTMLElement && !shell.contains(keepField)) {
           shell.remove()
           return
@@ -793,9 +803,14 @@ label[for="bw-missed-work-date"] {
 
   function removeTopMissedShiftDateSelector(scope, keepField) {
     if (!(keepField instanceof HTMLInputElement) || keepField.type !== 'date' || !scope) return
-    Array.from(scope.querySelectorAll('select[name="work_date"], select[id="work_date"], select[id="work-date"]'))
-      .filter((field) => isVisibleWorkDateField(field) && field !== keepField)
+    Array.from(scope.querySelectorAll('select'))
+      .filter((field) => isVisibleWorkDateField(field) && field !== keepField && isLegacyWorkDateSelect(field))
       .forEach((field) => {
+        const shell = field.closest('.bw-date-worked-wrap')
+        if (shell instanceof HTMLElement && !shell.contains(keepField)) {
+          shell.remove()
+          return
+        }
         const previousLabel = field.previousElementSibling
         if (previousLabel && /date worked/i.test(elementText(previousLabel))) previousLabel.remove()
         const parent = field.parentElement
@@ -1198,8 +1213,8 @@ label[for="bw-missed-work-date"] {
       const isMissedModeActive = isMissedShiftModeActive(scope, form)
       const workDateBinding = ensureVisibleWorkDateField(form, venueField, isMissedModeActive)
       const workDateField = workDateBinding.visibleField
-      removeTopMissedShiftDateSelector(scope, workDateField)
-      removeDuplicateWorkDateControls(scope, workDateField)
+      removeTopMissedShiftDateSelector(form, workDateField)
+      removeDuplicateWorkDateControls(form, workDateField)
       const descriptionField = firstField(form, ['textarea[name="work_description"]', 'input[name="work_description"]', 'textarea[name="details"]', 'input[name="details"]', 'textarea'])
       const rawWorkTypeField = firstField(form, ['select[name="work_type"]', 'input[name="work_type"]', 'select[name="role_worked"]', 'input[name="role_worked"]'])
       const workTypeField = restoreWorkTypeField(form, rawWorkTypeField, descriptionField || venueField || workDateField)
