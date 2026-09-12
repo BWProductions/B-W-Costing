@@ -284,6 +284,7 @@ label[for="bw-missed-work-date"] {
   const STAFF_WORK_TYPE_PROFILES = [
     { ids: ['1'], names: ['givemore chifetete kuziwa', 'givemore'], options: ['House', 'Team Assistance'] },
     { ids: ['2'], names: ['takavaudza chokuda', 'takavaudza', 'takka'], options: ['House/Garden', 'Warehouse Team'] },
+    { ids: ['3'], names: ['thina dyani', 'thina'], options: ['Normal'] },
     { ids: ['5'], names: ['bhekizitha maphosa', 'bheki'], options: ['Music Bus', 'Normal'] },
     { ids: ['7'], names: ['john simbarashe mhlanga', 'jay'], options: ['Music Bus', 'Normal'] },
     { ids: ['12'], names: ['brian ndlovu', 'sipho'], options: ['Music Bus', 'Normal'] },
