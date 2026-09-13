@@ -363,6 +363,7 @@ label[for="bw-missed-work-date"] {
   const CLAIM_WEEK_STORAGE_KEY = 'bwWagesClaimWeekStart'
   const MISSED_MODE_STORAGE_KEY = 'bwWagesMissedShiftMode'
   const ACTIVE_STAFF_PROFILE_KEY = 'bwWagesActiveStaffProfile'
+  const ACTIVE_STAFF_ID_STORAGE_KEY = 'bwWagesActiveStaffId'
   const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
   const FALLBACK_WORK_TYPE_OPTIONS = ['Normal', 'House', 'House/Garden', 'Warehouse Team', 'Team Assistance', 'Music Bus']
   const COMMON_VENUE_SUGGESTIONS = ['Warehouse', 'Garden', 'Work with the Team', 'House', 'Music Bus', 'Ellis Park', 'FNB Stadium', 'Loftus', 'Inanda Club', 'Supersport Park', 'SAB HQ', 'DHL Stadium']
@@ -414,13 +415,79 @@ label[for="bw-missed-work-date"] {
     return true
   }
 
+  function persistActiveStaffId(staffId) {
+    const normalizedStaffId = normalize(staffId)
+    if (!normalizedStaffId) return
+    try { window.sessionStorage.setItem(ACTIVE_STAFF_ID_STORAGE_KEY, normalizedStaffId) } catch (err) {}
+    try { window.localStorage.setItem(ACTIVE_STAFF_ID_STORAGE_KEY, normalizedStaffId) } catch (err) {}
+  }
+
+  function getStoredActiveStaffId() {
+    const readStored = (storage) => {
+      try {
+        return normalize(storage.getItem(ACTIVE_STAFF_ID_STORAGE_KEY) || '')
+      } catch (err) {
+        return ''
+      }
+    }
+    return readStored(window.sessionStorage) || readStored(window.localStorage)
+  }
+
+  function resolveActiveStaffId(scope) {
+    try {
+      const currentUrl = new URL(window.location.href)
+      const directStaffId = normalize(currentUrl.searchParams.get('bw_staff_id') || currentUrl.searchParams.get('staff') || '')
+      if (directStaffId) {
+        persistActiveStaffId(directStaffId)
+        return directStaffId
+      }
+    } catch (err) {}
+
+    const containers = []
+    if (scope instanceof HTMLElement || scope instanceof HTMLFormElement) containers.push(scope)
+    containers.push(document)
+
+    for (const container of containers) {
+      const idField = container.querySelector?.('input[name="staff_id"], input[name="person_id"], input[name="worker_id"], input[name="employee_id"], select[name="staff_id"], select[name="person_id"], select[name="worker_id"], select[name="employee_id"]')
+      const resolvedId = normalize(idField?.value || idField?.getAttribute?.('value') || '')
+      if (resolvedId) {
+        persistActiveStaffId(resolvedId)
+        return resolvedId
+      }
+    }
+
+    const storedProfile = getStoredActiveStaffProfile()
+    const profileStaffId = normalize(storedProfile?.ids?.[0] || '')
+    if (profileStaffId) {
+      persistActiveStaffId(profileStaffId)
+      return profileStaffId
+    }
+
+    return getStoredActiveStaffId()
+  }
+
+  function attachActiveStaffIdToUrl(parsed) {
+    if (!(parsed instanceof URL)) return
+    if (!parsed.pathname.startsWith('/wages')) return
+    if (parsed.pathname === LOGOUT_PATH) return
+    if (parsed.searchParams.get('bw_staff_id')) return
+    const activeStaffId = resolveActiveStaffId(document)
+    if (!activeStaffId) return
+    parsed.searchParams.set('bw_staff_id', activeStaffId)
+  }
+
   function rewriteToProxyUrl(rawUrl) {
     const normalized = normalize(rawUrl)
     if (!normalized) return rawUrl
     try {
       const parsed = new URL(normalized, window.location.origin)
-      if (parsed.origin !== UPSTREAM_ORIGIN) return parsed.toString()
-      return window.location.origin + parsed.pathname + parsed.search + parsed.hash
+      if (parsed.origin === UPSTREAM_ORIGIN) {
+        const proxied = new URL(window.location.origin + parsed.pathname + parsed.search + parsed.hash)
+        attachActiveStaffIdToUrl(proxied)
+        return proxied.toString()
+      }
+      attachActiveStaffIdToUrl(parsed)
+      return parsed.toString()
     } catch (err) {
       return rawUrl
     }
@@ -1054,10 +1121,12 @@ label[for="bw-missed-work-date"] {
   function ensureShiftStaffIdentity(form) {
     const existingIdField = firstField(form, ['input[name="staff_id"]', 'input[name="person_id"]', 'input[name="worker_id"]', 'input[name="employee_id"]', 'select[name="staff_id"]', 'select[name="person_id"]', 'select[name="worker_id"]', 'select[name="employee_id"]'])
     const existingIdValue = normalize(existingIdField?.value || existingIdField?.getAttribute('value') || '')
-    if (existingIdValue) return existingIdField
+    if (existingIdValue) {
+      persistActiveStaffId(existingIdValue)
+      return existingIdField
+    }
 
-    const profile = resolveStaffWorkTypeProfile(form) || getStoredActiveStaffProfile()
-    const fallbackStaffId = normalize(profile?.ids?.[0] || '')
+    const fallbackStaffId = resolveActiveStaffId(form)
     if (!fallbackStaffId) return null
 
     const hiddenStaffId = ensureDedicatedHiddenField(form, 'staff_id')
@@ -1413,6 +1482,7 @@ label[for="bw-missed-work-date"] {
       if (!(link instanceof HTMLAnchorElement) || !once(link, 'PersistStaffChoice')) return
       link.addEventListener('click', () => {
         const staffId = normalize(new URL(link.href, window.location.origin).searchParams.get('staff'))
+        if (staffId) persistActiveStaffId(staffId)
         const profile = STAFF_WORK_TYPE_PROFILES.find((entry) => entry.ids.includes(staffId))
         if (profile) persistActiveStaffProfile(profile)
       })
@@ -1423,8 +1493,9 @@ label[for="bw-missed-work-date"] {
     bindStaffPickerPersistence()
 
     const currentUrl = new URL(window.location.href)
-    const directStaffId = normalize(currentUrl.searchParams.get('staff'))
+    const directStaffId = normalize(currentUrl.searchParams.get('bw_staff_id') || currentUrl.searchParams.get('staff'))
     if (directStaffId) {
+      persistActiveStaffId(directStaffId)
       const profileById = STAFF_WORK_TYPE_PROFILES.find((profile) => profile.ids.includes(directStaffId))
       if (profileById) {
         persistActiveStaffProfile(profileById)
@@ -1438,19 +1509,24 @@ label[for="bw-missed-work-date"] {
       const headingName = normalize(hiMatch[1]).toLowerCase()
       const profileByHeading = STAFF_WORK_TYPE_PROFILES.find((profile) => profile.names.some((name) => headingName.includes(name) || name.includes(headingName)))
       if (profileByHeading) {
+        persistActiveStaffId(profileByHeading.ids?.[0] || '')
         persistActiveStaffProfile(profileByHeading)
         return profileByHeading
       }
     }
 
-    return getStoredActiveStaffProfile()
+    const storedProfile = getStoredActiveStaffProfile()
+    if (storedProfile?.ids?.[0]) persistActiveStaffId(storedProfile.ids[0])
+    return storedProfile
   }
 
   function resolveStaffWorkTypeProfile(form) {
     const idFields = Array.from(form.querySelectorAll('input[name="staff_id"], input[name="person_id"], input[name="worker_id"], input[name="employee_id"], select[name="staff_id"], select[name="person_id"], select[name="worker_id"], select[name="employee_id"]'))
     const idValues = idFields.map((field) => normalize(field.value || field.getAttribute('value') || ''))
     for (const profile of STAFF_WORK_TYPE_PROFILES) {
-      if (profile.ids.some((id) => idValues.includes(id))) {
+      const matchedId = profile.ids.find((id) => idValues.includes(id))
+      if (matchedId) {
+        persistActiveStaffId(matchedId)
         persistActiveStaffProfile(profile)
         return profile
       }
@@ -1739,7 +1815,13 @@ label[for="bw-missed-work-date"] {
       const livePayrollWeek = parseFlexibleDate(currentPayrollWeekStartValue())
       const isMissedModeActive = !!(currentWorkDate && livePayrollWeek && currentWorkDate.getTime() < livePayrollWeek.getTime())
 
-      ensureShiftStaffIdentity(form)
+      const resolvedStaffIdField = ensureShiftStaffIdentity(form)
+      if (resolvedStaffIdField?.value || resolvedStaffIdField?.getAttribute('value')) {
+        const hiddenStaffMarker = ensureHiddenField(form, 'bw_staff_id')
+        hiddenStaffMarker.value = normalize(resolvedStaffIdField.value || resolvedStaffIdField.getAttribute('value') || '')
+        hiddenStaffMarker.setAttribute('value', hiddenStaffMarker.value)
+      }
+      rewriteFormAction(form)
       syncOvernightHiddenField(form, startField, endField)
 
       ensureMissedShiftHeading(scope, form, isMissedModeActive)
@@ -2398,11 +2480,46 @@ function resolveMissedShiftSaveStatus(formData: FormData) {
   return 'draft'
 }
 
+function findProxyStaffIdInUrl(url: URL | null | undefined) {
+  if (!url) return 0
+  return parseProxyInteger(normalizeProxyFieldValue(url.searchParams.get('staff_id'))
+    || normalizeProxyFieldValue(url.searchParams.get('person_id'))
+    || normalizeProxyFieldValue(url.searchParams.get('worker_id'))
+    || normalizeProxyFieldValue(url.searchParams.get('employee_id'))
+    || normalizeProxyFieldValue(url.searchParams.get('bw_staff_id'))
+    || normalizeProxyFieldValue(url.searchParams.get('staff')))
+}
+
+function hydrateProxyStaffId(request: Request, incomingUrl: URL, formData: FormData) {
+  const existingStaffId = parseProxyInteger(findProxyFormValue(formData, ['staff_id', 'person_id', 'worker_id', 'employee_id', 'bw_staff_id']))
+  if (existingStaffId) return existingStaffId
+
+  const directUrlStaffId = findProxyStaffIdInUrl(incomingUrl)
+  if (directUrlStaffId) {
+    formData.set('staff_id', String(directUrlStaffId))
+    return directUrlStaffId
+  }
+
+  const referer = request.headers.get('referer') || ''
+  if (referer) {
+    try {
+      const refererUrl = new URL(referer)
+      const refererStaffId = findProxyStaffIdInUrl(refererUrl)
+      if (refererStaffId) {
+        formData.set('staff_id', String(refererStaffId))
+        return refererStaffId
+      }
+    } catch (err) {}
+  }
+
+  return 0
+}
+
 async function saveMissedShiftDirectly(env: Bindings | undefined, formData: FormData) {
   const db = env?.DB
   if (!db) return { ok: false, reason: 'missing_db' as const }
 
-  const staffId = parseProxyInteger(findProxyFormValue(formData, ['staff_id', 'person_id', 'worker_id', 'employee_id']))
+  const staffId = parseProxyInteger(findProxyFormValue(formData, ['staff_id', 'person_id', 'worker_id', 'employee_id', 'bw_staff_id']))
   if (!staffId) return { ok: false, reason: 'missing_staff' as const }
 
   const workDate = findProxyFormValue(formData, ['bw_actual_work_date', 'date_worked', 'actual_work_date', 'physical_work_date', 'exact_work_date', 'work_date', 'bw_visible_work_date'])
@@ -2476,46 +2593,78 @@ async function saveMissedShiftDirectly(env: Bindings | undefined, formData: Form
   }
 }
 
+function describeProxyError(err: unknown) {
+  if (err instanceof Error) {
+    const firstStackLine = String(err.stack || '').split('\n').map((line) => line.trim()).filter(Boolean)[0] || ''
+    return [err.message, firstStackLine && firstStackLine !== err.message ? firstStackLine : ''].filter(Boolean).join(' | ')
+  }
+  return typeof err === 'string' ? err : JSON.stringify(err)
+}
+
 async function handleDirectMissedShiftSave(c: any, incomingUrl: URL, formData: FormData) {
   const originalSnapshot = { _content_type: c.req.raw.headers.get('content-type') || '(none)', ...extractInterestingFormFields(formData) }
-  const saveResult = await saveMissedShiftDirectly(c.env, formData)
-  if (!saveResult.ok) return null
 
-  const redirectUrl = new URL('/wages', incomingUrl.origin)
-  redirectUrl.searchParams.set('payroll_week_start', saveResult.captureWeekStart)
-  redirectUrl.searchParams.set('saved', saveResult.status)
-  if (saveResult.claimedAgainstWeekStart) redirectUrl.searchParams.set('bw_claim_week_start', saveResult.claimedAgainstWeekStart)
+  try {
+    const hydratedStaffId = hydrateProxyStaffId(c.req.raw, incomingUrl, formData)
+    const saveResult = await saveMissedShiftDirectly(c.env, formData)
+    if (!saveResult.ok) return null
 
-  const rewrittenSnapshot = {
-    ...originalSnapshot,
-    payroll_week_start: saveResult.captureWeekStart,
-    bw_claim_week_start: saveResult.claimedAgainstWeekStart,
-    missed_previous_week: '1',
-    bw_missed_shift_mode: '1',
-    _direct_save: saveResult.status,
-    _inserted_id: String(saveResult.insertedId || ''),
+    const redirectUrl = new URL('/wages/me', incomingUrl.origin)
+    if (saveResult.status === 'submitted') {
+      redirectUrl.searchParams.set('final_submitted', '1')
+    } else {
+      redirectUrl.searchParams.set('draft_saved', '1')
+    }
+    redirectUrl.searchParams.set('payroll_week_start', saveResult.captureWeekStart)
+    if (saveResult.claimedAgainstWeekStart) redirectUrl.searchParams.set('bw_claim_week_start', saveResult.claimedAgainstWeekStart)
+
+    const rewrittenSnapshot = {
+      ...originalSnapshot,
+      staff_id: originalSnapshot.staff_id || (hydratedStaffId ? String(hydratedStaffId) : ''),
+      payroll_week_start: saveResult.captureWeekStart,
+      bw_claim_week_start: saveResult.claimedAgainstWeekStart,
+      missed_previous_week: '1',
+      bw_missed_shift_mode: '1',
+      _direct_save: saveResult.status,
+      _inserted_id: String(saveResult.insertedId || ''),
+    }
+
+    await captureWagesDebug(c.env, {
+      request_path: incomingUrl.pathname + incomingUrl.search,
+      request_method: (c.req.raw.method || 'POST').toUpperCase(),
+      original_payload_json: JSON.stringify(originalSnapshot),
+      rewritten_payload_json: JSON.stringify(rewrittenSnapshot),
+      rewrite_applied: 1,
+      response_status: 302,
+      response_location: redirectUrl.pathname + redirectUrl.search,
+      response_error_text: '',
+    })
+
+    return new Response(null, {
+      status: 302,
+      headers: {
+        location: redirectUrl.pathname + redirectUrl.search,
+        'cache-control': 'no-store, no-cache, must-revalidate, max-age=0',
+        pragma: 'no-cache',
+        expires: '0',
+      },
+    })
+  } catch (err) {
+    await captureWagesDebug(c.env, {
+      request_path: incomingUrl.pathname + incomingUrl.search,
+      request_method: (c.req.raw.method || 'POST').toUpperCase(),
+      original_payload_json: JSON.stringify(originalSnapshot),
+      rewritten_payload_json: JSON.stringify({
+        ...originalSnapshot,
+        _direct_save_error: '1',
+      }),
+      rewrite_applied: 1,
+      response_status: 500,
+      response_location: '',
+      response_error_text: describeProxyError(err),
+    })
+    throw err
   }
-
-  await captureWagesDebug(c.env, {
-    request_path: incomingUrl.pathname + incomingUrl.search,
-    request_method: (c.req.raw.method || 'POST').toUpperCase(),
-    original_payload_json: JSON.stringify(originalSnapshot),
-    rewritten_payload_json: JSON.stringify(rewrittenSnapshot),
-    rewrite_applied: 1,
-    response_status: 302,
-    response_location: redirectUrl.pathname + redirectUrl.search,
-    response_error_text: '',
-  })
-
-  return new Response(null, {
-    status: 302,
-    headers: {
-      location: redirectUrl.pathname + redirectUrl.search,
-      'cache-control': 'no-store, no-cache, must-revalidate, max-age=0',
-      pragma: 'no-cache',
-      expires: '0',
-    },
-  })
 }
 
 function parseDirectFinalSubmitDraftId(pathname: string) {
@@ -2570,40 +2719,59 @@ async function finalizeWageDraftDirectly(env: Bindings | undefined, draftId: num
 
 async function handleDirectDraftFinalSubmit(c: any, incomingUrl: URL, formData: FormData, draftId: number) {
   const originalSnapshot = { _content_type: c.req.raw.headers.get('content-type') || '(none)', ...extractInterestingFormFields(formData) }
-  const finalizeResult = await finalizeWageDraftDirectly(c.env, draftId, formData)
-  if (!finalizeResult.ok) return null
 
-  const redirectUrl = new URL('/wages/me', incomingUrl.origin)
-  redirectUrl.searchParams.set('final_submitted', '1')
-  redirectUrl.searchParams.set('draft_id', String(draftId))
+  try {
+    const finalizeResult = await finalizeWageDraftDirectly(c.env, draftId, formData)
+    if (!finalizeResult.ok) return null
 
-  const rewrittenSnapshot = {
-    ...originalSnapshot,
-    _direct_final_submit: '1',
-    _draft_id: String(draftId),
-    _submitted_at: finalizeResult.submittedAt,
+    const redirectUrl = new URL('/wages/me', incomingUrl.origin)
+    redirectUrl.searchParams.set('final_submitted', '1')
+    redirectUrl.searchParams.set('draft_id', String(draftId))
+
+    const rewrittenSnapshot = {
+      ...originalSnapshot,
+      _direct_final_submit: '1',
+      _draft_id: String(draftId),
+      _submitted_at: finalizeResult.submittedAt,
+    }
+
+    await captureWagesDebug(c.env, {
+      request_path: incomingUrl.pathname + incomingUrl.search,
+      request_method: (c.req.raw.method || 'POST').toUpperCase(),
+      original_payload_json: JSON.stringify(originalSnapshot),
+      rewritten_payload_json: JSON.stringify(rewrittenSnapshot),
+      rewrite_applied: 1,
+      response_status: 302,
+      response_location: redirectUrl.pathname + redirectUrl.search,
+      response_error_text: '',
+    })
+
+    return new Response(null, {
+      status: 302,
+      headers: {
+        location: redirectUrl.pathname + redirectUrl.search,
+        'cache-control': 'no-store, no-cache, must-revalidate, max-age=0',
+        pragma: 'no-cache',
+        expires: '0',
+      },
+    })
+  } catch (err) {
+    await captureWagesDebug(c.env, {
+      request_path: incomingUrl.pathname + incomingUrl.search,
+      request_method: (c.req.raw.method || 'POST').toUpperCase(),
+      original_payload_json: JSON.stringify(originalSnapshot),
+      rewritten_payload_json: JSON.stringify({
+        ...originalSnapshot,
+        _direct_final_submit_error: '1',
+        _draft_id: String(draftId),
+      }),
+      rewrite_applied: 1,
+      response_status: 500,
+      response_location: '',
+      response_error_text: describeProxyError(err),
+    })
+    throw err
   }
-
-  await captureWagesDebug(c.env, {
-    request_path: incomingUrl.pathname + incomingUrl.search,
-    request_method: (c.req.raw.method || 'POST').toUpperCase(),
-    original_payload_json: JSON.stringify(originalSnapshot),
-    rewritten_payload_json: JSON.stringify(rewrittenSnapshot),
-    rewrite_applied: 1,
-    response_status: 302,
-    response_location: redirectUrl.pathname + redirectUrl.search,
-    response_error_text: '',
-  })
-
-  return new Response(null, {
-    status: 302,
-    headers: {
-      location: redirectUrl.pathname + redirectUrl.search,
-      'cache-control': 'no-store, no-cache, must-revalidate, max-age=0',
-      pragma: 'no-cache',
-      expires: '0',
-    },
-  })
 }
 
 function shouldCaptureWagesDebug(incomingUrl: URL, formData: FormData) {

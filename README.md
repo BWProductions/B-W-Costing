@@ -46,6 +46,9 @@ Internal ops platform for B&W Productions CC. Built on Cloudflare Pages + Hono +
 - Previous-payroll rollback no longer shows the locked-payroll worker warning in the unified entry flow; the proxy/open-page handoff keeps staff on the single entry screen while backend review still marks the entry as a missed shift for office checks only.
 - When the upstream worker app still tries to reject a previous-payroll temporary/final save, the proxy now writes the missed shift directly into the shared wages D1 table under the current payroll week so it reappears in worker/admin lists while preserving backend conflict review metadata.
 - Added a direct proxy fallback for `POST /wages/drafts/:id/final-submit` so worker final submissions no longer crash with **Internal Server Error** when the upstream endpoint fails; the draft is marked `submitted` in the shared wages D1 table and the worker is redirected back into the wages flow.
+- Fixed the mobile/shared-device staff-context bug by persisting the active staff ID separately, appending `bw_staff_id` across rewritten wages links/forms, hydrating missing `staff_id` values from query/referer on the backend, and redirecting successful direct saves back to `/wages/me` instead of dumping workers back onto the blank add-shift form.
+- Fixed the live D1 overlap-review trigger so overlapping missed shifts no longer crash with a 500 before save; backend review rows now use the valid `possible_duplicate_manual_check` warning kind while workers still stay unblocked and the office still sees the manual overlap review details.
+- Added direct-save/direct-final-submit error capture into `wage_debug_capture` so future worker save failures are visible even when the fallback path itself throws.
 
 ## Phase 1 Foundation (completed)
 - `company_settings` table — single-row company details (legal name, VAT, registration, address, contact)
