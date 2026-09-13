@@ -206,6 +206,7 @@ body.bw-missed-mode .card,
 body.bw-missed-mode .form-card,
 body.bw-missed-mode .shift,
 body.bw-missed-mode form {
+  background: linear-gradient(180deg, #fff1f1 0%, #ffeded 100%) !important;
   border-color: rgba(185, 28, 28, 0.22) !important;
   box-shadow: 0 14px 32px rgba(185, 28, 28, 0.08) !important;
 }
@@ -266,6 +267,31 @@ label[for="bw-missed-work-date"] {
 @media (max-width: 560px) {
   .bw-final-submit-panel__row { align-items: stretch; }
   .bw-final-submit-go, .bw-last-payroll-btn { width: 100% !important; }
+  .submit-bar,
+  .submit-bar .btn,
+  .submit-bar,
+  .submit-bar .btn,
+  .draft-actions,
+  .actions,
+  .bw-shift-actions-row,
+  .bw-shift-actions-row .btn,
+  .bw-save-temp-btn,
+  .bw-final-submit-btn {
+    position: static !important;
+    inset: auto !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    transform: none !important;
+    z-index: auto !important;
+  }
+  .submit-bar {
+    padding-top: 0 !important;
+  }
+  .submit-bar .btn {
+    box-shadow: inherit !important;
+  }
 }
 </style>
 <script>
@@ -460,6 +486,7 @@ label[for="bw-missed-work-date"] {
         }
       }
       if (/save shift temporarily/i.test(text)) el.classList.add('bw-save-temp-btn')
+      if (/final submit|final submission/i.test(text)) el.classList.add('bw-final-submit-btn')
       if (onShiftEntryPage && /miss(ed)? shift|missshift/i.test(text)) {
         el.classList.add('bw-miss-shift-btn')
         if (once(el, 'MissShiftMode')) {
@@ -543,14 +570,23 @@ label[for="bw-missed-work-date"] {
     if (!row.contains(addButton)) row.appendChild(addButton)
   }
 
+  function isPayrollWeekField(field) {
+    if (!(field instanceof HTMLInputElement)) return false
+    const key = normalize(field.name || field.id || '').toLowerCase()
+    if (key === 'work_date' || key === 'bw_visible_work_date' || key === 'date_worked') return false
+    if (key.includes('payroll_week') || key.includes('week_start') || key.includes('pay_week')) return true
+    if (key.includes('week')) return true
+    return false
+  }
+
   function findPayrollWeekField() {
     const labels = Array.from(document.querySelectorAll('label')).filter((label) => elementText(label).toLowerCase() === 'view payroll week')
     for (const label of labels) {
       const container = label.parentElement || label.closest('.period-filter') || label.parentElement
-      const field = container?.querySelector('input')
+      const field = Array.from(container?.querySelectorAll('input') || []).find((candidate) => isPayrollWeekField(candidate))
       if (field) return field
     }
-    return document.querySelector('input[name="payroll_week_start"], input[id="payroll_week_start"], input[type="date"], input[name*="week"], input[id*="week"]')
+    return Array.from(document.querySelectorAll('input')).find((field) => isPayrollWeekField(field)) || null
   }
 
   function unlockPayrollWeekPicker() {
@@ -602,7 +638,8 @@ label[for="bw-missed-work-date"] {
   }
 
   function resolveClaimWeekStart(field, hiddenField) {
-    const current = parseFlexibleDate(field?.value || field?.getAttribute('value') || hiddenField?.value || getStoredClaimWeek()) || utcToday()
+    const fieldValue = isPayrollWeekField(field) ? (field?.value || field?.getAttribute('value') || '') : ''
+    const current = parseFlexibleDate(fieldValue || hiddenField?.value || getStoredClaimWeek()) || utcToday()
     return formatForInput(startOfPayrollWeek(current), false)
   }
 
@@ -617,6 +654,13 @@ label[for="bw-missed-work-date"] {
       cursor.setUTCDate(cursor.getUTCDate() + 1)
     }
     return dates
+  }
+
+  function clampDateToRange(date, minDate, maxDate) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return new Date(minDate.getTime())
+    if (date.getTime() < minDate.getTime()) return new Date(minDate.getTime())
+    if (date.getTime() > maxDate.getTime()) return new Date(maxDate.getTime())
+    return date
   }
 
   function getMissedShiftWindow(activePayrollWeekStart) {
@@ -650,27 +694,46 @@ label[for="bw-missed-work-date"] {
   function widenMissedShiftDateChoices(workDateField, activePayrollWeekStart) {
     const windowConfig = getMissedShiftWindow(activePayrollWeekStart)
     if (workDateField instanceof HTMLSelectElement) {
-      const current = parseFlexibleDate(workDateField.value || workDateField.selectedOptions?.[0]?.textContent || '')
+      const current = parseFlexibleDate(workDateField.value || workDateField.dataset.bwInitialValue || workDateField.selectedOptions?.[0]?.textContent || '')
       const currentValue = current ? formatForInput(current, false) : ''
       const placeholderText = workDateField.dataset.bwPlaceholderText || 'Date worked — select exact date missed'
+      const signature = windowConfig.previousPayrollStart.getTime() + '|' + windowConfig.rangeEnd.getTime() + '|' + windowConfig.dates.length
       workDateField.dataset.bwPlaceholderText = placeholderText
-      workDateField.innerHTML = ''
-      const placeholder = document.createElement('option')
-      placeholder.value = ''
-      placeholder.textContent = placeholderText
-      workDateField.appendChild(placeholder)
-      windowConfig.dates.forEach((entry) => {
-        const option = document.createElement('option')
-        option.value = entry.value
-        option.textContent = entry.label
-        workDateField.appendChild(option)
-      })
-      workDateField.value = windowConfig.dates.some((entry) => entry.value === currentValue) ? currentValue : ''
+      if (workDateField.dataset.bwDateOptionsSignature !== signature) {
+        workDateField.innerHTML = ''
+        const placeholder = document.createElement('option')
+        placeholder.value = ''
+        placeholder.textContent = placeholderText
+        workDateField.appendChild(placeholder)
+        windowConfig.dates.forEach((entry) => {
+          const option = document.createElement('option')
+          option.value = entry.value
+          option.textContent = entry.label
+          workDateField.appendChild(option)
+        })
+        workDateField.dataset.bwDateOptionsSignature = signature
+      }
+      workDateField.value = windowConfig.dates.some((entry) => entry.value === currentValue) ? currentValue : formatForInput(windowConfig.previousPayrollStart, false)
+      workDateField.dataset.bwInitialValue = workDateField.value || currentValue || ''
       return
     }
     if (workDateField instanceof HTMLInputElement && workDateField.type === 'date') {
-      workDateField.min = formatForInput(windowConfig.previousPayrollStart, false)
-      workDateField.max = formatForInput(windowConfig.rangeEnd, false)
+      const minValue = formatForInput(windowConfig.previousPayrollStart, false)
+      const maxValue = formatForInput(windowConfig.rangeEnd, false)
+      const syncDateBounds = () => {
+        const current = parseFlexibleDate(workDateField.value || workDateField.getAttribute('value') || '')
+        const safeValue = formatForInput(current ? clampDateToRange(current, windowConfig.previousPayrollStart, windowConfig.rangeEnd) : windowConfig.previousPayrollStart, false)
+        workDateField.min = minValue
+        workDateField.max = maxValue
+        workDateField.setAttribute('min', minValue)
+        workDateField.setAttribute('max', maxValue)
+        if (!workDateField.value || workDateField.value !== safeValue) workDateField.value = safeValue
+      }
+      syncDateBounds()
+      if (once(workDateField, 'MissedDateBounds')) {
+        workDateField.addEventListener('input', syncDateBounds)
+        workDateField.addEventListener('change', syncDateBounds)
+      }
     }
   }
 
@@ -899,6 +962,51 @@ label[for="bw-missed-work-date"] {
     return { visibleField, hiddenField: syncedHidden }
   }
 
+  function convertMissedWorkDateFieldToSelect(form, binding) {
+    const visibleField = binding?.visibleField
+    if (visibleField instanceof HTMLSelectElement) return binding
+    if (!(visibleField instanceof HTMLInputElement) || visibleField.type !== 'date') return binding
+
+    let hiddenField = binding.hiddenField
+    if (!(hiddenField instanceof HTMLInputElement)) {
+      hiddenField = ensureHiddenField(form, 'work_date')
+    }
+
+    const wrapper = visibleField.closest('.bw-date-worked-wrap') || visibleField.parentElement
+    if (!(wrapper instanceof HTMLElement)) return binding
+
+    const initialValue = normalize(hiddenField.value || visibleField.value || visibleField.getAttribute('value') || '')
+    const select = document.createElement('select')
+    select.name = 'bw_visible_work_date'
+    select.className = visibleField.className || 'bw-visible-work-date'
+    if (visibleField.id) {
+      select.id = visibleField.id
+      visibleField.removeAttribute('id')
+    }
+
+    if (hiddenField === visibleField) {
+      hiddenField.type = 'hidden'
+      hiddenField.classList.add('bw-hidden-restored-source')
+      hiddenField.value = initialValue
+      hiddenField.removeAttribute('min')
+      hiddenField.removeAttribute('max')
+      hiddenField.insertAdjacentElement('beforebegin', select)
+    } else {
+      visibleField.insertAdjacentElement('beforebegin', select)
+      visibleField.remove()
+      if (initialValue && !hiddenField.value) hiddenField.value = initialValue
+    }
+
+    if (once(select, 'WorkDateMirror')) {
+      if (initialValue) select.dataset.bwInitialValue = initialValue
+      const syncToHidden = () => { hiddenField.value = select.value || '' }
+      select.addEventListener('input', syncToHidden)
+      select.addEventListener('change', syncToHidden)
+    }
+
+    return { visibleField: select, hiddenField }
+  }
+
   function emphasizeDateWorkedField(workDateField) {
     if (!workDateField) return
     workDateField.classList.add('bw-work-date-field')
@@ -1124,7 +1232,7 @@ label[for="bw-missed-work-date"] {
     }
     if (workTypeField instanceof HTMLInputElement) {
       const originalField = workTypeField
-      const select = buildSyncedSelect(form, originalField.name || 'work_type', originalField, options, 'Work type / role', 'Select work type')
+      const select = buildSyncedSelect(form, originalField.name || 'work_type', originalField, options, 'Work type', 'Select work type')
       if (originalField.value && !select.value) select.value = originalField.value
       if (once(originalField, 'SourceToSelectWorkType')) {
         const syncToSource = () => { originalField.value = select.value || '' }
@@ -1135,7 +1243,59 @@ label[for="bw-missed-work-date"] {
       hideOriginalFieldArtifacts(form, originalField)
       return select
     }
-    return buildSyncedSelect(form, 'work_type', anchorField, options, 'Work type / role', 'Select work type')
+    return buildSyncedSelect(form, 'work_type', anchorField, options, 'Work type', 'Select work type')
+  }
+
+  function workTypeFieldLabelNodes(form, field) {
+    const labels = []
+    if (!field) return labels
+    if (field.id) {
+      form.querySelectorAll('label[for="' + field.id + '"]').forEach((label) => labels.push(label))
+    }
+    const previousLabel = field.previousElementSibling
+    if (previousLabel instanceof HTMLLabelElement) labels.push(previousLabel)
+    const wrapperLabel = field.closest('.bw-field-shell, .field, .row, div')?.querySelector('label')
+    if (wrapperLabel instanceof HTMLLabelElement) labels.push(wrapperLabel)
+    return Array.from(new Set(labels))
+  }
+
+  function fieldLooksLikeWorkType(form, field) {
+    if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement)) return false
+    if (field instanceof HTMLInputElement && (field.type === 'hidden' || field.type === 'date' || field.type === 'time')) return false
+    const nameKey = normalize(field.name || field.id || '').toLowerCase()
+    if (/(^|_)(work_type|role_worked)(_|$)/.test(nameKey)) return true
+    const placeholder = normalize(field.getAttribute('placeholder') || '').toLowerCase()
+    const hints = ['choose work type', 'select work type', 'work type', 'work type / role']
+    if (hints.some((hint) => placeholder.includes(hint))) return true
+    const labels = workTypeFieldLabelNodes(form, field).map((label) => elementText(label).toLowerCase())
+    if (labels.some((label) => hints.some((hint) => label.includes(hint)))) return true
+    if (field instanceof HTMLSelectElement) {
+      const optionTexts = Array.from(field.options).map((option) => normalize(option.textContent || option.value || '').toLowerCase())
+      if (optionTexts.some((text) => text.includes('choose work type') || text.includes('select work type'))) return true
+    }
+    return false
+  }
+
+  function removeDuplicateWorkTypeFields(form, keepField) {
+    if (!(keepField instanceof HTMLElement)) return
+    workTypeFieldLabelNodes(form, keepField).forEach((label) => {
+      label.textContent = 'Work type'
+      label.classList.remove('bw-hidden-original-label')
+    })
+    Array.from(form.querySelectorAll('select, input'))
+      .filter((field) => field !== keepField && fieldLooksLikeWorkType(form, field) && isVisibleElement(field))
+      .forEach((field) => {
+        workTypeFieldLabelNodes(form, field).forEach((label) => {
+          if (!keepField.contains(label)) label.remove()
+        })
+        const wrapper = field.closest('.bw-work-type-wrap, .bw-role-worked-wrap, .bw-field-shell')
+        const keepWrapper = keepField.closest('.bw-work-type-wrap, .bw-role-worked-wrap, .bw-field-shell')
+        if (wrapper instanceof HTMLElement && wrapper !== keepWrapper) {
+          wrapper.remove()
+          return
+        }
+        field.remove()
+      })
   }
 
   function ensureVenueSuggestions(venueField, workTypeOptions) {
@@ -1242,7 +1402,8 @@ label[for="bw-missed-work-date"] {
       const scope = resolveMissedShiftScope(form)
       const venueField = firstField(form, ['input[name="outlet_venue"]', 'input[name="venue_name"]', 'input[name="venue"]', 'input[id="outlet_venue"]', 'input[id="venue_name"]', 'input[id="venue"]'])
       const isMissedModeActive = isMissedShiftModeActive(scope, form)
-      const workDateBinding = ensureVisibleWorkDateField(form, venueField, isMissedModeActive)
+      let workDateBinding = ensureVisibleWorkDateField(form, venueField, isMissedModeActive)
+      if (isMissedModeActive) workDateBinding = convertMissedWorkDateFieldToSelect(form, workDateBinding)
       const workDateField = workDateBinding.visibleField
       removeTopMissedShiftDateSelector(scope, workDateField)
       removeDuplicateWorkDateControls(scope, workDateField)
@@ -1250,6 +1411,7 @@ label[for="bw-missed-work-date"] {
       const descriptionField = firstField(form, ['textarea[name="work_description"]', 'input[name="work_description"]', 'textarea[name="details"]', 'input[name="details"]', 'textarea'])
       const rawWorkTypeField = firstField(form, ['select[name="work_type"]', 'input[name="work_type"]', 'select[name="role_worked"]', 'input[name="role_worked"]'])
       const workTypeField = restoreWorkTypeField(form, rawWorkTypeField, descriptionField || venueField || workDateField)
+      removeDuplicateWorkTypeFields(form, workTypeField)
       const startField = firstField(form, ['input[name="start_time"]', 'input[name="start"]', 'input[id="start_time"]', 'input[id="start-time"]', 'input[type="time"]'])
       const endField = firstField(form, ['input[name="end_time"]', 'input[name="finish_time"]', 'input[name="finish"]', 'input[id="end_time"]', 'input[id="finish_time"]'])
 
