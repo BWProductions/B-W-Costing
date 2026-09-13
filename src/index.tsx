@@ -590,65 +590,15 @@ label[for="bw-missed-work-date"] {
       if (/save shift temporarily/i.test(text)) el.classList.add('bw-save-temp-btn')
       if (/final submit|final submission/i.test(text)) el.classList.add('bw-final-submit-btn')
       if (onShiftEntryPage && /miss(ed)? shift|missshift/i.test(text)) {
-        el.classList.add('bw-miss-shift-btn')
-        if (once(el, 'MissShiftMode')) {
-          el.addEventListener('click', () => {
-            setStoredMissedMode(true)
-            document.documentElement.classList.add('bw-missed-mode')
-            document.body.classList.add('bw-missed-mode')
-            const pageHeading = document.querySelector('main h1, .shell h1, h1')
-            if (pageHeading) pageHeading.textContent = 'Add a missed shift'
-            const pageSubtitle = Array.from(document.querySelectorAll('main p, .shell p, p')).find((node) => /save it temporarily while you work|final submission|current shift|missed shift/i.test(elementText(node)))
-            if (pageSubtitle) pageSubtitle.textContent = 'You are capturing a missed shift. Fill in the exact date worked and complete the details below.'
-          })
-        }
+        if (el instanceof HTMLElement) el.style.display = 'none'
       }
     })
   }
 
   function ensureFrontPageMissShiftButton() {
-    if (!isWagesHomePage()) {
-      document.querySelectorAll('.bw-home-miss-shift-btn').forEach((node) => node.remove())
-      document.querySelectorAll('.bw-home-shift-stack').forEach((node) => {
-        if (!node.querySelector('.bw-home-miss-shift-btn') && !node.children.length) node.remove()
-      })
-      return
-    }
-
-    const addButton = visibleActionElements().find((el) => isAddShiftAction(elementText(el)) && !el.closest('form'))
-    if (!addButton) return
-
-    let stack = document.querySelector('.bw-home-shift-stack')
-    if (!(stack instanceof HTMLElement)) {
-      stack = document.createElement('div')
-      stack.className = 'bw-home-shift-stack'
-      addButton.parentElement?.insertBefore(stack, addButton)
-      stack.appendChild(addButton)
-    } else if (!stack.contains(addButton)) {
-      stack.prepend(addButton)
-    }
-
-    let missButton = stack.querySelector('.bw-home-miss-shift-btn')
-    if (!missButton) {
-      missButton = document.createElement('button')
-      missButton.type = 'button'
-      missButton.className = 'btn bw-miss-shift-btn bw-home-miss-shift-btn'
-      missButton.textContent = 'Add a missed shift'
-      stack.appendChild(missButton)
-    }
-
-    if (!once(missButton, 'FrontPageMissShift')) return
-    missButton.addEventListener('click', (event) => {
-      event.preventDefault()
-      setStoredMissedMode(true)
-      if (addButton instanceof HTMLAnchorElement && addButton.href) {
-        const targetUrl = new URL(addButton.href, window.location.origin)
-        targetUrl.searchParams.set('bw_missed', '1')
-        window.location.href = targetUrl.toString()
-        return
-      }
-      window.__bwLaunchMode = 'missed'
-      addButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    document.querySelectorAll('.bw-home-miss-shift-btn').forEach((node) => node.remove())
+    document.querySelectorAll('.bw-home-shift-stack').forEach((node) => {
+      if (!node.children.length) node.remove()
     })
   }
 
@@ -741,6 +691,10 @@ label[for="bw-missed-work-date"] {
 
   function currentPayrollWeekStartValue() {
     return formatForInput(startOfPayrollWeek(utcToday()), false)
+  }
+
+  function selectedClaimWeekStartValue(field) {
+    return resolveClaimWeekStart(field, null) || getStoredClaimWeek() || currentPayrollWeekStartValue()
   }
 
   function syncPayrollWeekFieldValue(field, value) {
@@ -1136,37 +1090,24 @@ label[for="bw-missed-work-date"] {
   function ensureMissedShiftHeading(scope, form, isActive) {
     const pageHeading = document.querySelector('main h1, .shell h1, h1')
     if (pageHeading) {
-      pageHeading.textContent = isActive ? 'Add a missed shift' : 'Add a current shift'
+      pageHeading.textContent = 'Add a shift'
     }
 
     const pageSubtitle = Array.from(document.querySelectorAll('main p, .shell p, p')).find((node) => /save it temporarily while you work|final submission|current shift|missed shift/i.test(elementText(node)))
     if (pageSubtitle) {
-      pageSubtitle.textContent = isActive
-        ? 'You are on the missed shift page. Fill in the exact date worked and complete the details below.'
-        : 'Save it temporarily while you work, or continue to Final Submission when every detail is correct.'
+      pageSubtitle.textContent = 'Choose the exact date worked. Previous-payroll dates are treated automatically as missed shifts.'
     }
 
-    let banner = form.querySelector('.bw-missed-mode-banner')
-    if (isActive) {
-      if (!banner) {
-        banner = document.createElement('div')
-        banner.className = 'bw-missed-mode-banner'
-        banner.textContent = 'Missed shift page — select the date you missed'
-        form.insertBefore(banner, form.firstChild)
-      }
-    } else if (banner) {
-      banner.remove()
-    }
+    form.querySelectorAll('.bw-missed-mode-banner').forEach((banner) => banner.remove())
 
     const textTargets = Array.from((scope || form).querySelectorAll('h1, h2, h3, h4, legend, .eyebrow, .title, .bw-missed-heading')).filter((node) => /miss ?shift|missshift/i.test(elementText(node)))
     textTargets.forEach((node) => {
       if (node === pageHeading) return
-      if (isActive) return
       node.remove()
     })
 
-    document.documentElement.classList.toggle('bw-missed-mode', !!isActive)
-    document.body.classList.toggle('bw-missed-mode', !!isActive)
+    document.documentElement.classList.remove('bw-missed-mode')
+    document.body.classList.remove('bw-missed-mode')
   }
 
   function isMissedShiftModeActive(scope, form) {
@@ -1447,13 +1388,13 @@ label[for="bw-missed-work-date"] {
   }
 
   function syncMissedShiftMetadata(payload) {
-    const currentClaimWeekStart = currentPayrollWeekStartValue()
-    const windowConfig = getMissedShiftWindow(currentClaimWeekStart)
-    setStoredClaimWeek(currentClaimWeekStart)
-    syncPayrollWeekFieldValue(payload.claimWeekField, currentClaimWeekStart)
-    syncPayrollWeekFields(payload.form, currentClaimWeekStart)
-    widenMissedShiftDateChoices(payload.workDateField, currentClaimWeekStart)
-    rewriteMissedShiftRestrictionText(payload.scope, currentClaimWeekStart)
+    const captureWeekStart = currentPayrollWeekStartValue()
+    const selectedClaimWeek = selectedClaimWeekStartValue(payload.claimWeekField)
+    const windowConfig = getMissedShiftWindow(captureWeekStart)
+    setStoredClaimWeek(selectedClaimWeek)
+    syncPayrollWeekFieldValue(payload.claimWeekField, selectedClaimWeek)
+    widenMissedShiftDateChoices(payload.workDateField, captureWeekStart)
+    rewriteMissedShiftRestrictionText(payload.scope, captureWeekStart)
 
     const selectedWorkDateValue = normalize(payload.workDateField?.value || payload.workDateField?.getAttribute('value') || payload.workDateHidden?.value || '')
     if (payload.workDateHidden) {
@@ -1462,9 +1403,8 @@ label[for="bw-missed-work-date"] {
     }
     const workDate = parseFlexibleDate(selectedWorkDateValue)
     const isPrevious = !!(workDate && workDate.getTime() < windowConfig.currentPayrollStart.getTime())
-    const selectedClaimWeek = currentClaimWeekStart
-    payload.claimWeekHidden.value = selectedClaimWeek
-    payload.claimWeekHidden.setAttribute('value', selectedClaimWeek)
+    payload.claimWeekHidden.value = captureWeekStart
+    payload.claimWeekHidden.setAttribute('value', captureWeekStart)
     payload.previousPayrollHidden.value = isPrevious ? '1' : '0'
     payload.previousPayrollHidden.setAttribute('value', payload.previousPayrollHidden.value)
     if (payload.actualWorkDateHidden) {
@@ -1481,7 +1421,8 @@ label[for="bw-missed-work-date"] {
     }
 
     const reviewBits = []
-    if (payload.claimWeekHidden.value) reviewBits.push('Claimed against payroll week ' + payload.claimWeekHidden.value + '.')
+    if (selectedClaimWeek) reviewBits.push('Claimed against payroll week ' + selectedClaimWeek + '.')
+    if (captureWeekStart) reviewBits.push('Captured under current payroll week ' + captureWeekStart + '.')
     if (workDate) reviewBits.push('Exact work date ' + formatForInput(workDate, false) + '.')
     if (payload.venueField?.value) reviewBits.push('Venue ' + payload.venueField.value + '.')
     if (payload.workTypeField?.value) reviewBits.push('Work type / role ' + payload.workTypeField.value + '.')
@@ -1519,10 +1460,14 @@ label[for="bw-missed-work-date"] {
 
   function enhanceMissedShiftForms() {
     const claimWeekField = findPayrollWeekField()
+    let autoMissedByPayrollRollback = false
     if (claimWeekField) {
       const syncStoredWeek = () => {
         const claimWeekStart = resolveClaimWeekStart(claimWeekField, null)
         if (claimWeekStart) setStoredClaimWeek(claimWeekStart)
+        const selectedClaimWeek = parseFlexibleDate(claimWeekStart)
+        const livePayrollWeek = parseFlexibleDate(currentPayrollWeekStartValue())
+        autoMissedByPayrollRollback = !!(selectedClaimWeek && livePayrollWeek && selectedClaimWeek.getTime() < livePayrollWeek.getTime())
       }
       if (once(claimWeekField, 'ClaimWeekPersist')) {
         claimWeekField.addEventListener('input', syncStoredWeek)
@@ -1535,11 +1480,11 @@ label[for="bw-missed-work-date"] {
 
     Array.from(document.querySelectorAll('form')).forEach((form) => {
       removeBrokenMissedShiftPanel(form)
-      if (!isMissedShiftForm(form) && !(pendingMissedMode && looksLikeShiftEntryForm(form))) return
+      if (!isMissedShiftForm(form) && !(pendingMissedMode && looksLikeShiftEntryForm(form)) && !(autoMissedByPayrollRollback && looksLikeShiftEntryForm(form))) return
 
       const scope = resolveMissedShiftScope(form)
       const venueField = firstField(form, ['input[name="outlet_venue"]', 'input[name="venue_name"]', 'input[name="venue"]', 'input[id="outlet_venue"]', 'input[id="venue_name"]', 'input[id="venue"]'])
-      const isMissedModeActive = isMissedShiftModeActive(scope, form)
+      const isMissedModeActive = autoMissedByPayrollRollback || isMissedShiftModeActive(scope, form)
       let workDateBinding = ensureVisibleWorkDateField(form, venueField, isMissedModeActive)
       if (isMissedModeActive) workDateBinding = convertMissedWorkDateFieldToSelect(form, workDateBinding)
       const workDateField = workDateBinding.visibleField
@@ -1973,6 +1918,28 @@ function findObjectFieldValue(snapshot: Record<string, string>, matcher: (path: 
   return foundKey ? normalizeProxyFieldValue(snapshot[foundKey]) : ''
 }
 
+function objectKeyLooksLikeClaimWeekMarker(path: string) {
+  return proxyObjectPathTail(path) === 'bw_claim_week_start'
+}
+
+function findSnapshotClaimWeekStart(snapshot: Record<string, string>) {
+  return findObjectFieldValue(snapshot, objectKeyLooksLikeClaimWeekMarker)
+    || findObjectFieldValue(snapshot, (path) => formKeyLooksLikeClaimWeek(proxyObjectPathTail(path)) && !objectKeyLooksLikeClaimWeekMarker(path))
+    || currentProxyPayrollWeekStart()
+}
+
+function findFormClaimWeekStart(formData: FormData) {
+  const explicitClaimWeek = normalizeProxyFieldValue(formData.get('bw_claim_week_start'))
+  if (explicitClaimWeek) return explicitClaimWeek
+  for (const key of Array.from(new Set(Array.from(formData.keys())))) {
+    if (key === 'bw_claim_week_start') continue
+    if (!formKeyLooksLikeClaimWeek(key)) continue
+    const value = normalizeProxyFieldValue(formData.get(key))
+    if (value) return value
+  }
+  return currentProxyPayrollWeekStart()
+}
+
 function shouldRewriteMissedShiftObjectPayload(snapshot: Record<string, string>) {
   const explicitMarker = findObjectFieldValue(snapshot, objectKeyLooksLikeMissedMode) === '1'
   const previousPayrollFlag = findObjectFieldValue(snapshot, objectKeyLooksLikeMissedFlag) === '1'
@@ -1989,11 +1956,12 @@ function shouldRewriteMissedShiftObjectPayload(snapshot: Record<string, string>)
 function rewriteMissedShiftObjectPayload(payload: unknown, upstreamUrl: URL) {
   if (!payload || typeof payload !== 'object') return
   const snapshot = extractInterestingObjectFields(payload)
-  const claimWeekStart = findObjectFieldValue(snapshot, (path) => proxyObjectPathTail(path) === 'bw_claim_week_start') || currentProxyPayrollWeekStart()
-  const claimWeekDate = parseProxyIsoDate(claimWeekStart)
+  const captureWeekStart = currentProxyPayrollWeekStart()
+  const claimedAgainstWeekStart = findSnapshotClaimWeekStart(snapshot)
+  const captureWeekDate = parseProxyIsoDate(captureWeekStart)
   const actualWorkDateValue = findObjectFieldValue(snapshot, objectKeyLooksLikeActualWorkDate)
   const actualWorkDateParsed = parseProxyIsoDate(actualWorkDateValue)
-  const isPreviousPayroll = !!(claimWeekDate && actualWorkDateParsed && actualWorkDateParsed.getTime() < claimWeekDate.getTime())
+  const isPreviousPayroll = !!(captureWeekDate && actualWorkDateParsed && actualWorkDateParsed.getTime() < captureWeekDate.getTime())
 
   const rewriteNode = (value: unknown) => {
     if (Array.isArray(value)) {
@@ -2010,8 +1978,12 @@ function rewriteMissedShiftObjectPayload(payload: unknown, upstreamUrl: URL) {
         ;(value as Record<string, unknown>)[key] = '1'
         return
       }
+      if (objectKeyLooksLikeClaimWeekMarker(key)) {
+        ;(value as Record<string, unknown>)[key] = claimedAgainstWeekStart
+        return
+      }
       if (formKeyLooksLikeClaimWeek(key)) {
-        ;(value as Record<string, unknown>)[key] = claimWeekStart
+        ;(value as Record<string, unknown>)[key] = captureWeekStart
         return
       }
       if (objectKeyLooksLikeActualWorkDate(key) && actualWorkDateValue) {
@@ -2025,8 +1997,8 @@ function rewriteMissedShiftObjectPayload(payload: unknown, upstreamUrl: URL) {
   rewriteNode(payload)
 
   Array.from(new Set(Array.from(upstreamUrl.searchParams.keys()))).forEach((key) => {
-    if (formKeyLooksLikeClaimWeek(key)) {
-      upstreamUrl.searchParams.set(key, claimWeekStart)
+    if (key !== 'bw_claim_week_start' && formKeyLooksLikeClaimWeek(key)) {
+      upstreamUrl.searchParams.set(key, captureWeekStart)
     }
   })
 }
@@ -2035,12 +2007,24 @@ function shouldRewriteMissedShiftSubmission(formData: FormData) {
   const explicitMarker = normalizeProxyFieldValue(formData.get('bw_missed_shift_mode')) === '1'
   const previousPayrollFlag = normalizeProxyFieldValue(formData.get('missed_previous_week')) === '1'
   const note = normalizeProxyFieldValue(formData.get('payroll_note'))
-  return explicitMarker || previousPayrollFlag || /belongs to previous payroll:\s*yes/i.test(note)
+  const actualWorkDateValue = normalizeProxyFieldValue(formData.get('bw_actual_work_date'))
+    || normalizeProxyFieldValue(formData.get('date_worked'))
+    || normalizeProxyFieldValue(formData.get('actual_work_date'))
+    || normalizeProxyFieldValue(formData.get('physical_work_date'))
+    || normalizeProxyFieldValue(formData.get('exact_work_date'))
+    || normalizeProxyFieldValue(formData.get('work_date'))
+    || normalizeProxyFieldValue(formData.get('bw_visible_work_date'))
+  const actualWorkDateParsed = parseProxyIsoDate(actualWorkDateValue)
+  const currentClaimWeekParsed = parseProxyIsoDate(currentProxyPayrollWeekStart())
+  const hasShiftTimes = !!normalizeProxyFieldValue(formData.get('start_time')) || !!normalizeProxyFieldValue(formData.get('end_time'))
+  const looksLikePreviousPayrollShift = !!(actualWorkDateParsed && currentClaimWeekParsed && actualWorkDateParsed.getTime() < currentClaimWeekParsed.getTime() && hasShiftTimes)
+  return explicitMarker || previousPayrollFlag || /belongs to previous payroll:\s*yes/i.test(note) || looksLikePreviousPayrollShift
 }
 
 function rewriteMissedShiftSubmission(formData: FormData, upstreamUrl: URL) {
-  const claimWeekStart = normalizeProxyFieldValue(formData.get('bw_claim_week_start')) || currentProxyPayrollWeekStart()
-  const claimWeekDate = parseProxyIsoDate(claimWeekStart)
+  const captureWeekStart = currentProxyPayrollWeekStart()
+  const claimedAgainstWeekStart = findFormClaimWeekStart(formData)
+  const captureWeekDate = parseProxyIsoDate(captureWeekStart)
   const actualWorkDate = normalizeProxyFieldValue(formData.get('bw_actual_work_date'))
     || normalizeProxyFieldValue(formData.get('date_worked'))
     || normalizeProxyFieldValue(formData.get('actual_work_date'))
@@ -2050,16 +2034,16 @@ function rewriteMissedShiftSubmission(formData: FormData, upstreamUrl: URL) {
     || normalizeProxyFieldValue(formData.get('bw_visible_work_date'))
   const actualWorkDateValue = actualWorkDate || normalizeProxyFieldValue(formData.get('work_date'))
   const actualWorkDateParsed = parseProxyIsoDate(actualWorkDateValue)
-  const isPreviousPayroll = !!(claimWeekDate && actualWorkDateParsed && actualWorkDateParsed.getTime() < claimWeekDate.getTime())
+  const isPreviousPayroll = !!(captureWeekDate && actualWorkDateParsed && actualWorkDateParsed.getTime() < captureWeekDate.getTime())
 
   Array.from(new Set(Array.from(formData.keys()))).forEach((key) => {
-    if (formKeyLooksLikeClaimWeek(key)) {
-      formData.set(key, claimWeekStart)
+    if (key !== 'bw_claim_week_start' && formKeyLooksLikeClaimWeek(key)) {
+      formData.set(key, captureWeekStart)
     }
   })
 
-  formData.set('payroll_week_start', claimWeekStart)
-  formData.set('bw_claim_week_start', claimWeekStart)
+  formData.set('payroll_week_start', captureWeekStart)
+  formData.set('bw_claim_week_start', claimedAgainstWeekStart)
   formData.set('missed_previous_week', isPreviousPayroll ? '1' : '0')
   formData.set('bw_missed_shift_mode', '1')
 
@@ -2074,8 +2058,8 @@ function rewriteMissedShiftSubmission(formData: FormData, upstreamUrl: URL) {
   }
 
   Array.from(new Set(Array.from(upstreamUrl.searchParams.keys()))).forEach((key) => {
-    if (formKeyLooksLikeClaimWeek(key)) {
-      upstreamUrl.searchParams.set(key, claimWeekStart)
+    if (key !== 'bw_claim_week_start' && formKeyLooksLikeClaimWeek(key)) {
+      upstreamUrl.searchParams.set(key, captureWeekStart)
     }
   })
 }

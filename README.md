@@ -42,6 +42,7 @@ Internal ops platform for B&W Productions CC. Built on Cloudflare Pages + Hono +
 - The missed-shift form now restores the worker-facing heading as **Add a MissShift**, makes the **Date worked** control larger, restores the work-type dropdown breakdown (including House / Garden, Warehouse Team, Team Assistance, and Music Bus cases), and adds venue/event suggestion dropdown support for the free-text venue field.
 - Added hiding for the visible **Next Overnight Shift** prompt in the worker wages flow.
 - Missed-shift forms now enforce and persist the required claim metadata: payroll week being claimed against, exact work date, venue, work type / role, description, start time, finish time, previous-payroll flag, backend-only system review notes for overlap/conflict review, and a backend manual review item when overlaps or possible already-claimed entries exist.
+- Rolled-back payroll-week captures now auto-classify as missed shifts: the UI preserves the payroll week being claimed against for review, while the proxy rewrites the live submission onto the current open payroll week so locked prior payrolls do not block saving.
 
 ## Phase 1 Foundation (completed)
 - `company_settings` table — single-row company details (legal name, VAT, registration, address, contact)
