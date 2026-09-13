@@ -593,13 +593,34 @@ label[for="bw-missed-work-date"] {
     }
   }
 
+  function clearStoredStaffContext() {
+    ;[ACTIVE_STAFF_PROFILE_KEY, ACTIVE_STAFF_ID_STORAGE_KEY, CLAIM_WEEK_STORAGE_KEY, MISSED_MODE_STORAGE_KEY].forEach((key) => {
+      try { window.sessionStorage.removeItem(key) } catch (err) {}
+      try { window.localStorage.removeItem(key) } catch (err) {}
+    })
+  }
+
   async function logoutThenRedirect(target) {
+    clearStoredStaffContext()
     try {
-      await fetch(LOGOUT_PATH, { method: 'GET', credentials: 'include', redirect: 'follow' })
+      // Upstream only clears the worker cookie on POST (GET redirects to the admin login).
+      await fetch(LOGOUT_PATH, { method: 'POST', credentials: 'include', redirect: 'follow', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: '' })
     } catch (err) {
       console.warn('wages logout redirect fallback', err)
     }
     window.location.href = target
+  }
+
+  function hideWorkerSignOut() {
+    // Workers use Switch person only. The upstream Sign out form is hidden so a
+    // browser that also holds an admin login can never land on the admin 403 page.
+    document.querySelectorAll('form[action="/wages/logout"], form[action^="/wages/logout?"]').forEach((form) => {
+      if (form instanceof HTMLElement && form.style.display !== 'none') form.style.display = 'none'
+    })
+    actionElements().forEach((el) => {
+      if (!/^sign ?out$/i.test(elementText(el))) return
+      if (el.closest('.bw-topnav, .topnav') && el instanceof HTMLElement && el.style.display !== 'none') el.style.display = 'none'
+    })
   }
 
   function parseFlexibleDate(value) {
@@ -2047,6 +2068,7 @@ label[for="bw-missed-work-date"] {
     consumeMissedQueryFlag()
     detectAndPersistActiveStaffProfile()
     removeStaffDashboardAccess()
+    hideWorkerSignOut()
     fixSwitchPerson()
     bindPayrollWeekPickerPersistence()
     decorateButtons()
@@ -3162,6 +3184,22 @@ async function proxyRequest(c: any) {
     headers.set('pragma', 'no-cache')
     headers.set('expires', '0')
     headers.set('surrogate-control', 'no-store')
+  }
+
+  // Worker pages must never show the admin "403 — Not authorised" module page
+  // (happens when the same browser also holds an admin login). Send the
+  // worker back to the staff list instead.
+  const isWorkerWagesPage = incomingUrl.pathname.startsWith('/wages') && !incomingUrl.pathname.startsWith('/wages/logout')
+  if (upstreamResponse.status === 403 && c.req.raw.method === 'GET' && isWorkerWagesPage) {
+    return new Response(null, {
+      status: 302,
+      headers: {
+        location: '/wages',
+        'cache-control': 'no-store, no-cache, must-revalidate, max-age=0',
+        pragma: 'no-cache',
+        expires: '0',
+      },
+    })
   }
 
   const baseResponse = new Response(upstreamResponse.body, {
