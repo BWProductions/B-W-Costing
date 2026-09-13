@@ -13,7 +13,7 @@ This document records the current working wages state as a restore-point handove
 ## Backup archive restore point
 - **Project backup (previous):** https://www.genspark.ai/api/files/s/6k3morJo
 - **Code commit for this restore point:** see `git log` — "Remove orphan missed-shift helper text and pin per-worker work types"
-- **Cloudflare Pages production deployment:** https://1a7059c2.bw-productions.pages.dev (custom domain https://bwprodsystem.co.za)
+- **Cloudflare Pages production deployment:** https://cadb54b4.bw-productions.pages.dev (custom domain https://bwprodsystem.co.za)
 
 ## What is working in this restore point
 - Workers use a single **Add Current Shift** flow.
@@ -40,6 +40,16 @@ This document records the current working wages state as a restore-point handove
   "Saturday or Monday only".
 - Work-type dropdown is now pinned per worker (see table below). A worker with no special list
   always gets **Normal** only. A shared phone can no longer show the previous worker's list.
+
+## Sign out / Switch person (2026-09-13, later)
+- The worker **Sign out** button is hidden. Workers use **‹ Switch person** only.
+- **Switch person** now performs a real logout (POST `/wages/logout`, which clears the worker cookie),
+  wipes the stored worker ID/profile from the device, then returns to the staff list at `/wages`.
+- Cause of the "403 — Not authorised / This account does not have access to this module" screen:
+  it is the **admin** system's permission page. It appeared only because the same browser was also
+  logged into `/admin`; after the worker cookie was cleared the wages app saw the admin cookie.
+  Workers on their own phones cannot hit it. The proxy now redirects any 403 on a worker page to
+  `/wages` anyway, so it can never be shown again.
 
 ## Work-type dropdown per worker
 | Worker | Dropdown |

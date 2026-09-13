@@ -51,6 +51,7 @@ Internal ops platform for B&W Productions CC. Built on Cloudflare Pages + Hono +
 - Added direct-save/direct-final-submit error capture into `wage_debug_capture` so future worker save failures are visible even when the fallback path itself throws.
 - 2026-09-13: removed the leftover upstream **Add a missed shift** toggle row and its "Tap the button above only when this shift belongs to last week..." helper sentence from the worker form; the single calendar (previous payroll Saturday onward) is the only missed-shift mechanism.
 - 2026-09-13: work-type dropdowns pinned per worker (Givemore/Takka: House/Garden + Warehouse Team; Thina/Tsotlego: Normal + Warehouse Team; Bheki/Jay/Sipho/Joshua: Music Bus + Normal; everyone else: Normal). Unknown or unlisted workers always get Normal; a shared phone can no longer inherit the previous worker's list. Full table in `docs/wages-restore-point-2026-09-13.md`.
+- 2026-09-13: worker **Sign out** hidden; **Switch person** is the single exit and now really logs out (POST `/wages/logout`), clears device-stored worker context and returns to `/wages`. Any upstream 403 on a worker page is redirected to `/wages` so the admin "Not authorised" module page can never show to staff.
 - **Staff link (the only one workers need): https://bwprodsystem.co.za/wages**
 
 ## Phase 1 Foundation (completed)
