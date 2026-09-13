@@ -25,7 +25,7 @@ Internal ops platform for B&W Productions CC. Built on Cloudflare Pages + Hono +
 - **Music Bus** — separate fleet sub-app at `/musicbus`
 - **Dispatch TV** — token-protected big-screen warehouse view (60s refresh)
 - **Admin** — user management, exports, role permissions, **database backups** (founder-only)
-- **Wages / Timesheets** — public worker flow at `/wages` with PIN login, week picker, draft/final shift submission, and safe-proxy UI fixes layered in the worker
+- **Wages / Timesheets** — public worker flow at `/wages` with PIN login, unified shift entry, draft/final shift submission, and safe-proxy UI fixes layered in the worker
 
 ## Latest wages/timesheet fixes
 - Worker PIN access itself remained online; recent failed logins were traced to regenerated worker PINs on 2026-09-09 plus a broken/awkward shared-device switch-person flow.
@@ -35,9 +35,9 @@ Internal ops platform for B&W Productions CC. Built on Cloudflare Pages + Hono +
 - Updated the worker wages styling so the primary **Add current shift** action stays dark like the approved mock-up and the worker-facing **Save Shift Temporarily** action is yellow.
 - Forced proxied HTML responses under the safe-proxy flow to return `Cache-Control: no-store` headers so worker-facing wages UI changes show on normal refresh instead of only after a hard refresh.
 - Tightened the logged-in wages dashboard handling so staff now use a single **Add Current Shift** entry path and do not see a separate **Add a Missed Shift** action.
-- The add-shift flow now handles previous-payroll capture automatically: when staff roll the payroll week back within the allowed window, the form enhancer treats the entry as a missed shift without needing a separate launch button.
+- The add-shift flow now handles previous-payroll capture automatically from the single worker entry path: staff keep using **Add Current Shift**, the entered **Date worked** now drives the previous-payroll classification directly, and the worker no longer depends on a visible payroll-week control.
 - Removed the old staff-side **Return to Dashboard** action; dashboard access remains admin-only at `/admin/wages`.
-- Removed the unapproved **Last payroll** helper / worker guidance copy while still unlocking the payroll week picker safely.
+- Removed the unapproved worker-facing payroll rollback helpers so staff only see the approved wages dashboard actions while the proxy still preserves the backend claim/capture metadata it needs.
 - Missed-shift date selection now uses a rolling range from the previous payroll week's Saturday through the current payroll's live date window, so staff can choose the physical **Date worked** they actually missed instead of only seeing Saturday/Monday catch-up dates.
 - The unified shift-entry form keeps the worker-facing flow on a single page, makes the **Date worked** control larger, restores the work-type dropdown breakdown (including House / Garden, Warehouse Team, Team Assistance, and Music Bus cases), and adds venue/event suggestion dropdown support for the free-text venue field.
 - Added hiding for the visible **Next Overnight Shift** prompt in the worker wages flow.
@@ -45,6 +45,7 @@ Internal ops platform for B&W Productions CC. Built on Cloudflare Pages + Hono +
 - Rolled-back payroll-week captures now auto-classify as missed shifts: staff can enter them from **Add Current Shift**, the UI preserves the payroll week being claimed against for review, and the proxy rewrites the live submission onto the current open payroll week so locked prior payrolls do not block saving.
 - Previous-payroll rollback no longer shows the locked-payroll worker warning in the unified entry flow; the proxy/open-page handoff keeps staff on the single entry screen while backend review still marks the entry as a missed shift for office checks only.
 - When the upstream worker app still tries to reject a previous-payroll temporary/final save, the proxy now writes the missed shift directly into the shared wages D1 table under the current payroll week so it reappears in worker/admin lists while preserving backend conflict review metadata.
+- Added a direct proxy fallback for `POST /wages/drafts/:id/final-submit` so worker final submissions no longer crash with **Internal Server Error** when the upstream endpoint fails; the draft is marked `submitted` in the shared wages D1 table and the worker is redirected back into the wages flow.
 
 ## Phase 1 Foundation (completed)
 - `company_settings` table — single-row company details (legal name, VAT, registration, address, contact)
