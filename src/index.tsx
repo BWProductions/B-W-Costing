@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 
 type Bindings = {
   ANTHROPIC_API_KEY?: string
+  DB?: D1Database
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
@@ -302,6 +303,7 @@ label[for="bw-missed-work-date"] {
   const DASHBOARD_PATH = '/admin/wages'
   const WAGES_HOME_PATH = '/wages'
   const LOGOUT_PATH = '/wages/logout'
+  const UPSTREAM_ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
   const CLAIM_WEEK_STORAGE_KEY = 'bwWagesClaimWeekStart'
   const MISSED_MODE_STORAGE_KEY = 'bwWagesMissedShiftMode'
   const ACTIVE_STAFF_PROFILE_KEY = 'bwWagesActiveStaffProfile'
@@ -354,6 +356,106 @@ label[for="bw-missed-work-date"] {
     if (el.dataset[marker]) return false
     el.dataset[marker] = '1'
     return true
+  }
+
+  function rewriteToProxyUrl(rawUrl) {
+    const normalized = normalize(rawUrl)
+    if (!normalized) return rawUrl
+    try {
+      const parsed = new URL(normalized, window.location.origin)
+      if (parsed.origin !== UPSTREAM_ORIGIN) return parsed.toString()
+      return window.location.origin + parsed.pathname + parsed.search + parsed.hash
+    } catch (err) {
+      return rawUrl
+    }
+  }
+
+  function rewriteFormAction(form) {
+    if (!(form instanceof HTMLFormElement)) return
+    const action = form.getAttribute('action') || form.action || ''
+    const rewritten = rewriteToProxyUrl(action)
+    if (rewritten && rewritten !== action) form.setAttribute('action', rewritten)
+  }
+
+  function rewriteSubmitterAction(submitter) {
+    if (!(submitter instanceof HTMLButtonElement) && !(submitter instanceof HTMLInputElement)) return
+    const formAction = submitter.getAttribute('formaction') || submitter.formAction || ''
+    if (!formAction) return
+    const rewritten = rewriteToProxyUrl(formAction)
+    if (rewritten && rewritten !== formAction) submitter.setAttribute('formaction', rewritten)
+  }
+
+  function forceWagesProxyRouting() {
+    document.querySelectorAll('form').forEach((form) => {
+      rewriteFormAction(form)
+    })
+
+    document.querySelectorAll('a[href]').forEach((link) => {
+      if (!(link instanceof HTMLAnchorElement)) return
+      const href = link.getAttribute('href') || link.href || ''
+      const rewritten = rewriteToProxyUrl(href)
+      if (rewritten && rewritten !== href) link.setAttribute('href', rewritten)
+    })
+
+    document.querySelectorAll('button[formaction], input[formaction]').forEach((submitter) => {
+      rewriteSubmitterAction(submitter)
+    })
+  }
+
+  if (!window.__bwFetchProxyPatched) {
+    window.__bwFetchProxyPatched = true
+    const nativeFetch = window.fetch.bind(window)
+    window.fetch = function(resource, init) {
+      try {
+        if (typeof resource === 'string') resource = rewriteToProxyUrl(resource)
+        else if (resource instanceof URL) resource = new URL(rewriteToProxyUrl(resource.toString()))
+        else if (resource instanceof Request) {
+          const rewrittenUrl = rewriteToProxyUrl(resource.url)
+          if (rewrittenUrl !== resource.url) resource = new Request(rewrittenUrl, resource)
+        }
+      } catch (err) {}
+      return nativeFetch(resource, init)
+    }
+  }
+
+  if (!window.__bwXhrProxyPatched && window.XMLHttpRequest) {
+    window.__bwXhrProxyPatched = true
+    const nativeOpen = window.XMLHttpRequest.prototype.open
+    window.XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+      const rewritten = typeof url === 'string' ? rewriteToProxyUrl(url) : url
+      return nativeOpen.call(this, method, rewritten, ...rest)
+    }
+  }
+
+  if (!window.__bwSubmitProxyPatched) {
+    window.__bwSubmitProxyPatched = true
+    document.addEventListener('submit', (event) => {
+      const form = event.target
+      if (!(form instanceof HTMLFormElement)) return
+      rewriteFormAction(form)
+      rewriteSubmitterAction(event.submitter)
+    }, true)
+
+    if (window.HTMLFormElement?.prototype) {
+      const nativeSubmit = window.HTMLFormElement.prototype.submit
+      if (!window.__bwNativeFormSubmitProxyPatched && typeof nativeSubmit === 'function') {
+        window.__bwNativeFormSubmitProxyPatched = true
+        window.HTMLFormElement.prototype.submit = function() {
+          rewriteFormAction(this)
+          return nativeSubmit.call(this)
+        }
+      }
+
+      const nativeRequestSubmit = window.HTMLFormElement.prototype.requestSubmit
+      if (!window.__bwNativeFormRequestSubmitProxyPatched && typeof nativeRequestSubmit === 'function') {
+        window.__bwNativeFormRequestSubmitProxyPatched = true
+        window.HTMLFormElement.prototype.requestSubmit = function(submitter) {
+          rewriteFormAction(this)
+          rewriteSubmitterAction(submitter)
+          return nativeRequestSubmit.call(this, submitter)
+        }
+      }
+    }
   }
 
   async function logoutThenRedirect(target) {
@@ -635,6 +737,23 @@ label[for="bw-missed-work-date"] {
   function utcToday() {
     const now = new Date()
     return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
+  }
+
+  function currentPayrollWeekStartValue() {
+    return formatForInput(startOfPayrollWeek(utcToday()), false)
+  }
+
+  function syncPayrollWeekFieldValue(field, value) {
+    if (!(field instanceof HTMLInputElement) || !isPayrollWeekField(field)) return
+    field.value = value || ''
+    field.setAttribute('value', value || '')
+  }
+
+  function syncPayrollWeekFields(scope, value) {
+    if (!(scope instanceof HTMLElement) && !(scope instanceof HTMLFormElement) && !(scope instanceof Document)) return
+    Array.from(scope.querySelectorAll('input')).forEach((field) => {
+      syncPayrollWeekFieldValue(field, value)
+    })
   }
 
   function resolveClaimWeekStart(field, hiddenField) {
@@ -1328,19 +1447,38 @@ label[for="bw-missed-work-date"] {
   }
 
   function syncMissedShiftMetadata(payload) {
-    const activePayrollWeekStart = resolveClaimWeekStart(payload.claimWeekField, payload.claimWeekHidden)
-    const windowConfig = getMissedShiftWindow(activePayrollWeekStart)
-    setStoredClaimWeek(activePayrollWeekStart)
-    widenMissedShiftDateChoices(payload.workDateField, activePayrollWeekStart)
-    rewriteMissedShiftRestrictionText(payload.scope, activePayrollWeekStart)
+    const currentClaimWeekStart = currentPayrollWeekStartValue()
+    const windowConfig = getMissedShiftWindow(currentClaimWeekStart)
+    setStoredClaimWeek(currentClaimWeekStart)
+    syncPayrollWeekFieldValue(payload.claimWeekField, currentClaimWeekStart)
+    syncPayrollWeekFields(payload.form, currentClaimWeekStart)
+    widenMissedShiftDateChoices(payload.workDateField, currentClaimWeekStart)
+    rewriteMissedShiftRestrictionText(payload.scope, currentClaimWeekStart)
 
-    const workDate = parseFlexibleDate(payload.workDateField.value || payload.workDateField.getAttribute('value') || payload.workDateHidden?.value || '')
-    const selectedClaimWeek = workDate && workDate.getTime() < windowConfig.currentPayrollStart.getTime()
-      ? formatForInput(windowConfig.previousPayrollStart, false)
-      : formatForInput(windowConfig.currentPayrollStart, false)
-    payload.claimWeekHidden.value = selectedClaimWeek
+    const selectedWorkDateValue = normalize(payload.workDateField?.value || payload.workDateField?.getAttribute('value') || payload.workDateHidden?.value || '')
+    if (payload.workDateHidden) {
+      payload.workDateHidden.value = selectedWorkDateValue
+      payload.workDateHidden.setAttribute('value', selectedWorkDateValue)
+    }
+    const workDate = parseFlexibleDate(selectedWorkDateValue)
     const isPrevious = !!(workDate && workDate.getTime() < windowConfig.currentPayrollStart.getTime())
+    const selectedClaimWeek = currentClaimWeekStart
+    payload.claimWeekHidden.value = selectedClaimWeek
+    payload.claimWeekHidden.setAttribute('value', selectedClaimWeek)
     payload.previousPayrollHidden.value = isPrevious ? '1' : '0'
+    payload.previousPayrollHidden.setAttribute('value', payload.previousPayrollHidden.value)
+    if (payload.actualWorkDateHidden) {
+      payload.actualWorkDateHidden.value = selectedWorkDateValue
+      payload.actualWorkDateHidden.setAttribute('value', selectedWorkDateValue)
+    }
+    if (payload.claimWeekMarkerHidden) {
+      payload.claimWeekMarkerHidden.value = selectedClaimWeek
+      payload.claimWeekMarkerHidden.setAttribute('value', selectedClaimWeek)
+    }
+    if (payload.missedModeHidden) {
+      payload.missedModeHidden.value = '1'
+      payload.missedModeHidden.setAttribute('value', '1')
+    }
 
     const reviewBits = []
     if (payload.claimWeekHidden.value) reviewBits.push('Claimed against payroll week ' + payload.claimWeekHidden.value + '.')
@@ -1437,6 +1575,9 @@ label[for="bw-missed-work-date"] {
       const previousPayrollHidden = ensureHiddenField(form, 'missed_previous_week')
       const reviewNoteHidden = ensureHiddenField(form, 'payroll_note')
       const workDateHidden = workDateBinding.hiddenField || ensureHiddenField(form, 'work_date')
+      const actualWorkDateHidden = ensureHiddenField(form, 'bw_actual_work_date')
+      const claimWeekMarkerHidden = ensureHiddenField(form, 'bw_claim_week_start')
+      const missedModeHidden = ensureHiddenField(form, 'bw_missed_shift_mode')
 
       bindMissedShiftMetadata({
         form,
@@ -1452,6 +1593,9 @@ label[for="bw-missed-work-date"] {
         endField,
         previousPayrollHidden,
         reviewNoteHidden,
+        actualWorkDateHidden,
+        claimWeekMarkerHidden,
+        missedModeHidden,
       })
     })
   }
@@ -1556,6 +1700,7 @@ label[for="bw-missed-work-date"] {
 
   function runEnhancements() {
     if (!window.location.pathname.startsWith('/wages')) return
+    forceWagesProxyRouting()
     consumeMissedQueryFlag()
     detectAndPersistActiveStaffProfile()
     removeStaffDashboardAccess()
@@ -1717,19 +1862,294 @@ function rewriteRequestHeaders(rawHeaders: Headers, incomingUrl: URL, upstreamUr
   return upstreamHeaders
 }
 
+function normalizeProxyFieldValue(value: FormDataEntryValue | null) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function parseProxyIsoDate(value: string) {
+  const match = (value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return null
+  const parsed = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+function formatProxyIsoDate(date: Date) {
+  const year = date.getUTCFullYear()
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(date.getUTCDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function proxyStartOfPayrollWeek(date: Date) {
+  const copy = new Date(date.getTime())
+  const offset = (copy.getUTCDay() + 1) % 7
+  copy.setUTCDate(copy.getUTCDate() - offset)
+  return copy
+}
+
+function currentProxyPayrollWeekStart() {
+  const now = new Date()
+  const today = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
+  return formatProxyIsoDate(proxyStartOfPayrollWeek(today))
+}
+
+function formKeyLooksLikeClaimWeek(key: string) {
+  const normalized = (key || '').trim().toLowerCase()
+  if (!normalized) return false
+  if (normalized === 'work_date' || normalized === 'bw_visible_work_date' || normalized === 'date_worked' || normalized === 'bw_actual_work_date') return false
+  if (normalized.includes('payroll_week') || normalized.includes('week_start') || normalized.includes('pay_week') || normalized.includes('claim_week') || normalized.includes('period_start')) return true
+  if (normalized.endsWith('week') || normalized.includes('week')) return true
+  return false
+}
+
+function shouldRewriteMissedShiftSubmission(formData: FormData) {
+  const explicitMarker = normalizeProxyFieldValue(formData.get('bw_missed_shift_mode')) === '1'
+  const previousPayrollFlag = normalizeProxyFieldValue(formData.get('missed_previous_week')) === '1'
+  const note = normalizeProxyFieldValue(formData.get('payroll_note'))
+  return explicitMarker || previousPayrollFlag || /belongs to previous payroll:\s*yes/i.test(note)
+}
+
+function rewriteMissedShiftSubmission(formData: FormData, upstreamUrl: URL) {
+  const claimWeekStart = normalizeProxyFieldValue(formData.get('bw_claim_week_start')) || currentProxyPayrollWeekStart()
+  const claimWeekDate = parseProxyIsoDate(claimWeekStart)
+  const actualWorkDate = normalizeProxyFieldValue(formData.get('bw_actual_work_date'))
+    || normalizeProxyFieldValue(formData.get('date_worked'))
+    || normalizeProxyFieldValue(formData.get('actual_work_date'))
+    || normalizeProxyFieldValue(formData.get('physical_work_date'))
+    || normalizeProxyFieldValue(formData.get('exact_work_date'))
+    || normalizeProxyFieldValue(formData.get('work_date'))
+    || normalizeProxyFieldValue(formData.get('bw_visible_work_date'))
+  const actualWorkDateValue = actualWorkDate || normalizeProxyFieldValue(formData.get('work_date'))
+  const actualWorkDateParsed = parseProxyIsoDate(actualWorkDateValue)
+  const isPreviousPayroll = !!(claimWeekDate && actualWorkDateParsed && actualWorkDateParsed.getTime() < claimWeekDate.getTime())
+
+  Array.from(new Set(Array.from(formData.keys()))).forEach((key) => {
+    if (formKeyLooksLikeClaimWeek(key)) {
+      formData.set(key, claimWeekStart)
+    }
+  })
+
+  formData.set('payroll_week_start', claimWeekStart)
+  formData.set('bw_claim_week_start', claimWeekStart)
+  formData.set('missed_previous_week', isPreviousPayroll ? '1' : '0')
+  formData.set('bw_missed_shift_mode', '1')
+
+  if (actualWorkDateValue) {
+    formData.set('bw_actual_work_date', actualWorkDateValue)
+    if (formData.has('date_worked')) formData.set('date_worked', actualWorkDateValue)
+    if (formData.has('actual_work_date')) formData.set('actual_work_date', actualWorkDateValue)
+    if (formData.has('physical_work_date')) formData.set('physical_work_date', actualWorkDateValue)
+    if (formData.has('exact_work_date')) formData.set('exact_work_date', actualWorkDateValue)
+    if (formData.has('bw_visible_work_date')) formData.set('bw_visible_work_date', actualWorkDateValue)
+    if (formData.has('work_date')) formData.set('work_date', actualWorkDateValue)
+  }
+
+  Array.from(new Set(Array.from(upstreamUrl.searchParams.keys()))).forEach((key) => {
+    if (formKeyLooksLikeClaimWeek(key)) {
+      upstreamUrl.searchParams.set(key, claimWeekStart)
+    }
+  })
+}
+
+function shouldCaptureWagesDebug(incomingUrl: URL, formData: FormData) {
+  if (!(incomingUrl.pathname === '/wages' || incomingUrl.pathname.startsWith('/wages/'))) return false
+  return Array.from(new Set(Array.from(formData.keys()))).some((key) => /work_date|date_worked|actual_work_date|physical_work_date|exact_work_date|payroll|week|missed|start_time|end_time|submit|draft|save/i.test(key))
+}
+
+function extractInterestingFormFields(formData: FormData) {
+  const snapshot: Record<string, string> = {}
+  Array.from(new Set(Array.from(formData.keys()))).forEach((key) => {
+    if (!/work_date|date_worked|actual_work_date|physical_work_date|exact_work_date|payroll|week|missed|start_time|end_time|submit|draft|save|bw_/i.test(key)) return
+    const values = formData.getAll(key).map((value) => typeof value === 'string' ? value : `[file:${value.name || 'blob'}]`)
+    snapshot[key] = values.join(' | ')
+  })
+  return snapshot
+}
+
+async function captureWagesDebug(env: Bindings | undefined, entry: {
+  request_path: string,
+  request_method: string,
+  original_payload_json: string,
+  rewritten_payload_json: string,
+  rewrite_applied: number,
+  response_status: number,
+  response_location: string,
+  response_error_text: string,
+}) {
+  const db = env?.DB
+  if (!db) return
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS wage_debug_capture (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      request_path TEXT NOT NULL,
+      request_method TEXT NOT NULL,
+      original_payload_json TEXT,
+      rewritten_payload_json TEXT,
+      rewrite_applied INTEGER NOT NULL DEFAULT 0,
+      response_status INTEGER,
+      response_location TEXT,
+      response_error_text TEXT
+    )`).run()
+
+    await db.prepare(`INSERT INTO wage_debug_capture (
+      request_path,
+      request_method,
+      original_payload_json,
+      rewritten_payload_json,
+      rewrite_applied,
+      response_status,
+      response_location,
+      response_error_text
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(
+        entry.request_path,
+        entry.request_method,
+        entry.original_payload_json,
+        entry.rewritten_payload_json,
+        entry.rewrite_applied,
+        entry.response_status,
+        entry.response_location,
+        entry.response_error_text,
+      )
+      .run()
+
+    await db.prepare(`DELETE FROM wage_debug_capture
+      WHERE id NOT IN (
+        SELECT id FROM wage_debug_capture ORDER BY id DESC LIMIT 20
+      )`).run()
+  } catch (err) {
+    console.warn('wage debug capture failed', err)
+  }
+}
+
+async function describeWagesDebugResponse(response: Response) {
+  const contentType = response.headers.get('content-type') || ''
+  const location = response.headers.get('location') || ''
+  if (!contentType.includes('text/html')) {
+    return { location, errorText: '' }
+  }
+  const text = await response.text()
+  const directMatch = text.match(/That payroll week[\s\S]{0,280}?not Sunday\./i)
+    || text.match(/Choose a valid work date\.?/i)
+    || text.match(/You cannot save or finally submit shifts against it\.[\s\S]{0,220}/i)
+  const errorText = directMatch
+    ? directMatch[0].replace(/\s+/g, ' ').trim()
+    : ''
+  return { location, errorText }
+}
+
+async function buildUpstreamRequest(c: any, incomingUrl: URL, upstreamUrl: URL, upstreamHeaders: Headers) {
+  const method = (c.req.raw.method || 'GET').toUpperCase()
+  if (['GET', 'HEAD'].includes(method)) {
+    return {
+      upstreamRequest: new Request(upstreamUrl.toString(), {
+        method,
+        headers: upstreamHeaders,
+        redirect: 'manual',
+      }),
+      debugCapture: null,
+    }
+  }
+
+  const contentType = c.req.raw.headers.get('content-type') || ''
+  const isWagesPath = incomingUrl.pathname === '/wages' || incomingUrl.pathname.startsWith('/wages/')
+  const canRewriteForm = /application\/x-www-form-urlencoded|multipart\/form-data/i.test(contentType)
+
+  if (!isWagesPath || !canRewriteForm) {
+    return {
+      upstreamRequest: new Request(upstreamUrl.toString(), {
+        method,
+        headers: upstreamHeaders,
+        body: c.req.raw.body,
+        redirect: 'manual',
+      }),
+      debugCapture: null,
+    }
+  }
+
+  const formData = await c.req.raw.clone().formData()
+  const shouldCaptureDebug = shouldCaptureWagesDebug(incomingUrl, formData)
+  const originalSnapshot = shouldCaptureDebug ? extractInterestingFormFields(formData) : null
+  const rewriteApplied = shouldRewriteMissedShiftSubmission(formData)
+
+  if (rewriteApplied) {
+    rewriteMissedShiftSubmission(formData, upstreamUrl)
+  }
+
+  const rewrittenSnapshot = shouldCaptureDebug ? extractInterestingFormFields(formData) : null
+
+  upstreamHeaders.delete('content-length')
+
+  let upstreamRequest: Request
+  if (/application\/x-www-form-urlencoded/i.test(contentType)) {
+    const params = new URLSearchParams()
+    let hasBinaryField = false
+    formData.forEach((value, key) => {
+      if (typeof value === 'string') {
+        params.append(key, value)
+      } else {
+        hasBinaryField = true
+      }
+    })
+    if (!hasBinaryField) {
+      upstreamHeaders.set('content-type', 'application/x-www-form-urlencoded;charset=UTF-8')
+      upstreamRequest = new Request(upstreamUrl.toString(), {
+        method,
+        headers: upstreamHeaders,
+        body: params.toString(),
+        redirect: 'manual',
+      })
+    } else {
+      upstreamHeaders.delete('content-type')
+      upstreamRequest = new Request(upstreamUrl.toString(), {
+        method,
+        headers: upstreamHeaders,
+        body: formData,
+        redirect: 'manual',
+      })
+    }
+  } else {
+    upstreamHeaders.delete('content-type')
+    upstreamRequest = new Request(upstreamUrl.toString(), {
+      method,
+      headers: upstreamHeaders,
+      body: formData,
+      redirect: 'manual',
+    })
+  }
+
+  return {
+    upstreamRequest,
+    debugCapture: shouldCaptureDebug ? {
+      originalSnapshot,
+      rewrittenSnapshot,
+      rewriteApplied,
+    } : null,
+  }
+}
+
 async function proxyRequest(c: any) {
   const incomingUrl = new URL(c.req.url)
   const upstreamUrl = new URL(incomingUrl.pathname + incomingUrl.search, ORIGIN)
   const upstreamHeaders = rewriteRequestHeaders(c.req.raw.headers, incomingUrl, upstreamUrl)
 
-  const upstreamRequest = new Request(upstreamUrl.toString(), {
-    method: c.req.raw.method,
-    headers: upstreamHeaders,
-    body: ['GET', 'HEAD'].includes(c.req.raw.method) ? undefined : c.req.raw.body,
-    redirect: 'manual',
-  })
+  const { upstreamRequest, debugCapture } = await buildUpstreamRequest(c, incomingUrl, upstreamUrl, upstreamHeaders)
 
   const upstreamResponse = await fetch(upstreamRequest)
+  if (debugCapture) {
+    const responseDebug = await describeWagesDebugResponse(upstreamResponse.clone())
+    await captureWagesDebug(c.env, {
+      request_path: incomingUrl.pathname + incomingUrl.search,
+      request_method: (c.req.raw.method || 'POST').toUpperCase(),
+      original_payload_json: JSON.stringify(debugCapture.originalSnapshot || {}),
+      rewritten_payload_json: JSON.stringify(debugCapture.rewrittenSnapshot || {}),
+      rewrite_applied: debugCapture.rewriteApplied ? 1 : 0,
+      response_status: upstreamResponse.status,
+      response_location: responseDebug.location,
+      response_error_text: responseDebug.errorText,
+    })
+  }
   const headers = rewriteHeaders(upstreamResponse, incomingUrl.origin)
   const contentType = headers.get('content-type') || ''
 
