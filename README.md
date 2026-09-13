@@ -43,6 +43,7 @@ Internal ops platform for B&W Productions CC. Built on Cloudflare Pages + Hono +
 - Added hiding for the visible **Next Overnight Shift** prompt in the worker wages flow.
 - Missed-shift forms now enforce and persist the required claim metadata: payroll week being claimed against, exact work date, venue, work type / role, description, start time, finish time, previous-payroll flag, backend-only system review notes for overlap/conflict review, and a backend manual review item when overlaps or possible already-claimed entries exist.
 - Rolled-back payroll-week captures now auto-classify as missed shifts: staff can enter them from **Add Current Shift**, the UI preserves the payroll week being claimed against for review, and the proxy rewrites the live submission onto the current open payroll week so locked prior payrolls do not block saving.
+- Previous-payroll rollback no longer shows the locked-payroll worker warning in the unified entry flow; the proxy/open-page handoff keeps staff on the single entry screen while backend review still marks the entry as a missed shift for office checks only.
 
 ## Phase 1 Foundation (completed)
 - `company_settings` table — single-row company details (legal name, VAT, registration, address, contact)

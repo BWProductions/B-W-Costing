@@ -561,6 +561,67 @@ label[for="bw-missed-work-date"] {
     return /view payroll week/i.test(bodyText) || /finally submitted hours this payroll week/i.test(bodyText)
   }
 
+  function rewriteAddShiftTarget(el, claimWeekStart) {
+    if (!claimWeekStart) return
+    const currentWeekStart = currentPayrollWeekStartValue()
+    const claimWeek = parseFlexibleDate(claimWeekStart)
+    const currentWeek = parseFlexibleDate(currentWeekStart)
+    const shouldTreatAsPreviousPayroll = !!(claimWeek && currentWeek && claimWeek.getTime() < currentWeek.getTime())
+    if (!shouldTreatAsPreviousPayroll) return
+
+    const rewriteUrl = (rawUrl) => {
+      const normalized = normalize(rawUrl)
+      if (!normalized) return rawUrl
+      try {
+        const parsed = new URL(normalized, window.location.origin)
+        let replacedClaimWeek = false
+        Array.from(new Set(Array.from(parsed.searchParams.keys()))).forEach((key) => {
+          if (key !== 'bw_claim_week_start' && formKeyLooksLikeClaimWeek(key)) {
+            parsed.searchParams.set(key, currentWeekStart)
+            replacedClaimWeek = true
+          }
+        })
+        if (!replacedClaimWeek) parsed.searchParams.set('payroll_week_start', currentWeekStart)
+        parsed.searchParams.set('bw_claim_week_start', claimWeekStart)
+        parsed.searchParams.set('bw_missed', '1')
+        return parsed.toString()
+      } catch (err) {
+        return rawUrl
+      }
+    }
+
+    if (el instanceof HTMLAnchorElement) {
+      const href = el.getAttribute('href') || el.href || ''
+      const rewrittenHref = rewriteUrl(href)
+      if (rewrittenHref && rewrittenHref !== href) el.setAttribute('href', rewrittenHref)
+      return
+    }
+
+    if (el instanceof HTMLButtonElement || el instanceof HTMLInputElement) {
+      const formAction = el.getAttribute('formaction') || el.formAction || ''
+      if (formAction) {
+        const rewrittenFormAction = rewriteUrl(formAction)
+        if (rewrittenFormAction && rewrittenFormAction !== formAction) el.setAttribute('formaction', rewrittenFormAction)
+      }
+      const form = el.form || el.closest('form')
+      if (form instanceof HTMLFormElement) {
+        const action = form.getAttribute('action') || form.action || ''
+        const rewrittenAction = rewriteUrl(action)
+        if (rewrittenAction && rewrittenAction !== action) form.setAttribute('action', rewrittenAction)
+        const claimWeekHidden = ensureHiddenField(form, 'bw_claim_week_start')
+        claimWeekHidden.value = claimWeekStart
+        claimWeekHidden.setAttribute('value', claimWeekStart)
+        Array.from(form.querySelectorAll('input')).forEach((field) => {
+          if (!(field instanceof HTMLInputElement)) return
+          if (field.name === 'bw_claim_week_start') return
+          if (!formKeyLooksLikeClaimWeek(field.name || field.id || '')) return
+          field.value = currentWeekStart
+          field.setAttribute('value', currentWeekStart)
+        })
+      }
+    }
+  }
+
   function decorateButtons() {
     actionElements().forEach((el) => {
       const text = elementText(el)
@@ -573,8 +634,11 @@ label[for="bw-missed-work-date"] {
           const markSelected = () => el.classList.add('bw-is-selected')
           const clearSelected = () => el.classList.remove('bw-is-selected')
           el.addEventListener('click', () => {
+            const selectedClaimWeek = queryClaimWeekStartValue() || resolveClaimWeekStart(findPayrollWeekField(), null) || currentPayrollWeekStartValue()
+            setStoredClaimWeek(selectedClaimWeek)
             setStoredMissedMode(false)
             window.__bwLaunchMode = ''
+            rewriteAddShiftTarget(el, selectedClaimWeek)
             markSelected()
           })
           el.addEventListener('focus', markSelected)
@@ -635,6 +699,20 @@ label[for="bw-missed-work-date"] {
     return Array.from(document.querySelectorAll('input')).find((field) => isPayrollWeekField(field)) || null
   }
 
+  function bindPayrollWeekPickerPersistence() {
+    const field = findPayrollWeekField()
+    if (!field) return
+    const syncStoredWeek = () => {
+      const claimWeekStart = queryClaimWeekStartValue() || resolveClaimWeekStart(field, null)
+      if (claimWeekStart) setStoredClaimWeek(claimWeekStart)
+    }
+    if (once(field, 'ClaimWeekPersistGlobal')) {
+      field.addEventListener('input', syncStoredWeek)
+      field.addEventListener('change', syncStoredWeek)
+    }
+    syncStoredWeek()
+  }
+
   function unlockPayrollWeekPicker() {
     const field = findPayrollWeekField()
     if (!field) return
@@ -687,8 +765,25 @@ label[for="bw-missed-work-date"] {
     return formatForInput(startOfPayrollWeek(utcToday()), false)
   }
 
+  function queryClaimWeekStartValue() {
+    try {
+      const params = new URLSearchParams(window.location.search)
+      const explicit = normalize(params.get('bw_claim_week_start') || '')
+      const explicitDate = parseFlexibleDate(explicit)
+      if (explicitDate) return formatForInput(startOfPayrollWeek(explicitDate), false)
+      for (const key of Array.from(new Set(Array.from(params.keys())))) {
+        if (key === 'bw_claim_week_start') continue
+        if (!formKeyLooksLikeClaimWeek(key)) continue
+        const value = normalize(params.get(key) || '')
+        const parsed = parseFlexibleDate(value)
+        if (parsed) return formatForInput(startOfPayrollWeek(parsed), false)
+      }
+    } catch (err) {}
+    return ''
+  }
+
   function selectedClaimWeekStartValue(field) {
-    return resolveClaimWeekStart(field, null) || getStoredClaimWeek() || currentPayrollWeekStartValue()
+    return queryClaimWeekStartValue() || getStoredClaimWeek() || resolveClaimWeekStart(field, null) || currentPayrollWeekStartValue()
   }
 
   function syncPayrollWeekFieldValue(field, value) {
@@ -1457,7 +1552,7 @@ label[for="bw-missed-work-date"] {
     let autoMissedByPayrollRollback = false
     if (claimWeekField) {
       const syncStoredWeek = () => {
-        const claimWeekStart = resolveClaimWeekStart(claimWeekField, null)
+        const claimWeekStart = selectedClaimWeekStartValue(claimWeekField)
         if (claimWeekStart) setStoredClaimWeek(claimWeekStart)
         const selectedClaimWeek = parseFlexibleDate(claimWeekStart)
         const livePayrollWeek = parseFlexibleDate(currentPayrollWeekStartValue())
@@ -1536,6 +1631,19 @@ label[for="bw-missed-work-date"] {
         claimWeekMarkerHidden,
         missedModeHidden,
       })
+    })
+  }
+
+  function hideLockedPayrollWarnings() {
+    const selectors = '.alert, .notice, .warning, .error, .flash, .message, .card, .row, label, p, small, div, span'
+    Array.from(document.querySelectorAll(selectors)).forEach((node) => {
+      const text = elementText(node)
+      if (!/that payroll week .* has already been paid and is locked|hours missed .* can only be captured on this payroll week's saturday|please recapture it only under the current payroll week/i.test(text)) return
+      const container = node.closest('.alert, .notice, .warning, .error, .flash, .message, .card, .row, div')
+      const target = container || node
+      if (!(target instanceof HTMLElement) || target.dataset.bwHiddenLockedPayroll === '1') return
+      target.dataset.bwHiddenLockedPayroll = '1'
+      target.style.display = 'none'
     })
   }
 
@@ -1644,12 +1752,14 @@ label[for="bw-missed-work-date"] {
     detectAndPersistActiveStaffProfile()
     removeStaffDashboardAccess()
     fixSwitchPerson()
+    bindPayrollWeekPickerPersistence()
     decorateButtons()
     document.querySelectorAll('.bw-home-miss-shift-btn').forEach((node) => node.remove())
     document.querySelectorAll('.bw-period-tools, .bw-last-payroll-btn').forEach((node) => node.remove())
     moveAddShiftNearSaveTemporary()
     unlockPayrollWeekPicker()
     enhanceMissedShiftForms()
+    hideLockedPayrollWarnings()
     hideOvernightPrompt()
     addBulkFinalSubmission()
   }
@@ -1932,6 +2042,34 @@ function findFormClaimWeekStart(formData: FormData) {
     if (value) return value
   }
   return currentProxyPayrollWeekStart()
+}
+
+function findSearchClaimWeekStart(searchParams: URLSearchParams) {
+  const explicitClaimWeek = (searchParams.get('bw_claim_week_start') || '').trim()
+  if (explicitClaimWeek) return explicitClaimWeek
+  for (const key of Array.from(new Set(Array.from(searchParams.keys())))) {
+    if (key === 'bw_claim_week_start') continue
+    if (!formKeyLooksLikeClaimWeek(key)) continue
+    const value = (searchParams.get(key) || '').trim()
+    if (value) return value
+  }
+  return ''
+}
+
+function rewritePreviousPayrollGetRequest(incomingUrl: URL, upstreamUrl: URL) {
+  if (!incomingUrl.pathname.startsWith('/wages')) return
+  if (incomingUrl.pathname === '/wages' || incomingUrl.pathname === '/wages/') return
+  const requestedClaimWeek = findSearchClaimWeekStart(incomingUrl.searchParams)
+  const requestedClaimWeekDate = parseProxyIsoDate(requestedClaimWeek)
+  const currentClaimWeekStart = currentProxyPayrollWeekStart()
+  const currentClaimWeekDate = parseProxyIsoDate(currentClaimWeekStart)
+  const shouldForceOpenPayroll = !!(requestedClaimWeekDate && currentClaimWeekDate && requestedClaimWeekDate.getTime() < currentClaimWeekDate.getTime())
+  if (!shouldForceOpenPayroll) return
+  Array.from(new Set(Array.from(upstreamUrl.searchParams.keys()))).forEach((key) => {
+    if (key !== 'bw_claim_week_start' && formKeyLooksLikeClaimWeek(key)) {
+      upstreamUrl.searchParams.set(key, currentClaimWeekStart)
+    }
+  })
 }
 
 function shouldRewriteMissedShiftObjectPayload(snapshot: Record<string, string>) {
@@ -2319,6 +2457,7 @@ async function buildUpstreamRequest(c: any, incomingUrl: URL, upstreamUrl: URL, 
 async function proxyRequest(c: any) {
   const incomingUrl = new URL(c.req.url)
   const upstreamUrl = new URL(incomingUrl.pathname + incomingUrl.search, ORIGIN)
+  rewritePreviousPayrollGetRequest(incomingUrl, upstreamUrl)
   const upstreamHeaders = rewriteRequestHeaders(c.req.raw.headers, incomingUrl, upstreamUrl)
 
   const { upstreamRequest, debugCapture } = await buildUpstreamRequest(c, incomingUrl, upstreamUrl, upstreamHeaders)
