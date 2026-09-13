@@ -1902,6 +1902,135 @@ function formKeyLooksLikeClaimWeek(key: string) {
   return false
 }
 
+function proxyObjectPathTail(path: string) {
+  const tail = (path || '').trim().split('.').pop() || ''
+  return tail.replace(/\[\d+\]$/g, '').toLowerCase()
+}
+
+function objectKeyLooksLikeActualWorkDate(path: string) {
+  const normalized = proxyObjectPathTail(path)
+  return ['bw_actual_work_date', 'date_worked', 'actual_work_date', 'physical_work_date', 'exact_work_date', 'work_date', 'bw_visible_work_date'].includes(normalized)
+}
+
+function objectKeyLooksLikeMissedFlag(path: string) {
+  return proxyObjectPathTail(path) === 'missed_previous_week'
+}
+
+function objectKeyLooksLikeMissedMode(path: string) {
+  return proxyObjectPathTail(path) === 'bw_missed_shift_mode'
+}
+
+function extractInterestingObjectFields(value: unknown, path = '', snapshot: Record<string, string> = {}) {
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => {
+      extractInterestingObjectFields(entry, path ? `${path}[${index}]` : `[${index}]`, snapshot)
+    })
+    return snapshot
+  }
+  if (value && typeof value === 'object') {
+    Object.entries(value as Record<string, unknown>).forEach(([key, entry]) => {
+      extractInterestingObjectFields(entry, path ? `${path}.${key}` : key, snapshot)
+    })
+    return snapshot
+  }
+  if (path && /work_date|date_worked|actual_work_date|physical_work_date|exact_work_date|payroll|week|missed|start_time|end_time|submit|draft|save|bw_/i.test(path)) {
+    snapshot[path] = value == null ? '' : String(value)
+  }
+  return snapshot
+}
+
+function normalizeProxySnippet(value: string, limit = 1800) {
+  return (value || '').replace(/\s+/g, ' ').trim().slice(0, limit)
+}
+
+function parseProxyJsonPayload(rawText: string, contentType: string) {
+  const trimmed = (rawText || '').trim()
+  if (!trimmed) return null
+  if (!/application\/json/i.test(contentType) && !/^[\[{]/.test(trimmed)) return null
+  try {
+    const parsed = JSON.parse(trimmed)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function parseProxyUrlEncodedPayload(rawText: string, contentType: string) {
+  const trimmed = (rawText || '').trim()
+  if (!trimmed) return null
+  if (!/application\/x-www-form-urlencoded/i.test(contentType) && !/^[^\s=&]+=[^]*$/.test(trimmed)) return null
+  const params = new URLSearchParams(trimmed)
+  if (!Array.from(params.keys()).length) return null
+  const formData = new FormData()
+  params.forEach((value, key) => {
+    formData.append(key, value)
+  })
+  return formData
+}
+
+function findObjectFieldValue(snapshot: Record<string, string>, matcher: (path: string) => boolean) {
+  const foundKey = Object.keys(snapshot).find((path) => matcher(path))
+  return foundKey ? normalizeProxyFieldValue(snapshot[foundKey]) : ''
+}
+
+function shouldRewriteMissedShiftObjectPayload(snapshot: Record<string, string>) {
+  const explicitMarker = findObjectFieldValue(snapshot, objectKeyLooksLikeMissedMode) === '1'
+  const previousPayrollFlag = findObjectFieldValue(snapshot, objectKeyLooksLikeMissedFlag) === '1'
+  const note = findObjectFieldValue(snapshot, (path) => proxyObjectPathTail(path) === 'payroll_note')
+  const actualWorkDateValue = findObjectFieldValue(snapshot, objectKeyLooksLikeActualWorkDate)
+  const actualWorkDateParsed = parseProxyIsoDate(actualWorkDateValue)
+  const currentClaimWeekParsed = parseProxyIsoDate(currentProxyPayrollWeekStart())
+  const hasShiftTimes = !!findObjectFieldValue(snapshot, (path) => proxyObjectPathTail(path) === 'start_time')
+    || !!findObjectFieldValue(snapshot, (path) => proxyObjectPathTail(path) === 'end_time')
+  const looksLikePreviousPayrollShift = !!(actualWorkDateParsed && currentClaimWeekParsed && actualWorkDateParsed.getTime() < currentClaimWeekParsed.getTime() && hasShiftTimes)
+  return explicitMarker || previousPayrollFlag || /belongs to previous payroll:\s*yes/i.test(note) || looksLikePreviousPayrollShift
+}
+
+function rewriteMissedShiftObjectPayload(payload: unknown, upstreamUrl: URL) {
+  if (!payload || typeof payload !== 'object') return
+  const snapshot = extractInterestingObjectFields(payload)
+  const claimWeekStart = findObjectFieldValue(snapshot, (path) => proxyObjectPathTail(path) === 'bw_claim_week_start') || currentProxyPayrollWeekStart()
+  const claimWeekDate = parseProxyIsoDate(claimWeekStart)
+  const actualWorkDateValue = findObjectFieldValue(snapshot, objectKeyLooksLikeActualWorkDate)
+  const actualWorkDateParsed = parseProxyIsoDate(actualWorkDateValue)
+  const isPreviousPayroll = !!(claimWeekDate && actualWorkDateParsed && actualWorkDateParsed.getTime() < claimWeekDate.getTime())
+
+  const rewriteNode = (value: unknown) => {
+    if (Array.isArray(value)) {
+      value.forEach((entry) => rewriteNode(entry))
+      return
+    }
+    if (!value || typeof value !== 'object') return
+    Object.entries(value as Record<string, unknown>).forEach(([key, entry]) => {
+      if (objectKeyLooksLikeMissedFlag(key)) {
+        ;(value as Record<string, unknown>)[key] = isPreviousPayroll ? '1' : '0'
+        return
+      }
+      if (objectKeyLooksLikeMissedMode(key)) {
+        ;(value as Record<string, unknown>)[key] = '1'
+        return
+      }
+      if (formKeyLooksLikeClaimWeek(key)) {
+        ;(value as Record<string, unknown>)[key] = claimWeekStart
+        return
+      }
+      if (objectKeyLooksLikeActualWorkDate(key) && actualWorkDateValue) {
+        ;(value as Record<string, unknown>)[key] = actualWorkDateValue
+        return
+      }
+      rewriteNode(entry)
+    })
+  }
+
+  rewriteNode(payload)
+
+  Array.from(new Set(Array.from(upstreamUrl.searchParams.keys()))).forEach((key) => {
+    if (formKeyLooksLikeClaimWeek(key)) {
+      upstreamUrl.searchParams.set(key, claimWeekStart)
+    }
+  })
+}
+
 function shouldRewriteMissedShiftSubmission(formData: FormData) {
   const explicitMarker = normalizeProxyFieldValue(formData.get('bw_missed_shift_mode')) === '1'
   const previousPayrollFlag = normalizeProxyFieldValue(formData.get('missed_previous_week')) === '1'
@@ -2056,50 +2185,52 @@ async function buildUpstreamRequest(c: any, incomingUrl: URL, upstreamUrl: URL, 
   const isWagesPath = incomingUrl.pathname === '/wages' || incomingUrl.pathname.startsWith('/wages/')
   const canRewriteForm = /application\/x-www-form-urlencoded|multipart\/form-data/i.test(contentType)
 
-  if (!isWagesPath || !canRewriteForm) {
-    return {
-      upstreamRequest: new Request(upstreamUrl.toString(), {
-        method,
-        headers: upstreamHeaders,
-        body: c.req.raw.body,
-        redirect: 'manual',
-      }),
-      debugCapture: null,
+  if (isWagesPath && canRewriteForm) {
+    const formData = await c.req.raw.clone().formData()
+    const shouldCaptureDebug = shouldCaptureWagesDebug(incomingUrl, formData)
+    const originalSnapshot = shouldCaptureDebug
+      ? { _content_type: contentType || '(none)', ...extractInterestingFormFields(formData) }
+      : null
+    const rewriteApplied = shouldRewriteMissedShiftSubmission(formData)
+
+    if (rewriteApplied) {
+      rewriteMissedShiftSubmission(formData, upstreamUrl)
     }
-  }
 
-  const formData = await c.req.raw.clone().formData()
-  const shouldCaptureDebug = shouldCaptureWagesDebug(incomingUrl, formData)
-  const originalSnapshot = shouldCaptureDebug ? extractInterestingFormFields(formData) : null
-  const rewriteApplied = shouldRewriteMissedShiftSubmission(formData)
+    const rewrittenSnapshot = shouldCaptureDebug
+      ? { _content_type: contentType || '(none)', ...extractInterestingFormFields(formData) }
+      : null
 
-  if (rewriteApplied) {
-    rewriteMissedShiftSubmission(formData, upstreamUrl)
-  }
+    upstreamHeaders.delete('content-length')
 
-  const rewrittenSnapshot = shouldCaptureDebug ? extractInterestingFormFields(formData) : null
-
-  upstreamHeaders.delete('content-length')
-
-  let upstreamRequest: Request
-  if (/application\/x-www-form-urlencoded/i.test(contentType)) {
-    const params = new URLSearchParams()
-    let hasBinaryField = false
-    formData.forEach((value, key) => {
-      if (typeof value === 'string') {
-        params.append(key, value)
-      } else {
-        hasBinaryField = true
-      }
-    })
-    if (!hasBinaryField) {
-      upstreamHeaders.set('content-type', 'application/x-www-form-urlencoded;charset=UTF-8')
-      upstreamRequest = new Request(upstreamUrl.toString(), {
-        method,
-        headers: upstreamHeaders,
-        body: params.toString(),
-        redirect: 'manual',
+    let upstreamRequest: Request
+    if (/application\/x-www-form-urlencoded/i.test(contentType)) {
+      const params = new URLSearchParams()
+      let hasBinaryField = false
+      formData.forEach((value, key) => {
+        if (typeof value === 'string') {
+          params.append(key, value)
+        } else {
+          hasBinaryField = true
+        }
       })
+      if (!hasBinaryField) {
+        upstreamHeaders.set('content-type', 'application/x-www-form-urlencoded;charset=UTF-8')
+        upstreamRequest = new Request(upstreamUrl.toString(), {
+          method,
+          headers: upstreamHeaders,
+          body: params.toString(),
+          redirect: 'manual',
+        })
+      } else {
+        upstreamHeaders.delete('content-type')
+        upstreamRequest = new Request(upstreamUrl.toString(), {
+          method,
+          headers: upstreamHeaders,
+          body: formData,
+          redirect: 'manual',
+        })
+      }
     } else {
       upstreamHeaders.delete('content-type')
       upstreamRequest = new Request(upstreamUrl.toString(), {
@@ -2109,22 +2240,100 @@ async function buildUpstreamRequest(c: any, incomingUrl: URL, upstreamUrl: URL, 
         redirect: 'manual',
       })
     }
-  } else {
-    upstreamHeaders.delete('content-type')
-    upstreamRequest = new Request(upstreamUrl.toString(), {
-      method,
-      headers: upstreamHeaders,
-      body: formData,
-      redirect: 'manual',
+
+    return {
+      upstreamRequest,
+      debugCapture: shouldCaptureDebug ? {
+        originalSnapshot,
+        rewrittenSnapshot,
+        rewriteApplied,
+      } : null,
+    }
+  }
+
+  const shouldCaptureDebug = isWagesPath && !['GET', 'HEAD'].includes(method)
+  const rawText = shouldCaptureDebug ? await c.req.raw.clone().text() : ''
+  const debugPrefix = shouldCaptureDebug
+    ? {
+        _content_type: contentType || '(none)',
+        _transport: 'raw-body',
+        _raw_text: normalizeProxySnippet(rawText),
+      }
+    : null
+
+  const jsonPayload = isWagesPath ? parseProxyJsonPayload(rawText, contentType) : null
+  if (jsonPayload) {
+    const originalSnapshot = shouldCaptureDebug
+      ? { ...debugPrefix, ...extractInterestingObjectFields(jsonPayload) }
+      : null
+    const rewriteApplied = shouldRewriteMissedShiftObjectPayload(extractInterestingObjectFields(jsonPayload))
+    if (rewriteApplied) {
+      rewriteMissedShiftObjectPayload(jsonPayload, upstreamUrl)
+    }
+    const rewrittenSnapshot = shouldCaptureDebug
+      ? { ...debugPrefix, ...extractInterestingObjectFields(jsonPayload) }
+      : null
+    upstreamHeaders.delete('content-length')
+    upstreamHeaders.set('content-type', 'application/json;charset=UTF-8')
+    return {
+      upstreamRequest: new Request(upstreamUrl.toString(), {
+        method,
+        headers: upstreamHeaders,
+        body: JSON.stringify(jsonPayload),
+        redirect: 'manual',
+      }),
+      debugCapture: shouldCaptureDebug ? {
+        originalSnapshot,
+        rewrittenSnapshot,
+        rewriteApplied,
+      } : null,
+    }
+  }
+
+  const looseFormData = isWagesPath ? parseProxyUrlEncodedPayload(rawText, contentType) : null
+  if (looseFormData) {
+    const originalSnapshot = shouldCaptureDebug
+      ? { ...debugPrefix, ...extractInterestingFormFields(looseFormData) }
+      : null
+    const rewriteApplied = shouldRewriteMissedShiftSubmission(looseFormData)
+    if (rewriteApplied) {
+      rewriteMissedShiftSubmission(looseFormData, upstreamUrl)
+    }
+    const rewrittenSnapshot = shouldCaptureDebug
+      ? { ...debugPrefix, ...extractInterestingFormFields(looseFormData) }
+      : null
+    const params = new URLSearchParams()
+    looseFormData.forEach((value, key) => {
+      if (typeof value === 'string') params.append(key, value)
     })
+    upstreamHeaders.delete('content-length')
+    upstreamHeaders.set('content-type', 'application/x-www-form-urlencoded;charset=UTF-8')
+    return {
+      upstreamRequest: new Request(upstreamUrl.toString(), {
+        method,
+        headers: upstreamHeaders,
+        body: params.toString(),
+        redirect: 'manual',
+      }),
+      debugCapture: shouldCaptureDebug ? {
+        originalSnapshot,
+        rewrittenSnapshot,
+        rewriteApplied,
+      } : null,
+    }
   }
 
   return {
-    upstreamRequest,
+    upstreamRequest: new Request(upstreamUrl.toString(), {
+      method,
+      headers: upstreamHeaders,
+      body: c.req.raw.body,
+      redirect: 'manual',
+    }),
     debugCapture: shouldCaptureDebug ? {
-      originalSnapshot,
-      rewrittenSnapshot,
-      rewriteApplied,
+      originalSnapshot: debugPrefix,
+      rewrittenSnapshot: debugPrefix,
+      rewriteApplied: false,
     } : null,
   }
 }
