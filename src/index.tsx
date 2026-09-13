@@ -263,25 +263,9 @@ label[for="bw-missed-work-date"] {
 .bw-hidden-original-label {
   display: none !important;
 }
-.bw-time-row {
-  display: grid !important;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  align-items: start;
-}
-.bw-time-cell {
-  min-width: 0;
-}
-.bw-time-cell input,
-.bw-time-cell select {
-  width: 100% !important;
-  max-width: 100% !important;
-  min-width: 0 !important;
-}
 @media (max-width: 560px) {
   .bw-final-submit-panel__row { align-items: stretch; }
   .bw-final-submit-go, .bw-last-payroll-btn { width: 100% !important; }
-  .bw-time-row { grid-template-columns: 1fr !important; }
 }
 </style>
 <script>
@@ -1140,7 +1124,7 @@ label[for="bw-missed-work-date"] {
     }
     if (workTypeField instanceof HTMLInputElement) {
       const originalField = workTypeField
-      const select = buildSyncedSelect(form, originalField.name || 'work_type', originalField, options, 'Work type', 'Select work type')
+      const select = buildSyncedSelect(form, originalField.name || 'work_type', originalField, options, 'Work type / role', 'Select work type')
       if (originalField.value && !select.value) select.value = originalField.value
       if (once(originalField, 'SourceToSelectWorkType')) {
         const syncToSource = () => { originalField.value = select.value || '' }
@@ -1151,72 +1135,7 @@ label[for="bw-missed-work-date"] {
       hideOriginalFieldArtifacts(form, originalField)
       return select
     }
-    return buildSyncedSelect(form, 'work_type', anchorField, options, 'Work type', 'Select work type')
-  }
-
-  function workTypeFieldLabelNodes(form, field) {
-    const labels = []
-    if (!field) return labels
-    if (field.id) {
-      form.querySelectorAll('label[for="' + field.id + '"]').forEach((label) => labels.push(label))
-    }
-    const previousLabel = field.previousElementSibling
-    if (previousLabel instanceof HTMLLabelElement) labels.push(previousLabel)
-    const wrapperLabel = field.closest('.bw-field-shell, .field, .row, div')?.querySelector('label')
-    if (wrapperLabel instanceof HTMLLabelElement) labels.push(wrapperLabel)
-    return Array.from(new Set(labels))
-  }
-
-  function fieldLooksLikeWorkType(form, field) {
-    if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement)) return false
-    if (field instanceof HTMLInputElement && (field.type === 'hidden' || field.type === 'date' || field.type === 'time')) return false
-    const nameKey = normalize(field.name || field.id || '').toLowerCase()
-    if (/(^|_)(work_type|role_worked)(_|$)/.test(nameKey)) return true
-    const placeholder = normalize(field.getAttribute('placeholder') || '').toLowerCase()
-    if (/choose work type|select work type|work type|work type \/ role/.test(placeholder)) return true
-    const labels = workTypeFieldLabelNodes(form, field).map((label) => elementText(label).toLowerCase())
-    if (labels.some((label) => /work type|work type \/ role/.test(label))) return true
-    if (field instanceof HTMLSelectElement) {
-      const optionTexts = Array.from(field.options).map((option) => normalize(option.textContent || option.value || '').toLowerCase())
-      if (optionTexts.some((text) => /choose work type|select work type/.test(text))) return true
-    }
-    return false
-  }
-
-  function normalizeCurrentShiftWorkTypeUi(form, keepField) {
-    if (!(keepField instanceof HTMLElement)) return
-    workTypeFieldLabelNodes(form, keepField).forEach((label) => {
-      label.textContent = 'Work type'
-      label.classList.remove('bw-hidden-original-label')
-    })
-    if (keepField instanceof HTMLSelectElement && !keepField.value) keepField.value = ''
-    Array.from(form.querySelectorAll('select, input'))
-      .filter((field) => field !== keepField && fieldLooksLikeWorkType(form, field) && isVisibleElement(field))
-      .forEach((field) => {
-        workTypeFieldLabelNodes(form, field).forEach((label) => {
-          if (!keepField.contains(label)) label.remove()
-        })
-        const wrapper = field.closest('.bw-work-type-wrap, .bw-role-worked-wrap, .bw-field-shell')
-        if (wrapper instanceof HTMLElement && wrapper.contains(field) && wrapper !== keepField.closest('.bw-work-type-wrap, .bw-role-worked-wrap, .bw-field-shell')) {
-          wrapper.remove()
-          return
-        }
-        field.remove()
-      })
-  }
-
-  function normalizeCurrentShiftTimeLayout(startField, endField) {
-    if (!(startField instanceof HTMLElement) || !(endField instanceof HTMLElement)) return
-    const startGroup = startField.closest('.bw-field-shell, .field, .row > div, .col, div') || startField.parentElement
-    const endGroup = endField.closest('.bw-field-shell, .field, .row > div, .col, div') || endField.parentElement
-    if (!(startGroup instanceof HTMLElement) || !(endGroup instanceof HTMLElement)) return
-    startField.classList.add('bw-time-input')
-    endField.classList.add('bw-time-input')
-    if (startGroup.parentElement && startGroup.parentElement === endGroup.parentElement) {
-      startGroup.parentElement.classList.add('bw-time-row')
-      startGroup.classList.add('bw-time-cell')
-      endGroup.classList.add('bw-time-cell')
-    }
+    return buildSyncedSelect(form, 'work_type', anchorField, options, 'Work type / role', 'Select work type')
   }
 
   function ensureVenueSuggestions(venueField, workTypeOptions) {
@@ -1340,10 +1259,6 @@ label[for="bw-missed-work-date"] {
       emphasizeDateWorkedField(workDateField)
       ensureDateWorkedLabel(workDateField)
       removeDateWorkedHelperText(workDateField)
-      if (!isMissedModeActive) {
-        normalizeCurrentShiftWorkTypeUi(form, workTypeField)
-        normalizeCurrentShiftTimeLayout(startField, endField)
-      }
       form.querySelectorAll('.field-help').forEach((node) => node.remove())
       ensureVenueSuggestions(venueField, resolveWorkTypeOptions(form))
       setRequired(workDateField, 'WorkDate', '')
