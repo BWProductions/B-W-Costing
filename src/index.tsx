@@ -2196,6 +2196,157 @@ function rewriteMissedShiftSubmission(formData: FormData, upstreamUrl: URL) {
   })
 }
 
+function findProxyFormValue(formData: FormData, keys: string[]) {
+  for (const key of keys) {
+    const value = normalizeProxyFieldValue(formData.get(key))
+    if (value) return value
+  }
+  return ''
+}
+
+function parseProxyInteger(value: string) {
+  const parsed = Number.parseInt((value || '').trim(), 10)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function proxySqlNow() {
+  return new Date().toISOString().slice(0, 19).replace('T', ' ')
+}
+
+function resolveMissedShiftSaveStatus(formData: FormData) {
+  const explicit = findProxyFormValue(formData, ['save_action', 'status', 'action'])
+  if (/draft|temp/i.test(explicit)) return 'draft'
+  if (/final|submit/i.test(explicit)) return 'submitted'
+
+  for (const key of Array.from(new Set(Array.from(formData.keys())))) {
+    const normalizedKey = (key || '').trim().toLowerCase()
+    const value = normalizeProxyFieldValue(formData.get(key))
+    if (/final|submit/.test(normalizedKey) || /final|submit/i.test(value)) return 'submitted'
+    if (/draft|temp/.test(normalizedKey) || /draft|temp/i.test(value)) return 'draft'
+  }
+
+  return 'draft'
+}
+
+async function saveMissedShiftDirectly(env: Bindings | undefined, formData: FormData) {
+  const db = env?.DB
+  if (!db) return { ok: false, reason: 'missing_db' as const }
+
+  const staffId = parseProxyInteger(findProxyFormValue(formData, ['staff_id', 'person_id', 'worker_id', 'employee_id']))
+  if (!staffId) return { ok: false, reason: 'missing_staff' as const }
+
+  const workDate = findProxyFormValue(formData, ['bw_actual_work_date', 'date_worked', 'actual_work_date', 'physical_work_date', 'exact_work_date', 'work_date', 'bw_visible_work_date'])
+  const workDateParsed = parseProxyIsoDate(workDate)
+  if (!workDateParsed) return { ok: false, reason: 'missing_work_date' as const }
+
+  const captureWeekStart = currentProxyPayrollWeekStart()
+  const claimedAgainstWeekStart = formatProxyIsoDate(proxyStartOfPayrollWeek(workDateParsed))
+  const status = resolveMissedShiftSaveStatus(formData)
+  const submittedAt = status === 'submitted' ? proxySqlNow() : null
+  const overnightConfirmed = /^(1|true|yes|on)$/i.test(findProxyFormValue(formData, ['overnight_confirmed', 'next_overnight_shift', 'overnight'])) ? 1 : 0
+  const venue = findProxyFormValue(formData, ['outlet_venue', 'venue_name', 'venue'])
+  const area = findProxyFormValue(formData, ['area'])
+  const workType = findProxyFormValue(formData, ['work_type', 'role_worked'])
+  const workDescription = findProxyFormValue(formData, ['work_description', 'details', 'description'])
+  const startTime = findProxyFormValue(formData, ['start_time', 'start'])
+  const endTime = findProxyFormValue(formData, ['end_time', 'finish_time', 'finish'])
+  const note = [
+    'Claimed against payroll week ' + claimedAgainstWeekStart + '.',
+    'Captured under current payroll week ' + captureWeekStart + '.',
+    'Exact work date ' + workDate + '.',
+    venue ? 'Venue ' + venue + '.' : '',
+    workType ? 'Work type / role ' + workType + '.' : '',
+    workDescription ? 'Description ' + workDescription + '.' : '',
+    (startTime || endTime) ? 'Captured time ' + (startTime || '??') + '-' + (endTime || '??') + '.' : '',
+    'Belongs to previous payroll: Yes.',
+    'Do not block staff entry. Do not auto-call it duplicate. Create backend manual overlap review only where an existing entry conflicts.',
+  ].filter(Boolean).join(' ')
+
+  const result = await db.prepare(`INSERT INTO wage_shift_drafts (
+    staff_id,
+    work_date,
+    outlet_venue,
+    area,
+    work_type,
+    work_description,
+    start_time,
+    end_time,
+    status,
+    submitted_at,
+    missed_previous_week,
+    overnight_confirmed,
+    payroll_week_start,
+    payroll_note
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(
+      staffId,
+      workDate,
+      venue || null,
+      area || null,
+      workType || null,
+      workDescription || null,
+      startTime || null,
+      endTime || null,
+      status,
+      submittedAt,
+      1,
+      overnightConfirmed,
+      captureWeekStart,
+      note,
+    )
+    .run()
+
+  return {
+    ok: true,
+    status,
+    captureWeekStart,
+    claimedAgainstWeekStart,
+    insertedId: Number(result.meta?.last_row_id || 0),
+  }
+}
+
+async function handleDirectMissedShiftSave(c: any, incomingUrl: URL, formData: FormData) {
+  const originalSnapshot = { _content_type: c.req.raw.headers.get('content-type') || '(none)', ...extractInterestingFormFields(formData) }
+  const saveResult = await saveMissedShiftDirectly(c.env, formData)
+  if (!saveResult.ok) return null
+
+  const redirectUrl = new URL('/wages', incomingUrl.origin)
+  redirectUrl.searchParams.set('payroll_week_start', saveResult.captureWeekStart)
+  redirectUrl.searchParams.set('saved', saveResult.status)
+  if (saveResult.claimedAgainstWeekStart) redirectUrl.searchParams.set('bw_claim_week_start', saveResult.claimedAgainstWeekStart)
+
+  const rewrittenSnapshot = {
+    ...originalSnapshot,
+    payroll_week_start: saveResult.captureWeekStart,
+    bw_claim_week_start: saveResult.claimedAgainstWeekStart,
+    missed_previous_week: '1',
+    bw_missed_shift_mode: '1',
+    _direct_save: saveResult.status,
+    _inserted_id: String(saveResult.insertedId || ''),
+  }
+
+  await captureWagesDebug(c.env, {
+    request_path: incomingUrl.pathname + incomingUrl.search,
+    request_method: (c.req.raw.method || 'POST').toUpperCase(),
+    original_payload_json: JSON.stringify(originalSnapshot),
+    rewritten_payload_json: JSON.stringify(rewrittenSnapshot),
+    rewrite_applied: 1,
+    response_status: 302,
+    response_location: redirectUrl.pathname + redirectUrl.search,
+    response_error_text: '',
+  })
+
+  return new Response(null, {
+    status: 302,
+    headers: {
+      location: redirectUrl.pathname + redirectUrl.search,
+      'cache-control': 'no-store, no-cache, must-revalidate, max-age=0',
+      pragma: 'no-cache',
+      expires: '0',
+    },
+  })
+}
+
 function shouldCaptureWagesDebug(incomingUrl: URL, formData: FormData) {
   if (!(incomingUrl.pathname === '/wages' || incomingUrl.pathname.startsWith('/wages/'))) return false
   return Array.from(new Set(Array.from(formData.keys()))).some((key) => /work_date|date_worked|actual_work_date|physical_work_date|exact_work_date|payroll|week|missed|start_time|end_time|submit|draft|save/i.test(key))
@@ -2458,6 +2609,18 @@ async function proxyRequest(c: any) {
   const incomingUrl = new URL(c.req.url)
   const upstreamUrl = new URL(incomingUrl.pathname + incomingUrl.search, ORIGIN)
   rewritePreviousPayrollGetRequest(incomingUrl, upstreamUrl)
+
+  const method = (c.req.raw.method || 'GET').toUpperCase()
+  const requestContentType = c.req.raw.headers.get('content-type') || ''
+  const cookieHeader = c.req.raw.headers.get('cookie') || ''
+  if (method === 'POST' && cookieHeader && incomingUrl.pathname === '/wages/drafts' && /application\/x-www-form-urlencoded|multipart\/form-data/i.test(requestContentType)) {
+    const directFormData = await c.req.raw.clone().formData()
+    if (shouldRewriteMissedShiftSubmission(directFormData)) {
+      const directResponse = await handleDirectMissedShiftSave(c, incomingUrl, directFormData)
+      if (directResponse) return directResponse
+    }
+  }
+
   const upstreamHeaders = rewriteRequestHeaders(c.req.raw.headers, incomingUrl, upstreamUrl)
 
   const { upstreamRequest, debugCapture } = await buildUpstreamRequest(c, incomingUrl, upstreamUrl, upstreamHeaders)
