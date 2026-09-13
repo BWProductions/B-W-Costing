@@ -367,15 +367,27 @@ label[for="bw-missed-work-date"] {
   const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
   const FALLBACK_WORK_TYPE_OPTIONS = ['Normal', 'House', 'House/Garden', 'Warehouse Team', 'Team Assistance', 'Music Bus']
   const COMMON_VENUE_SUGGESTIONS = ['Warehouse', 'Garden', 'Work with the Team', 'House', 'Music Bus', 'Ellis Park', 'FNB Stadium', 'Loftus', 'Inanda Club', 'Supersport Park', 'SAB HQ', 'DHL Stadium']
+  // Every active worker has an explicit profile so a shared phone can never
+  // fall back to another worker's dropdown. Unlisted / unknown = Normal only.
   const STAFF_WORK_TYPE_PROFILES = [
-    { ids: ['1'], names: ['givemore chifetete kuziwa', 'givemore'], options: ['House', 'Team Assistance'] },
+    { ids: ['1'], names: ['givemore chifetete kuziwa', 'givemore'], options: ['House/Garden', 'Warehouse Team'] },
     { ids: ['2'], names: ['takavaudza chokuda', 'takavaudza', 'takka'], options: ['House/Garden', 'Warehouse Team'] },
-    { ids: ['3'], names: ['thina dyani', 'thina'], options: ['Normal'] },
+    { ids: ['3'], names: ['thina dyani', 'thina'], options: ['Normal', 'Warehouse Team'] },
+    { ids: ['4'], names: ['tsotlego petrus malakoane', 'tsotlego'], options: ['Normal', 'Warehouse Team'] },
     { ids: ['5'], names: ['bhekizitha maphosa', 'bheki'], options: ['Music Bus', 'Normal'] },
+    { ids: ['6'], names: ['isaac mbele', 'isaac'], options: ['Normal'] },
     { ids: ['7'], names: ['john simbarashe mhlanga', 'jay'], options: ['Music Bus', 'Normal'] },
-    { ids: ['12'], names: ['brian ndlovu', 'sipho'], options: ['Music Bus', 'Normal'] },
+    { ids: ['8'], names: ['erence mngomezulu', 'erence'], options: ['Normal'] },
+    { ids: ['9'], names: ['erick mpho molefe', 'erick'], options: ['Normal'] },
+    { ids: ['10'], names: ['daniel motaung', 'daniel', 'danny'], options: ['Normal'] },
+    { ids: ['11'], names: ['solomon moyo', 'solomon', 'solly'], options: ['Normal'] },
+    { ids: ['12'], names: ['brian ndlovu', 'brian', 'sipho'], options: ['Music Bus', 'Normal'] },
+    { ids: ['13'], names: ['patrick ngozo', 'patrick'], options: ['Normal'] },
+    { ids: ['14'], names: ['thandanani nkala', 'thandanani'], options: ['Normal'] },
     { ids: ['15'], names: ['joshua motsamai nteo', 'joshua'], options: ['Music Bus', 'Normal'] },
+    { ids: ['16'], names: ['lebo lebo', 'lebo'], options: ['Normal'] },
   ]
+  const NORMAL_ONLY_PROFILE = { ids: [], names: [], options: ['Normal'] }
 
   const normalize = (value) => String(value || '')
     .split(String.fromCharCode(10)).join(' ')
@@ -1515,9 +1527,21 @@ label[for="bw-missed-work-date"] {
       }
     }
 
+    // Prefer the stored staff ID over a stored profile blob so a shared phone
+    // never carries one worker's dropdown into another worker's session.
+    const storedStaffId = getStoredActiveStaffId()
+    if (storedStaffId) {
+      const profileByStoredId = STAFF_WORK_TYPE_PROFILES.find((profile) => profile.ids.includes(storedStaffId))
+      if (profileByStoredId) {
+        persistActiveStaffProfile(profileByStoredId)
+        return profileByStoredId
+      }
+      return NORMAL_ONLY_PROFILE
+    }
+
     const storedProfile = getStoredActiveStaffProfile()
     if (storedProfile?.ids?.[0]) persistActiveStaffId(storedProfile.ids[0])
-    return storedProfile
+    return storedProfile || NORMAL_ONLY_PROFILE
   }
 
   function resolveStaffWorkTypeProfile(form) {
@@ -1535,11 +1559,31 @@ label[for="bw-missed-work-date"] {
     return detectAndPersistActiveStaffProfile()
   }
 
+  function upstreamWorkTypeOptions(form) {
+    // The upstream server already knows who is logged in and renders that
+    // worker's own options. Remember them before we rebuild the select so an
+    // unknown-ID phone still gets the correct server-side list, never another
+    // worker's list.
+    const select = firstField(form, ['select[name="work_type"]', 'select[id="work_type"]', 'select[id="work_type_choice"]'])
+    if (!(select instanceof HTMLSelectElement)) return []
+    if (!select.dataset.bwUpstreamOptions) {
+      const raw = Array.from(select.options).map((option) => normalize(option.value || '')).filter(Boolean)
+      select.dataset.bwUpstreamOptions = JSON.stringify(raw)
+    }
+    try {
+      const parsed = JSON.parse(select.dataset.bwUpstreamOptions || '[]')
+      return Array.isArray(parsed) ? uniqueLabels(parsed) : []
+    } catch (err) {
+      return []
+    }
+  }
+
   function resolveWorkTypeOptions(form) {
     const profile = resolveStaffWorkTypeProfile(form)
-    if (profile?.options?.length) return uniqueLabels(profile.options)
-    if (profile) return ['Normal']
-    return uniqueLabels(FALLBACK_WORK_TYPE_OPTIONS)
+    if (profile && profile !== NORMAL_ONLY_PROFILE && profile.options?.length) return uniqueLabels(profile.options)
+    const upstream = upstreamWorkTypeOptions(form)
+    if (upstream.length) return upstream
+    return ['Normal']
   }
 
   function repopulateSelect(select, options, placeholderText) {
@@ -1608,6 +1652,7 @@ label[for="bw-missed-work-date"] {
   }
 
   function restoreWorkTypeField(form, workTypeField, anchorField) {
+    upstreamWorkTypeOptions(form)
     const options = resolveWorkTypeOptions(form)
     if (workTypeField instanceof HTMLSelectElement) {
       repopulateSelect(workTypeField, options, 'Select work type')
@@ -1882,6 +1927,22 @@ label[for="bw-missed-work-date"] {
     })
   }
 
+  function hideLegacyMissedShiftToggle() {
+    // Upstream still renders an "Add a missed shift" toggle plus the helper
+    // sentence "Tap the button above only when this shift belongs to last week…".
+    // The single-calendar flow replaces it, so remove the whole block.
+    document.querySelectorAll('#missed_previous_week_toggle, #missed_previous_week_status, .toggle-status').forEach((node) => {
+      const row = node.closest('.toggle-row') || node
+      if (row instanceof HTMLElement) row.remove()
+    })
+    Array.from(document.querySelectorAll('small, p, div, span')).forEach((node) => {
+      if (node.children.length) return
+      const text = elementText(node)
+      if (!/tap the button above|add a missed shift button|use the add a missed shift/i.test(text)) return
+      if (node instanceof HTMLElement) node.remove()
+    })
+  }
+
   function hideOvernightPrompt() {
     const selectors = '.toggle-row, .check-row, .row, label, p, small, div'
     Array.from(document.querySelectorAll(selectors)).forEach((node) => {
@@ -1995,6 +2056,7 @@ label[for="bw-missed-work-date"] {
     unlockPayrollWeekPicker()
     hidePayrollWeekSection()
     enhanceMissedShiftForms()
+    hideLegacyMissedShiftToggle()
     hideLockedPayrollWarnings()
     hideOvernightPrompt()
     addBulkFinalSubmission()
