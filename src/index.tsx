@@ -2612,8 +2612,7 @@ async function proxyRequest(c: any) {
 
   const method = (c.req.raw.method || 'GET').toUpperCase()
   const requestContentType = c.req.raw.headers.get('content-type') || ''
-  const cookieHeader = c.req.raw.headers.get('cookie') || ''
-  if (method === 'POST' && cookieHeader && incomingUrl.pathname === '/wages/drafts' && /application\/x-www-form-urlencoded|multipart\/form-data/i.test(requestContentType)) {
+  if (method === 'POST' && incomingUrl.pathname === '/wages/drafts' && /application\/x-www-form-urlencoded|multipart\/form-data/i.test(requestContentType)) {
     const directFormData = await c.req.raw.clone().formData()
     if (shouldRewriteMissedShiftSubmission(directFormData)) {
       const directResponse = await handleDirectMissedShiftSave(c, incomingUrl, directFormData)
