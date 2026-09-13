@@ -49,6 +49,9 @@ Internal ops platform for B&W Productions CC. Built on Cloudflare Pages + Hono +
 - Fixed the mobile/shared-device staff-context bug by persisting the active staff ID separately, appending `bw_staff_id` across rewritten wages links/forms, hydrating missing `staff_id` values from query/referer on the backend, and redirecting successful direct saves back to `/wages/me` instead of dumping workers back onto the blank add-shift form.
 - Fixed the live D1 overlap-review trigger so overlapping missed shifts no longer crash with a 500 before save; backend review rows now use the valid `possible_duplicate_manual_check` warning kind while workers still stay unblocked and the office still sees the manual overlap review details.
 - Added direct-save/direct-final-submit error capture into `wage_debug_capture` so future worker save failures are visible even when the fallback path itself throws.
+- 2026-09-13: removed the leftover upstream **Add a missed shift** toggle row and its "Tap the button above only when this shift belongs to last week..." helper sentence from the worker form; the single calendar (previous payroll Saturday onward) is the only missed-shift mechanism.
+- 2026-09-13: work-type dropdowns pinned per worker (Givemore/Takka: House/Garden + Warehouse Team; Thina/Tsotlego: Normal + Warehouse Team; Bheki/Jay/Sipho/Joshua: Music Bus + Normal; everyone else: Normal). Unknown or unlisted workers always get Normal; a shared phone can no longer inherit the previous worker's list. Full table in `docs/wages-restore-point-2026-09-13.md`.
+- **Staff link (the only one workers need): https://bwprodsystem.co.za/wages**
 
 ## Phase 1 Foundation (completed)
 - `company_settings` table — single-row company details (legal name, VAT, registration, address, contact)

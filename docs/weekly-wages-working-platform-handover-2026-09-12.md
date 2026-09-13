@@ -325,7 +325,35 @@ Restore tag for known wages baseline:
 If asked to restore the wages system, prefer restoring to the tag/commit above and redeploying.
 ```
 
-## 12. Final summary
+## 12. User-approved locked state after final missed-shift cleanup
+This section records the later final state that the user explicitly approved and asked to keep unchanged.
+
+### Approved visible missed-shift result
+The accepted missed-shift page state is:
+- the old top legacy `Date worked` block with the Saturday-style dropdown is gone
+- only the lower red `Date worked` field remains
+- the remaining `Date worked` field uses the calendar popup/date-picker behavior
+- the page keeps the red missed-shift banner and the approved missed-shift layout
+- this accepted state must not be casually changed again
+
+### Locked restore points for this approved state
+- approved commit: `2467df2` (`Remove legacy top missed-shift date block`)
+- approved restore tag: `weekly-wages-approved-state-2026-09-12`
+- approved deploy observed at the time of lock: `https://717f04b8.bw-productions.pages.dev`
+- approved backup archive: `https://www.genspark.ai/api/files/s/PlXe3OLs`
+
+### Instruction for future chats / future AI
+If the user says “put it back to the approved missed-shift state”, restore to:
+- tag `weekly-wages-approved-state-2026-09-12`
+- or commit `2467df2`
+
+And preserve these specific missed-shift expectations:
+- do not reintroduce the top Saturday/Monday/legacy dropdown block
+- do not add a duplicate `Date worked` control above the real calendar field
+- keep only the lower red `Date worked` field with the date picker/calendar
+- do not casually restyle or restructure this approved page
+
+## 13. Final summary
 This handover is the operational reference for the Weekly Wages Working Platform baseline established during the 2026-09-12 session.
 
 Keep this file together with:
