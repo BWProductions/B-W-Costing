@@ -31,18 +31,18 @@ Internal ops platform for B&W Productions CC. Built on Cloudflare Pages + Hono +
 - Worker PIN access itself remained online; recent failed logins were traced to regenerated worker PINs on 2026-09-09 plus a broken/awkward shared-device switch-person flow.
 - Added safe-proxy UI enhancement injection on `/wages*` pages so fixes can be layered without changing the upstream wage app directly.
 - Rewired **Switch person** to force a wages logout request first, then return to `/wages` for the next worker on shared devices.
-- Added UI styling hooks for **Add Shift**, **Save Shift Temporarily**, **Miss Shift**, and bulk **Final Submission** selection.
-- Updated the worker wages styling so the primary **Add current shift** action stays dark like the approved mock-up, the worker-facing **Save Shift Temporarily** action is yellow, and the front-page **Add a missed Shift** action stays bold red.
+- Added UI styling hooks for **Add Shift**, **Save Shift Temporarily**, and bulk **Final Submission** selection.
+- Updated the worker wages styling so the primary **Add current shift** action stays dark like the approved mock-up and the worker-facing **Save Shift Temporarily** action is yellow.
 - Forced proxied HTML responses under the safe-proxy flow to return `Cache-Control: no-store` headers so worker-facing wages UI changes show on normal refresh instead of only after a hard refresh.
-- Tightened the logged-in wages dashboard detection so the worker now reinserts the red **Add a MissShift** button directly under **+ Add a shift** even when hidden upstream actions exist on the page.
-- The MissShift launch now carries an explicit `bw_missed=1` handoff into the add-shift screen, and the form enhancer now recognizes standard shift-entry forms during that launch so the date picker is widened to the intended missed-shift range instead of falling back to the old Saturday/Monday-only options.
+- Tightened the logged-in wages dashboard handling so staff now use a single **Add Current Shift** entry path and do not see a separate **Add a Missed Shift** action.
+- The add-shift flow now handles previous-payroll capture automatically: when staff roll the payroll week back within the allowed window, the form enhancer treats the entry as a missed shift without needing a separate launch button.
 - Removed the old staff-side **Return to Dashboard** action; dashboard access remains admin-only at `/admin/wages`.
 - Removed the unapproved **Last payroll** helper / worker guidance copy while still unlocking the payroll week picker safely.
 - Missed-shift date selection now uses a rolling range from the previous payroll week's Saturday through the current payroll's live date window, so staff can choose the physical **Date worked** they actually missed instead of only seeing Saturday/Monday catch-up dates.
-- The missed-shift form now restores the worker-facing heading as **Add a MissShift**, makes the **Date worked** control larger, restores the work-type dropdown breakdown (including House / Garden, Warehouse Team, Team Assistance, and Music Bus cases), and adds venue/event suggestion dropdown support for the free-text venue field.
+- The unified shift-entry form keeps the worker-facing flow on a single page, makes the **Date worked** control larger, restores the work-type dropdown breakdown (including House / Garden, Warehouse Team, Team Assistance, and Music Bus cases), and adds venue/event suggestion dropdown support for the free-text venue field.
 - Added hiding for the visible **Next Overnight Shift** prompt in the worker wages flow.
 - Missed-shift forms now enforce and persist the required claim metadata: payroll week being claimed against, exact work date, venue, work type / role, description, start time, finish time, previous-payroll flag, backend-only system review notes for overlap/conflict review, and a backend manual review item when overlaps or possible already-claimed entries exist.
-- Rolled-back payroll-week captures now auto-classify as missed shifts: the UI preserves the payroll week being claimed against for review, while the proxy rewrites the live submission onto the current open payroll week so locked prior payrolls do not block saving.
+- Rolled-back payroll-week captures now auto-classify as missed shifts: staff can enter them from **Add Current Shift**, the UI preserves the payroll week being claimed against for review, and the proxy rewrites the live submission onto the current open payroll week so locked prior payrolls do not block saving.
 
 ## Phase 1 Foundation (completed)
 - `company_settings` table — single-row company details (legal name, VAT, registration, address, contact)

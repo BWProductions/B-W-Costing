@@ -562,8 +562,6 @@ label[for="bw-missed-work-date"] {
   }
 
   function decorateButtons() {
-    const onShiftEntryPage = actionElements().some((el) => /save shift temporarily/i.test(elementText(el)))
-
     actionElements().forEach((el) => {
       const text = elementText(el)
       if (isAddShiftAction(text)) {
@@ -575,12 +573,8 @@ label[for="bw-missed-work-date"] {
           const markSelected = () => el.classList.add('bw-is-selected')
           const clearSelected = () => el.classList.remove('bw-is-selected')
           el.addEventListener('click', () => {
-            if (window.__bwLaunchMode === 'missed') {
-              setStoredMissedMode(true)
-              window.__bwLaunchMode = ''
-            } else {
-              setStoredMissedMode(false)
-            }
+            setStoredMissedMode(false)
+            window.__bwLaunchMode = ''
             markSelected()
           })
           el.addEventListener('focus', markSelected)
@@ -589,7 +583,7 @@ label[for="bw-missed-work-date"] {
       }
       if (/save shift temporarily/i.test(text)) el.classList.add('bw-save-temp-btn')
       if (/final submit|final submission/i.test(text)) el.classList.add('bw-final-submit-btn')
-      if (onShiftEntryPage && /miss(ed)? shift|missshift/i.test(text)) {
+      if (/miss(ed)? shift|missshift/i.test(text)) {
         if (el instanceof HTMLElement) el.style.display = 'none'
       }
     })
