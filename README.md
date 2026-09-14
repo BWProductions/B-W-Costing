@@ -56,6 +56,7 @@ Internal ops platform for B&W Productions CC. Built on Cloudflare Pages + Hono +
 - 2026-09-14: permanent database guard (migration 0040) — a shift can never be marked submitted without a paid shift record; `GET /wages-health` integrity report; green/red integrity banner on `/admin/wages`.
 - 2026-09-14: every worker shift card shows the full `MISSED SHIFT – actual date … – …` text (draft and submitted); description de-duplicated on re-save.
 - 2026-09-14 (pm): previous-week shifts are stored with their REAL work date (paid in the current payroll, `missed_previous_week=1`); the proxy restores the real date after the wages app accepts the Saturday-booked save and parks/restores it around edit/final-check/final-submit. Dashboard lists them under "Missed shifts from last week — paid in this payroll".
+- 2026-09-14 (later): UI version stamp + `/wages-version` — stale pages on any device auto-reload once; server-side work-type enforcement per worker on every save. Bump `WAGES_UI_VERSION` on every worker-UI deploy.
 - **Staff link (the only one workers need): https://bwprodsystem.co.za/wages**
 
 ## Phase 1 Foundation (completed)

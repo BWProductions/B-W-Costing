@@ -13,7 +13,7 @@ This document records the current working wages state as a restore-point handove
 ## Backup archive restore point
 - **Project backup (previous):** https://www.genspark.ai/api/files/s/6k3morJo
 - **Code commit for this restore point:** see `git log` — "Remove orphan missed-shift helper text and pin per-worker work types"
-- **Cloudflare Pages production deployment:** https://75f25689.bw-productions.pages.dev (custom domain https://bwprodsystem.co.za)
+- **Cloudflare Pages production deployment:** https://e930c675.bw-productions.pages.dev (custom domain https://bwprodsystem.co.za)
 
 ## What is working in this restore point
 - Workers use a single **Add Current Shift** flow.
@@ -69,6 +69,17 @@ The proxy’s direct writes produced `status='submitted'` drafts with **no** pai
   this payroll (with worker/date/time), last paid shift time. Returns HTTP 200 `ok` or 503 `ATTENTION`.
 - `/admin/wages` shows a green/red banner from that report on every load. Red lists the exact blank rows.
 - Nothing for staff or admin to change. No new accounts, no new steps.
+
+## Stale pages and work-type enforcement (2026-09-14, later)
+- Every wages page carries `WAGES_UI_VERSION`. On load it asks `/wages-version`; if the server is newer the page
+  reloads itself once and clears the device-stored dropdown profile. Old copies on office PCs / phone home screens
+  can no longer keep showing an out-of-date form. **Bump `WAGES_UI_VERSION` in `src/index.tsx` on every deploy that
+  changes the worker UI.**
+- Server-side work-type enforcement (`STAFF_ALLOWED_WORK_TYPES`, keyed by the login cookie, not the page): a save with a
+  work type outside the worker's list is rejected with "Work type X is not available for you. Your options are: …".
+  A stale page therefore cannot bill a disallowed type even if it shows one.
+- The per-worker dropdown list exists in two places and must be kept identical: `STAFF_WORK_TYPE_PROFILES` (client) and
+  `STAFF_ALLOWED_WORK_TYPES` (server).
 
 ## REAL DATE kept for previous-week shifts (2026-09-14, afternoon) — supersedes the Saturday-booking note above
 - Worker picks the real date (e.g. Thu 10 Sep) in the single calendar. No button, no error.
