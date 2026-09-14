@@ -3879,6 +3879,23 @@ async function proxyRequest(c: any) {
 
   const method = (c.req.raw.method || 'GET').toUpperCase()
 
+  // Safety net (2026-09-14, seen on Patrick's phone): a Final Submission POST
+  // that lands on /final-check instead of /final-submit is answered by the
+  // engine with a redirect to the ADMIN /login. Treat it as the real
+  // final-submit: rewrite the path and body here, then let it flow through the
+  // normal final-submit handling below (Saturday parking, real-date restore,
+  // error checking) exactly as if the button on the confirmation page was pressed.
+  let finalCheckRedirectFix = false
+  const finalCheckPostMatch = method === 'POST' ? incomingUrl.pathname.match(/^\/wages\/drafts\/(\d+)\/final-check\/?$/) : null
+  if (finalCheckPostMatch) {
+    finalCheckRedirectFix = true
+    incomingUrl.pathname = '/wages/drafts/' + finalCheckPostMatch[1] + '/final-submit'
+    upstreamUrl.pathname = incomingUrl.pathname
+    const fixedBody = new URLSearchParams({ time_correct: 'yes', end_time_correct: 'yes', information_complete: 'yes' }).toString()
+    const h = new Headers(c.req.raw.headers); h.delete('content-length'); h.set('content-type', 'application/x-www-form-urlencoded;charset=UTF-8')
+    c.req.raw = new Request(c.req.raw.url.replace(/\/final-check(\/)?(\?|$)/, '/final-submit$2'), { method: 'POST', headers: h, body: fixedBody })
+  }
+
   if (method === 'GET' && (incomingUrl.pathname === '/wages' || incomingUrl.pathname === '/wages/') && !incomingUrl.search) {
     const baseResponse = new Response(renderWagesLandingHtml(), {
       status: 200,
@@ -3986,6 +4003,14 @@ async function proxyRequest(c: any) {
 
   // After upstream ACCEPTED (302 without error) put the real date back.
   const upstreamLocation = upstreamResponse.headers.get('location') || ''
+  if (finalCheckRedirectFix) {
+    await captureWagesDebug(c.env, { request_path: incomingUrl.pathname + incomingUrl.search + ' (was final-check POST)', request_method: 'POST', original_payload_json: '{"note":"final-check POST treated as final-submit"}', rewritten_payload_json: '{}', rewrite_applied: 1, response_status: upstreamResponse.status, response_location: upstreamLocation, response_error_text: '' })
+    if (/\/login/.test(upstreamLocation) || (upstreamResponse.status === 302 && /[?&]error=/.test(upstreamLocation) === false && !/\/wages\/me/.test(upstreamLocation))) {
+      const back = '/wages/drafts/' + finalCheckPostMatch![1] + '/final-check?error=' + encodeURIComponent('Final Submission did not go through. Please tick all three boxes and press YES – FINAL SUBMISSION again.')
+      if (parkedDraft) { /* restore handled in finally above */ }
+      return new Response(null, { status: 302, headers: { location: back, 'cache-control': 'no-store' } })
+    }
+  }
   const upstreamAccepted = upstreamResponse.status === 302 && !/[?&]error=/.test(upstreamLocation)
   if (upstreamAccepted && realDateRestore && !realDateRestore.staffId) {
     await captureWagesDebug(c.env, { request_path: incomingUrl.pathname + incomingUrl.search, request_method: 'POST', original_payload_json: JSON.stringify(realDateRestore), rewritten_payload_json: '{}', rewrite_applied: 1, response_status: upstreamResponse.status, response_location: upstreamLocation, response_error_text: 'real-date restore skipped: no staff session resolved' })
