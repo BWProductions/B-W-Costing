@@ -13,7 +13,7 @@ This document records the current working wages state as a restore-point handove
 ## Backup archive restore point
 - **Project backup (previous):** https://www.genspark.ai/api/files/s/6k3morJo
 - **Code commit for this restore point:** see `git log` — "Remove orphan missed-shift helper text and pin per-worker work types"
-- **Cloudflare Pages production deployment:** https://414802b4.bw-productions.pages.dev (custom domain https://bwprodsystem.co.za)
+- **Cloudflare Pages production deployment:** https://75f25689.bw-productions.pages.dev (custom domain https://bwprodsystem.co.za)
 
 ## What is working in this restore point
 - Workers use a single **Add Current Shift** flow.
@@ -69,6 +69,22 @@ The proxy’s direct writes produced `status='submitted'` drafts with **no** pai
   this payroll (with worker/date/time), last paid shift time. Returns HTTP 200 `ok` or 503 `ATTENTION`.
 - `/admin/wages` shows a green/red banner from that report on every load. Red lists the exact blank rows.
 - Nothing for staff or admin to change. No new accounts, no new steps.
+
+## REAL DATE kept for previous-week shifts (2026-09-14, afternoon) — supersedes the Saturday-booking note above
+- Worker picks the real date (e.g. Thu 10 Sep) in the single calendar. No button, no error.
+- Stored as **work_date = real date**, `payroll_week_start` = current week (paid this week), `missed_previous_week = 1`,
+  note `Real work date 2026-09-10; paid in current payroll 2026-09-12 to 2026-09-18; flagged for payroll cross-check.`
+  This is the same shape the wages app itself produced for earlier missed shifts (e.g. wage_shifts 9586 = Jay 4 Sep).
+- How: the wages app only ACCEPTS a past date when sent as the current Saturday. The proxy sends Saturday, and once the app
+  has accepted (and on Final Submission has calculated hours/amounts) the proxy writes the real date back. For edit /
+  final-check / final-submit of a real-date draft, the draft is parked on Saturday for that one request then restored.
+- Worker dashboard: paid missed shifts appear under "Missed shifts from last week — paid in this payroll" with the real date,
+  and the week hours/count include them. Cards show `MISSED SHIFT – actual date Thu 10 Sep 2026 – Strike HQ`.
+- Auditor export (Wage Detail / Auditor Review) shows the real date in the date column and the missed flag — proven with
+  last week's export (Jay 2026-09-04 row).
+- Duplicate checks can now compare the real date against previous payroll (review report = agreed next step).
+- Converted this morning's Saturday-booked drafts back to real dates: Bheki 656, Givemore 683/684 (test rows),
+  Joshua 667, Solomon 692/693/694, Takka 675/676, Thandanani 674, Thina 639.
 
 ## Missed-shift detail on every card (2026-09-14)
 - Every shift card (draft and finally submitted) shows the full text
