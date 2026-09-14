@@ -13,7 +13,7 @@ This document records the current working wages state as a restore-point handove
 ## Backup archive restore point
 - **Project backup (previous):** https://www.genspark.ai/api/files/s/6k3morJo
 - **Code commit for this restore point:** see `git log` — "Remove orphan missed-shift helper text and pin per-worker work types"
-- **Cloudflare Pages production deployment:** https://e0a76b52.bw-productions.pages.dev (custom domain https://bwprodsystem.co.za)
+- **Cloudflare Pages production deployment:** https://414802b4.bw-productions.pages.dev (custom domain https://bwprodsystem.co.za)
 
 ## What is working in this restore point
 - Workers use a single **Add Current Shift** flow.
@@ -69,6 +69,17 @@ The proxy’s direct writes produced `status='submitted'` drafts with **no** pai
   this payroll (with worker/date/time), last paid shift time. Returns HTTP 200 `ok` or 503 `ATTENTION`.
 - `/admin/wages` shows a green/red banner from that report on every load. Red lists the exact blank rows.
 - Nothing for staff or admin to change. No new accounts, no new steps.
+
+## Missed-shift detail on every card (2026-09-14)
+- Every shift card (draft and finally submitted) shows the full text
+  `MISSED SHIFT – actual date Thu 10 Sep 2026 – Strike HQ` in place of the generic
+  "Hours missed / not captured from last week" badge. The booked date line (e.g. `2026-09-12`) stays
+  because that is the payroll week the wages app pays it in; the badge gives the real day claimed.
+- Same text is stored in the shift description, so the auditor export shows it on the paid row.
+- Re-saving a missed draft no longer doubles the marker in the description.
+- Display only — saving, Final Submission, dropdowns, calendar unchanged.
+- Known limit: the app's automatic overlap check compares against the booked Saturday, not the real date.
+  Checking the real date against previous payroll is a manual office review (a read-only review report is the agreed next step).
 
 ## Sign out / Switch person (2026-09-13, later)
 - The worker **Sign out** button is hidden. Workers use **‹ Switch person** only.

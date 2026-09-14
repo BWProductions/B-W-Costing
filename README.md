@@ -54,6 +54,7 @@ Internal ops platform for B&W Productions CC. Built on Cloudflare Pages + Hono +
 - 2026-09-13: worker **Sign out** hidden; **Switch person** is the single exit and now really logs out (POST `/wages/logout`), clears device-stored worker context and returns to `/wages`. Any upstream 403 on a worker page is redirected to `/wages` so the admin "Not authorised" module page can never show to staff.
 - 2026-09-14 CRITICAL: removed the proxy's direct D1 writes for saves/final submission (they produced 'submitted' drafts with no paid shift and 0.00 hours). All saves go to the upstream wages app again. Previous-week dates from the single calendar are converted to Saturday + `missed_previous_week=1` + `MISSED SHIFT - actual date …` description prefix. Migration 0039 stops the D1 triggers resetting the missed flag. Verified live end-to-end.
 - 2026-09-14: permanent database guard (migration 0040) — a shift can never be marked submitted without a paid shift record; `GET /wages-health` integrity report; green/red integrity banner on `/admin/wages`.
+- 2026-09-14: every worker shift card shows the full `MISSED SHIFT – actual date … – …` text (draft and submitted); description de-duplicated on re-save.
 - **Staff link (the only one workers need): https://bwprodsystem.co.za/wages**
 
 ## Phase 1 Foundation (completed)
