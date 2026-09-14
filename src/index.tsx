@@ -1936,15 +1936,17 @@ label[for="bw-missed-work-date"] {
   }
 
   function hideLockedPayrollWarnings() {
-    const selectors = '.alert, .notice, .warning, .error, .flash, .message, .card, .row, label, p, small, div, span'
+    // Rewrite (not hide) the upstream locked-payroll rejection. With the
+    // Saturday-booking conversion in the proxy it should not occur, but if it
+    // ever does the worker must SEE that the shift was not saved.
+    const selectors = '.alert, .notice, .warning, .error, .flash, .message, p, small, div, span'
     Array.from(document.querySelectorAll(selectors)).forEach((node) => {
+      if (node.children.length) return
       const text = elementText(node)
-      if (!/that payroll week .* has already been paid and is locked|hours missed .* can only be captured on this payroll week's saturday|please recapture it only under the current payroll week/i.test(text)) return
-      const container = node.closest('.alert, .notice, .warning, .error, .flash, .message, .card, .row, div')
-      const target = container || node
-      if (!(target instanceof HTMLElement) || target.dataset.bwHiddenLockedPayroll === '1') return
-      target.dataset.bwHiddenLockedPayroll = '1'
-      target.style.display = 'none'
+      if (!/that payroll week .* has already been paid and is locked/i.test(text)) return
+      if (!(node instanceof HTMLElement) || node.dataset.bwRewroteLockedPayroll === '1') return
+      node.dataset.bwRewroteLockedPayroll = '1'
+      node.textContent = 'This shift was NOT saved. Please check the Date worked and try again, or ask the office to capture it.'
     })
   }
 
@@ -2249,6 +2251,12 @@ function formatProxyIsoDate(date: Date) {
   return `${year}-${month}-${day}`
 }
 
+function formatProxyLongDate(date: Date) {
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return days[date.getUTCDay()] + ' ' + date.getUTCDate() + ' ' + months[date.getUTCMonth()] + ' ' + date.getUTCFullYear()
+}
+
 function proxyStartOfPayrollWeek(date: Date) {
   const copy = new Date(date.getTime())
   const offset = (copy.getUTCDay() + 1) % 7
@@ -2507,6 +2515,22 @@ function rewriteMissedShiftSubmission(formData: FormData, upstreamUrl: URL) {
     if (formData.has('exact_work_date')) formData.set('exact_work_date', actualWorkDateValue)
     if (formData.has('bw_visible_work_date')) formData.set('bw_visible_work_date', actualWorkDateValue)
     if (formData.has('work_date')) formData.set('work_date', actualWorkDateValue)
+  }
+
+  if (isPreviousPayroll && actualWorkDateParsed) {
+    // Upstream only accepts a missed shift when it is booked on the CURRENT
+    // payroll week's Saturday with missed_previous_week=1. It rejects the real
+    // (locked) date outright. Book it on Saturday, keep the real date in the
+    // description so admin/export can see it.
+    formData.set('work_date', captureWeekStart)
+    if (formData.has('bw_visible_work_date')) formData.set('bw_visible_work_date', captureWeekStart)
+    formData.set('missed_previous_week', '1')
+    const realDateLabel = formatProxyLongDate(actualWorkDateParsed)
+    const marker = 'MISSED SHIFT - actual date ' + realDateLabel
+    const existingDescription = normalizeProxyFieldValue(formData.get('work_description'))
+    if (!/MISSED SHIFT - actual date/i.test(existingDescription)) {
+      formData.set('work_description', (marker + ' - ' + existingDescription).slice(0, 500))
+    }
   }
 
   Array.from(new Set(Array.from(upstreamUrl.searchParams.keys()))).forEach((key) => {
@@ -3141,22 +3165,13 @@ async function proxyRequest(c: any) {
   }
   const requestContentType = c.req.raw.headers.get('content-type') || ''
   const isProxyFormPost = /application\/x-www-form-urlencoded|multipart\/form-data/i.test(requestContentType)
-  if (method === 'POST' && isProxyFormPost) {
-    const directFinalSubmitDraftId = parseDirectFinalSubmitDraftId(incomingUrl.pathname)
-    if (directFinalSubmitDraftId) {
-      const finalSubmitFormData = await c.req.raw.clone().formData()
-      const finalSubmitResponse = await handleDirectDraftFinalSubmit(c, incomingUrl, finalSubmitFormData, directFinalSubmitDraftId)
-      if (finalSubmitResponse) return finalSubmitResponse
-    }
-
-    if (incomingUrl.pathname === '/wages/drafts') {
-      const directFormData = await c.req.raw.clone().formData()
-      if (shouldRewriteMissedShiftSubmission(directFormData)) {
-        const directResponse = await handleDirectMissedShiftSave(c, incomingUrl, directFormData)
-        if (directResponse) return directResponse
-      }
-    }
-  }
+  // NOTE (2026-09-14): the proxy must NEVER short-circuit worker saves or Final
+  // Submission. Only the upstream wages app creates paid wage_shifts rows
+  // (hours, overtime, Sunday rates, amounts). Direct DB writes produced
+  // "submitted" drafts with no paid shift and 0.00 hours on the dashboard.
+  // Previous-payroll dates are instead converted (see rewriteMissedShiftSubmission)
+  // into the format upstream accepts and forwarded normally.
+  void isProxyFormPost
 
   const upstreamHeaders = rewriteRequestHeaders(c.req.raw.headers, incomingUrl, upstreamUrl)
 
