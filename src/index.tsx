@@ -37,6 +37,32 @@ class DashboardButtonInjector {
   }
 }
 
+// Admin /admin/wages: live banner from /wages-health. Green = every submitted
+// shift this payroll has a paid record. Red = blanks found; lists them.
+class WagesHealthBannerInjector {
+  element(element: Element) {
+    element.append(
+      `<div id="bw-wages-health" style="margin:12px 0;padding:12px 16px;border-radius:12px;font-weight:600;background:#eef2f7;color:#334155">Checking wages integrity…</div>
+<script>
+(function(){
+  var box=document.getElementById('bw-wages-health'); if(!box) return;
+  fetch('/wages-health',{credentials:'include',cache:'no-store'}).then(function(r){return r.json()}).then(function(h){
+    if(h.status==='ok'){
+      box.style.background='#e7f6ec'; box.style.color='#14532d';
+      box.textContent='Wages integrity OK — every submitted shift this payroll has a paid record. Blank submissions are blocked at database level. Last paid shift: '+(h.last_paid_shift_created_at||'n/a')+' UTC.';
+      return;
+    }
+    box.style.background='#fdecec'; box.style.color='#7f1d1d';
+    var rows=(h.blank_submission_rows||[]).map(function(x){return (x.display_name||('staff '+x.staff_id))+' — '+x.work_date+' '+x.start_time+'–'+x.end_time+' (draft #'+x.id+')'});
+    box.innerHTML='<strong>WAGES ATTENTION:</strong> '+(h.blank_submissions_this_payroll||0)+' submitted shift(s) with NO paid record'+(h.guard_triggers_installed?'':' — and the database guard is MISSING')+'.<br>'+rows.join('<br>')+(rows.length?'<br>':'')+'These workers see 0.00 hours. Set the draft back to editable and Final Submit through the wages app.';
+  }).catch(function(){ box.textContent='Wages integrity check unavailable (could not reach /wages-health).'; });
+})();
+</script>`,
+      { html: true },
+    )
+  }
+}
+
 class TeamPickerInitInjector {
   element(element: Element) {
     element.append(
@@ -3238,12 +3264,48 @@ async function proxyRequest(c: any) {
 
   const rewriter = new HTMLRewriter()
   if (needsWagesButton) rewriter.on('#topbar-actions', new DashboardButtonInjector())
+  if (needsWagesButton) rewriter.on('main', new WagesHealthBannerInjector())
   if (needsTeamInit) rewriter.on('body', new TeamPickerInitInjector())
   if (needsWagesUi) rewriter.on('body', new WagesUiInjector())
   return rewriter.transform(baseResponse)
 }
 
 app.get('/health', (c) => c.json({ status: 'ok', mode: 'safe-proxy', origin: ORIGIN }))
+
+// Wages integrity self-check. Read-only. Reports any "blank" submission
+// (status='submitted' with no paid wage_shifts row) so the problem of
+// 2026-09-14 can never sit unnoticed again. Also shows guard triggers exist.
+app.get('/wages-health', async (c) => {
+  const db = c.env?.DB
+  if (!db) return c.json({ status: 'error', reason: 'no database binding' }, 500)
+  try {
+    const guards = await db.prepare(`SELECT count(*) AS n FROM sqlite_master WHERE type='trigger' AND name IN ('wage_shift_drafts_block_blank_submit_insert','wage_shift_drafts_block_blank_submit_update')`).first<{ n: number }>()
+    const blanks = await db.prepare(`SELECT d.id, d.staff_id, s.display_name, d.work_date, d.start_time, d.end_time, d.submitted_at
+      FROM wage_shift_drafts d LEFT JOIN wage_staff s ON s.id = d.staff_id
+      WHERE d.status = 'submitted' AND d.final_shift_id IS NULL AND d.submitted_at >= '2026-09-12'
+      ORDER BY d.id`).all()
+    const orphanPaid = await db.prepare(`SELECT count(*) AS n FROM wage_shifts w
+      WHERE w.source_draft_id IS NOT NULL AND w.created_at >= '2026-09-12'
+        AND NOT EXISTS (SELECT 1 FROM wage_shift_drafts d WHERE d.id = w.source_draft_id AND d.final_shift_id = w.id)`).first<{ n: number }>()
+    const lastPaid = await db.prepare(`SELECT max(created_at) AS t FROM wage_shifts`).first<{ t: string }>()
+    const blankRows = (blanks.results || []) as Array<Record<string, unknown>>
+    const ok = (guards?.n || 0) === 2 && blankRows.length === 0
+    return c.json({
+      status: ok ? 'ok' : 'ATTENTION',
+      checked_at: new Date().toISOString(),
+      guard_triggers_installed: (guards?.n || 0) === 2,
+      blank_submissions_this_payroll: blankRows.length,
+      blank_submission_rows: blankRows,
+      paid_shifts_without_matching_draft_this_payroll: orphanPaid?.n || 0,
+      last_paid_shift_created_at: lastPaid?.t || null,
+      meaning: ok
+        ? 'Every submitted shift this payroll has a paid shift record behind it. Blank submissions are blocked at database level.'
+        : 'A submitted shift exists with no paid record, or the database guard is missing. Investigate before payroll.',
+    }, ok ? 200 : 503)
+  } catch (err) {
+    return c.json({ status: 'error', reason: String((err as Error)?.message || err) }, 500)
+  }
+})
 app.post('/field/ai-extract', handleAiExtract)
 app.all('*', proxyRequest)
 
