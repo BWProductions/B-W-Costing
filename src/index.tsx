@@ -40,12 +40,44 @@ class DashboardButtonInjector {
 
 // Admin /admin/wages: live banner from /wages-health. Green = every submitted
 // shift this payroll has a paid record. Red = blanks found; lists them.
+// Also hides the engine's "Add a shift on behalf of an employee" block
+// (2026-09-14, owner's decision): it bypasses the worker flow (no draft, no
+// worker Final Submission, old Saturday/Monday rule). Office corrections go
+// through Open Work app -> worker -> Edit, or the manager correction on the
+// sheet. Display-only; the engine route behind it is untouched.
 class WagesHealthBannerInjector {
   element(element: Element) {
     element.append(
       `<div id="bw-wages-health" style="margin:12px 0;padding:12px 16px;border-radius:12px;font-weight:600;background:#eef2f7;color:#334155">Checking wages integrity…</div>
 <script>
 (function(){
+  function hideOnBehalfBlock(){
+    var heads=Array.prototype.slice.call(document.querySelectorAll('h1,h2,h3,h4,legend,.eyebrow,.title'));
+    heads.forEach(function(h){
+      var t=(h.textContent||'').replace(/\\s+/g,' ').trim();
+      if(!/^add a shift on behalf of an employee$/i.test(t)) return;
+      // Walk up to the card/section that contains the form, but never past <main>.
+      var node=h, target=null;
+      while(node && node!==document.body && node.tagName!=='MAIN'){
+        if(node.querySelector && node.querySelector('form') && node!==h){ target=node; break; }
+        node=node.parentElement;
+      }
+      var tooBig=!target || target.tagName==='MAIN' || target.querySelector('table') || /wage sheet|grand total/i.test(target.textContent||'');
+      if(!tooBig){
+        if(!target.dataset.bwHiddenOnBehalf){ target.dataset.bwHiddenOnBehalf='1'; target.style.display='none'; }
+        return;
+      }
+      // Fallback: hide only the heading, its intro line and the first form after it.
+      h.style.display='none';
+      var sib=h.nextElementSibling; if(sib && sib.tagName==='P'){ sib.style.display='none'; sib=sib.nextElementSibling; }
+      var form=(sib && sib.tagName==='FORM')?sib:null;
+      if(!form){ var all=Array.prototype.slice.call(document.querySelectorAll('form')); form=all.find(function(f){ return (h.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_FOLLOWING) && !f.querySelector('table') && /employee/i.test(f.textContent||''); })||null; }
+      if(form){ form.style.display='none'; }
+    });
+  }
+  try{ hideOnBehalfBlock(); }catch(e){}
+  document.addEventListener('DOMContentLoaded',function(){ try{ hideOnBehalfBlock(); }catch(e){} });
+  setTimeout(function(){ try{ hideOnBehalfBlock(); }catch(e){} },400);
   var box=document.getElementById('bw-wages-health'); if(!box) return;
   fetch('/wages-health',{credentials:'include',cache:'no-store'}).then(function(r){return r.json()}).then(function(h){
     if(h.status==='ok'){
