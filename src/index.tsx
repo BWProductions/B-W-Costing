@@ -6,7 +6,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-14-5'
+const WAGES_UI_VERSION = 'v2026-09-14-6'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3566,6 +3566,88 @@ function shiftsOverlap(aStart: string, aEnd: string, bStart: string, bEnd: strin
   return s1 < e2 && s2 < e1
 }
 
+// Owner's pay rule (confirmed 2026-09-14). Applied per PERSON per REAL DAY after
+// joining all that person's entries on the day (overlapping minutes counted once):
+//   1. Day part: > 4 h inside 07:00–16:00 → R750; up to 4 h inside → R375; none → R0.
+//   2. Every hour outside 07:00–16:00: R90/h (staff, Warehouse Team, Team Assistance),
+//      R130/h for Music Bus entries.
+//   3. Sunday: whole day × 1.2.
+//   4. Own-rate work (House / House/Garden R62,50; Tsotlego R81,25 …): hours × rate.
+// Read-only: the checker only compares; it never changes a paid record.
+const RULE_WINDOW_START = 7 * 60, RULE_WINDOW_END = 16 * 60, RULE_FULL_DAY = 750, RULE_HALF_DAY = 375, RULE_HALF_MAX_MIN = 4 * 60, RULE_SUNDAY_FACTOR = 1.2
+type RuleSegment = { start: string, end: string, rate: number, kind: 'standard' | 'musicbus' | 'ownrate', label: string }
+type RuleDayResult = { amount: number, insideMin: number, outsideStdMin: number, outsideMbMin: number, ownRateAmount: number, dayPart: number, overtime: number, sunday: boolean, span: string, notes: string[] }
+
+function ruleSegmentMinutes(seg: { start: string, end: string }) {
+  const s = timeToMinutes(seg.start), eRaw = timeToMinutes(seg.end)
+  if (s === null || eRaw === null) return null
+  const e = eRaw <= s ? eRaw + 1440 : eRaw
+  return { s, e }
+}
+
+// Minutes of [s,e) that fall inside [a,b) — used to split a segment around the 07:00–16:00 window.
+function overlapMinutes(s: number, e: number, a: number, b: number) {
+  return Math.max(0, Math.min(e, b) - Math.max(s, a))
+}
+
+// Subtract already-covered minute ranges from [s,e) so the same minute is never priced twice.
+function subtractCovered(s: number, e: number, covered: Array<[number, number]>): Array<[number, number]> {
+  let pieces: Array<[number, number]> = [[s, e]]
+  for (const [cs, ce] of covered) {
+    const next: Array<[number, number]> = []
+    for (const [ps, pe] of pieces) {
+      if (ce <= ps || cs >= pe) { next.push([ps, pe]); continue }
+      if (cs > ps) next.push([ps, cs])
+      if (ce < pe) next.push([ce, pe])
+    }
+    pieces = next
+  }
+  return pieces.filter(([a, b]) => b > a)
+}
+
+function computeRuleDay(dateIso: string, segments: RuleSegment[]): RuleDayResult {
+  const d = parseProxyIsoDate(dateIso)
+  const sunday = !!d && d.getUTCDay() === 0
+  const notes: string[] = []
+  let insideMin = 0, outsideStdMin = 0, outsideMbMin = 0, ownRateAmount = 0
+  const covered: Array<[number, number]> = []
+  let minS = Infinity, maxE = -Infinity
+  const ordered = segments.slice().sort((a, b) => (timeToMinutes(a.start) || 0) - (timeToMinutes(b.start) || 0))
+  for (const seg of ordered) {
+    const m = ruleSegmentMinutes(seg)
+    if (!m) { notes.push('unreadable time ' + seg.start + '–' + seg.end); continue }
+    minS = Math.min(minS, m.s); maxE = Math.max(maxE, m.e)
+    const pieces = subtractCovered(m.s, m.e, covered)
+    if (pieces.length === 0 || pieces.reduce((a, [x, y]) => a + (y - x), 0) < (m.e - m.s)) notes.push('overlapping entries counted once')
+    for (const [ps, pe] of pieces) {
+      if (seg.kind === 'ownrate') { ownRateAmount += ((pe - ps) / 60) * seg.rate; continue }
+      const inside = overlapMinutes(ps, pe, RULE_WINDOW_START, RULE_WINDOW_END)
+      insideMin += inside
+      const outside = (pe - ps) - inside
+      if (seg.kind === 'musicbus') outsideMbMin += outside; else outsideStdMin += outside
+    }
+    covered.push([m.s, m.e])
+  }
+  const dayPart = insideMin === 0 ? 0 : (insideMin > RULE_HALF_MAX_MIN ? RULE_FULL_DAY : RULE_HALF_DAY)
+  const overtime = (outsideStdMin / 60) * 90 + (outsideMbMin / 60) * 130
+  const base = dayPart + overtime + ownRateAmount
+  const amount = Math.round((sunday ? base * RULE_SUNDAY_FACTOR : base) * 100) / 100
+  const fmtT = (mins: number) => { const mm = ((mins % 1440) + 1440) % 1440; return String(Math.floor(mm / 60)).padStart(2, '0') + ':' + String(mm % 60).padStart(2, '0') + (mins >= 1440 ? ' (next day)' : '') }
+  const span = isFinite(minS) ? fmtT(minS) + '–' + fmtT(maxE) : ''
+  return { amount, insideMin, outsideStdMin, outsideMbMin, ownRateAmount, dayPart, overtime, sunday, span, notes: Array.from(new Set(notes)) }
+}
+
+function ruleBreakdownText(r: RuleDayResult) {
+  const parts: string[] = []
+  const h = (m: number) => (m / 60).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1') + ' h'
+  if (r.insideMin > 0) parts.push(`${h(r.insideMin)} inside 07–16 → ${r.dayPart === RULE_FULL_DAY ? 'full day R750' : 'half day R375'}`)
+  if (r.outsideStdMin > 0) parts.push(`${h(r.outsideStdMin)} outside × R90 = ${fmtRand((r.outsideStdMin / 60) * 90)}`)
+  if (r.outsideMbMin > 0) parts.push(`${h(r.outsideMbMin)} outside × R130 (Music Bus) = ${fmtRand((r.outsideMbMin / 60) * 130)}`)
+  if (r.ownRateAmount > 0) parts.push(`own hourly rate = ${fmtRand(r.ownRateAmount)}`)
+  if (r.sunday) parts.push('Sunday × 1,2')
+  return parts.join(' + ')
+}
+
 type AdminPaidRow = { id: number, staff_id: number, display_name: string, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, work_type: string, outlet_venue: string, area: string, event_name: string, work_description: string, payroll_week_start: string | null, missed_previous_week: number, overnight_confirmed: number, source_draft_id: number | null, manager_update_reason: string | null }
 type AdminDraftRow = { id: number, staff_id: number, display_name: string, work_date: string, start_time: string, end_time: string, outlet_venue: string, work_type: string, work_description: string, status: string, missed_previous_week: number }
 type AdminReviewRow = { id: number, status: string, severity: string, staff_id: number, work_date: string, subject_source: string, subject_shift_id: number, compared_shift_id: number | null, original_hours: number | null, previously_paid_hours: number | null, system_proposed_payable_hours: number | null, approved_payable_hours: number | null, decision_type: string | null, decision_reason: string | null, reviewed_by_name: string | null, issue_summary: string, warning_reason: string, system_snapshot_json: string | null }
@@ -3604,7 +3686,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
 
   const staffIds = Array.from(new Set([...paid.map((r) => r.staff_id), ...drafts.map((r) => r.staff_id)]))
   const ph = staffIds.map(() => '?').join(',')
-  const revRes = await db.prepare(`SELECT id, status, severity, staff_id, work_date, subject_source, subject_shift_id, compared_shift_id, original_hours, previously_paid_hours,
+  const revRes = await db.prepare(`SELECT id, issue_key, status, severity, staff_id, work_date, subject_source, subject_shift_id, compared_shift_id, original_hours, previously_paid_hours,
         system_proposed_payable_hours, approved_payable_hours, decision_type, decision_reason, reviewed_by_name, issue_summary, warning_reason, system_snapshot_json
       FROM wage_payroll_reviews WHERE staff_id IN (${ph}) AND status <> 'VOID' AND (work_date BETWEEN date(?, '-7 days') AND ?)`).bind(...staffIds, weekStart, weekEnd).all()
   const reviewsAll = (revRes.results || []) as AdminReviewRow[]
@@ -3613,12 +3695,32 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
 
   // Cross-check source: everything paid to these workers on the missed real dates in EARLIER payrolls.
   const missedDates = Array.from(new Set(paid.filter((r) => r.work_date < weekStart).map((r) => r.work_date)))
-  let prior: Array<{ id: number, staff_id: number, work_date: string, start_time: string, end_time: string, outlet_venue: string, payroll_week_start: string | null }> = []
+  let prior: Array<{ id: number, staff_id: number, work_date: string, start_time: string, end_time: string, outlet_venue: string, payroll_week_start: string | null, work_type: string, hours_worked: number, amount: number }> = []
   if (missedDates.length) {
-    const priorRes = await db.prepare(`SELECT id, staff_id, work_date, start_time, end_time, outlet_venue, payroll_week_start FROM wage_shifts
+    const priorRes = await db.prepare(`SELECT id, staff_id, work_date, start_time, end_time, outlet_venue, payroll_week_start, work_type, hours_worked, COALESCE(gross_wage, total_amount, 0) AS amount FROM wage_shifts
         WHERE staff_id IN (${ph}) AND work_date IN (${missedDates.map(() => '?').join(',')}) AND (payroll_week_start IS NULL OR payroll_week_start < ?)`).bind(...staffIds, ...missedDates, weekStart).all()
     prior = (priorRes.results || []) as typeof prior
   }
+
+  // Pay-rule check inputs: each worker's own hourly rates per work type + base rate/rule.
+  const staffRes = await db.prepare(`SELECT id, hourly_rate, payroll_rule FROM wage_staff WHERE id IN (${ph})`).bind(...staffIds).all()
+  const staffBase: Record<number, { hourly_rate: number, payroll_rule: string }> = {}
+  for (const s of (staffRes.results || []) as Array<{ id: number, hourly_rate: number, payroll_rule: string }>) staffBase[s.id] = { hourly_rate: Number(s.hourly_rate || 0), payroll_rule: String(s.payroll_rule || '') }
+  const ratesRes = await db.prepare(`SELECT staff_id, work_type, hourly_rate FROM wage_work_rates WHERE active = 1 AND staff_id IN (${ph})`).bind(...staffIds).all()
+  const workRates: Record<string, number> = {}
+  for (const r of (ratesRes.results || []) as Array<{ staff_id: number, work_type: string, hourly_rate: number }>) workRates[r.staff_id + '|' + r.work_type] = Number(r.hourly_rate || 0)
+  const ruleSegmentFor = (staffId: number, workType: string, start: string, end: string): RuleSegment => {
+    const wt = workType || ''
+    if (/music bus/i.test(wt)) return { start, end, rate: 130, kind: 'musicbus', label: wt }
+    // Own hourly rates apply only where the owner confirmed them: a work type with its own
+    // rate in wage_work_rates (House, House/Garden = R62,50) or Tsotlego (staff 4, R81,25).
+    // Everyone else is priced on the standard day rule, whatever their legacy base rate says.
+    const typeRate = workRates[staffId + '|' + wt]
+    if (typeRate !== undefined && typeRate !== 90) return { start, end, rate: typeRate, kind: 'ownrate', label: wt }
+    if (staffId === 4) return { start, end, rate: staffBase[4]?.hourly_rate || 81.25, kind: 'ownrate', label: wt }
+    return { start, end, rate: 90, kind: 'standard', label: wt }
+  }
+  const ruleApplies = (staffId: number) => (staffBase[staffId]?.payroll_rule || 'hourly') !== 'fixed_weekly'
 
   const reviewsForPaid = (r: AdminPaidRow) => reviews.filter((v) => (v.subject_source === 'shift' && v.subject_shift_id === r.id) || (v.subject_source === 'draft' && r.source_draft_id && v.subject_shift_id === r.source_draft_id))
   const reviewsForDraft = (d: AdminDraftRow) => reviews.filter((v) => v.subject_source === 'draft' && v.subject_shift_id === d.id)
@@ -3684,9 +3786,13 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   drafts.forEach((d) => { (byStaff[d.staff_id] = byStaff[d.staff_id] || { name: d.display_name, paid: [], drafts: [] }).drafts.push(d) })
   const order = Object.keys(byStaff).map(Number).sort((a, b) => byStaff[a].name.localeCompare(byStaff[b].name))
 
-  let gHours = 0, gAmount = 0, gShifts = 0, gMissedH = 0, gMissedA = 0, gDrafts = 0, gOpenReviews = 0
+  let gHours = 0, gAmount = 0, gShifts = 0, gMissedH = 0, gMissedA = 0, gDrafts = 0, gOpenReviews = 0, gRuleDays = 0, gRuleOver = 0, gRuleUnder = 0, gRuleAmount = 0
+  type RuleDayCheck = { staffId: number, name: string, date: string, paid: number, rule: RuleDayResult, diff: number, entries: string[], shiftIds: number[], priorIncluded: boolean }
+  const ruleDiffsAll: RuleDayCheck[] = []
   const th = (t: string, extra = '') => `<th style="padding:8px 10px;text-align:left;color:#e2b93b;font-size:11px;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;${extra}">${t}</th>`
   const td = (t: string, extra = '') => `<td style="padding:8px 10px;vertical-align:top;${extra}">${t}</td>`
+
+  const ruleDetailTop = (c: RuleDayCheck) => `<div style="font-size:12px;opacity:.9">Rule: ${escapeHtmlText(ruleBreakdownText(c.rule))}${c.rule.notes.length ? ' · ' + escapeHtmlText(c.rule.notes.join('; ')) : ''}<br>Entries paid: ${c.entries.map((e) => escapeHtmlText(e)).join(' · ')}${c.priorIncluded ? ' · <em>includes what was already paid for this real day in an earlier payroll</em>' : ''}</div>`
 
   const sections = order.map((sid) => {
     const g = byStaff[sid]
@@ -3699,13 +3805,47 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     const openRev = rows.reduce((a, r) => a + reviewsForPaid(r).filter((v) => v.status === 'OPEN').length, 0) + g.drafts.reduce((a, d) => a + reviewsForDraft(d).filter((v) => v.status === 'OPEN').length, 0)
     gHours += hours; gAmount += amount; gShifts += rows.length; gMissedH += mH; gMissedA += mA; gDrafts += g.drafts.length; gOpenReviews += openRev
 
+    // Pay-rule check: one calculation per real day, all of this person's entries on that
+    // day joined (incl. what was already paid for a missed shift's real day in an earlier payroll).
+    const ruleByDate: Record<string, RuleDayCheck> = {}
+    if (ruleApplies(sid)) {
+      const dates = Array.from(new Set(rows.map((r) => r.work_date)))
+      for (const date of dates) {
+        const dayRows = rows.filter((r) => r.work_date === date)
+        const priorRows = date < weekStart ? prior.filter((p) => p.staff_id === sid && p.work_date === date) : []
+        const segs = [...dayRows.map((r) => ruleSegmentFor(sid, r.work_type, r.start_time, r.end_time)), ...priorRows.map((p) => ruleSegmentFor(sid, p.work_type, p.start_time, p.end_time))]
+        const rule = computeRuleDay(date, segs)
+        const paidTotal = dayRows.reduce((a, r) => a + Number(r.amount || 0), 0) + priorRows.reduce((a, p) => a + Number(p.amount || 0), 0)
+        const diff = Math.round((paidTotal - rule.amount) * 100) / 100
+        if (priorRows.length && Math.abs(diff) >= 0.5) {
+          // Where does the difference sit? If the earlier payroll's own entries already differ
+          // from the rule by the same amount, this week's missed-shift entry is right as an add-on.
+          const priorOnly = computeRuleDay(date, priorRows.map((p) => ruleSegmentFor(sid, p.work_type, p.start_time, p.end_time)))
+          const priorPaid = priorRows.reduce((a, p) => a + Number(p.amount || 0), 0)
+          const priorDiff = Math.round((priorPaid - priorOnly.amount) * 100) / 100
+          if (Math.abs(diff - priorDiff) < 0.5) rule.notes.push(`the whole difference sits in the EARLIER payroll's entry (paid ${fmtRand(priorPaid)}, rule ${fmtRand(priorOnly.amount)}); this week's missed-shift entry is correct as an add-on`)
+          else if (Math.abs(priorDiff) >= 0.5) rule.notes.push(`of this, ${priorDiff > 0 ? '+' : '\u2212'}${fmtRand(Math.abs(priorDiff))} sits in the earlier payroll's entry`)
+        }
+        const chk: RuleDayCheck = { staffId: sid, name: g.name, date, paid: paidTotal, rule, diff, shiftIds: dayRows.map((r) => r.id),
+          entries: [...dayRows.map((r) => `${r.start_time}–${r.end_time} ${r.work_type || ''} ${fmtRand(r.amount)}`), ...priorRows.map((p) => `${p.start_time}–${p.end_time} ${p.work_type || ''} ${fmtRand(p.amount)} (paid in payroll ${p.payroll_week_start || 'n/a'})`)], priorIncluded: priorRows.length > 0 }
+        ruleByDate[date] = chk
+        if (Math.abs(diff) >= 0.5) { ruleDiffsAll.push(chk); gRuleDays++; gRuleAmount += diff; if (diff > 0) gRuleOver += diff; else gRuleUnder += -diff }
+      }
+    }
+    const ruleDiffDays = Object.values(ruleByDate).filter((c) => Math.abs(c.diff) >= 0.5).sort((a, b) => a.date.localeCompare(b.date))
+    const rulePill = (c: RuleDayCheck) => c.diff > 0 ? pill('RULE: paid ' + fmtRand(c.diff) + ' MORE than rule', '#7f1d1d', '#fff') : pill('RULE: paid ' + fmtRand(-c.diff) + ' LESS than rule', '#1e3a8a', '#fff')
+    const ruleDetail = (c: RuleDayCheck) => `<div style="padding:6px 0;border-top:1px solid rgba(255,255,255,.08);font-size:12.5px"><strong>${escapeHtmlText(c.date)} (${dayName(c.date)})</strong> · day as one: ${escapeHtmlText(c.rule.span)} — <strong>paid ${fmtRand(c.paid)}</strong> vs <strong>rule ${fmtRand(c.rule.amount)}</strong> → ${rulePill(c)}<div style="opacity:.85;margin-top:2px">Rule: ${escapeHtmlText(ruleBreakdownText(c.rule))}${c.rule.notes.length ? ' · ' + escapeHtmlText(c.rule.notes.join('; ')) : ''}</div><div style="opacity:.7;margin-top:2px">Entries paid: ${c.entries.map((e) => escapeHtmlText(e)).join(' · ')}${c.priorIncluded ? ' · <em>includes what was already paid for this real day in an earlier payroll</em>' : ''}</div></div>`
+
     const paidTrs = rows.map((r) => {
       const isMissed = r.work_date < weekStart
       const revs = reviewsForPaid(r)
       const hasRed = revs.some((v) => v.status === 'OPEN' && v.severity === 'red')
-      const rowBg = hasRed ? 'background:rgba(127,29,29,.18)' : isMissed ? 'background:rgba(226,185,59,.07)' : ''
+      const ruleChk = ruleByDate[r.work_date]
+      const ruleOff = !!ruleChk && Math.abs(ruleChk.diff) >= 0.5
+      const rowBg = hasRed ? 'background:rgba(127,29,29,.18)' : ruleOff ? 'background:rgba(30,58,138,.14)' : isMissed ? 'background:rgba(226,185,59,.07)' : ''
       const flags = [
         isMissed ? pill('MISSED', '#fdecec', '#7f1d1d') : '',
+        ruleOff ? `<a href="#" onclick="var b=document.getElementById('bw-person-rule-${sid}');if(b){b.style.display='block'}return false" style="text-decoration:none">${pill('⚖ RULE ' + (ruleChk.diff > 0 ? '+' : '−') + fmtRand(Math.abs(ruleChk.diff)), ruleChk.diff > 0 ? '#7f1d1d' : '#1e3a8a', '#fff')}</a>` : (ruleChk ? pill('⚖ rule ok', '#1f5f3a', '#fff') : ''),
         hasRed ? pill('⚑ REVIEW', '#7f1d1d', '#fff') : revs.some((v) => v.status === 'OPEN') ? pill('⚑ review', '#b45309', '#fff') : '',
         r.overnight_confirmed ? pill('next day', '#1e3a8a', '#fff') : '',
         r.manager_update_reason ? pill('corrected', '#1f5f3a', '#fff') : '',
@@ -3755,10 +3895,18 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
           return `<div style="padding:6px 0;border-top:1px solid rgba(255,255,255,.08)"><div style="font-size:12.5px;margin-bottom:2px"><strong>${line}</strong></div>${reviewCell([v])}</div>`
         }).join('')}</div>`
       : ''
-    const flagsSummary = (openRev ? `<a href="#" onclick="var b=document.getElementById('bw-person-reviews-${sid}');if(b){b.style.display=b.style.display==='none'?'block':'none'}return false" style="text-decoration:none">${pill('⚑ ' + openRev + ' open review' + (openRev === 1 ? '' : 's') + ' ▾', '#b45309', '#fff')}</a>` : '') + (missed.length ? pill(missed.length + ' missed shift' + (missed.length === 1 ? '' : 's') + ' · ' + mH.toFixed(2) + ' h · ' + fmtRand(mA), '#fdecec', '#7f1d1d') : '') + (g.drafts.length ? pill(g.drafts.length + ' not final-submitted', '#374151', '#fff') : '')
+    const personRuleHtml = ruleDiffDays.length
+      ? `<div id="bw-person-rule-${sid}" style="display:none;margin:8px 0 4px;padding:10px 12px;border-radius:10px;background:rgba(30,58,138,.14);border:1px solid rgba(96,165,250,.5)"><div style="font-weight:800;color:#93c5fd;margin-bottom:6px">⚖ Pay-rule check for ${escapeHtmlText(g.name)} — ${ruleDiffDays.length} day${ruleDiffDays.length === 1 ? '' : 's'} differ${ruleDiffDays.length === 1 ? 's' : ''} from the rule (nothing has been changed — for your decision)</div>${ruleDiffDays.map(ruleDetail).join('')}</div>`
+      : ''
+    const ruleSummaryPill = ruleApplies(sid)
+      ? (ruleDiffDays.length
+        ? `<a href="#" onclick="var b=document.getElementById('bw-person-rule-${sid}');if(b){b.style.display=b.style.display==='none'?'block':'none'}return false" style="text-decoration:none">${pill('⚖ ' + ruleDiffDays.length + ' day' + (ruleDiffDays.length === 1 ? '' : 's') + ' differ from pay rule · ' + (ruleDiffDays.reduce((a, c) => a + c.diff, 0) > 0 ? 'paid ' + fmtRand(ruleDiffDays.reduce((a, c) => a + c.diff, 0)) + ' more' : 'paid ' + fmtRand(-ruleDiffDays.reduce((a, c) => a + c.diff, 0)) + ' less') + ' ▾', '#1e3a8a', '#fff')}</a>`
+        : pill('⚖ all days match pay rule', '#1f5f3a', '#fff'))
+      : pill('fixed weekly – rule check not applied', '#374151', '#fff')
+    const flagsSummary = ruleSummaryPill + (openRev ? `<a href="#" onclick="var b=document.getElementById('bw-person-reviews-${sid}');if(b){b.style.display=b.style.display==='none'?'block':'none'}return false" style="text-decoration:none">${pill('⚑ ' + openRev + ' open review' + (openRev === 1 ? '' : 's') + ' ▾', '#b45309', '#fff')}</a>` : '') + (missed.length ? pill(missed.length + ' missed shift' + (missed.length === 1 ? '' : 's') + ' · ' + mH.toFixed(2) + ' h · ' + fmtRand(mA), '#fdecec', '#7f1d1d') : '') + (g.drafts.length ? pill(g.drafts.length + ' not final-submitted', '#374151', '#fff') : '')
     return `<tr><td colspan="12" style="padding:14px 10px 6px;border-top:2px solid rgba(226,185,59,.5)">
         <span style="color:#e2b93b;font-weight:800;text-transform:uppercase;font-size:11px;letter-spacing:.06em;margin-right:8px">Name</span><strong style="font-size:15px">${escapeHtmlText(g.name)}</strong>
-        <span style="color:#e2b93b;font-weight:700;margin-left:10px">${hours.toFixed(2)} hours · ${fmtRand(amount)}</span>${openLink}<div style="margin-top:6px">${flagsSummary}</div>${personReviewsHtml}</td></tr>
+        <span style="color:#e2b93b;font-weight:700;margin-left:10px">${hours.toFixed(2)} hours · ${fmtRand(amount)}</span>${openLink}<div style="margin-top:6px">${flagsSummary}</div>${personReviewsHtml}${personRuleHtml}</td></tr>
       ${paidTrs}${draftTrs}
       <tr><td colspan="12" style="padding:6px 10px 12px;color:#e2b93b;font-weight:700">Subtotal for ${escapeHtmlText(g.name)} — ${rows.length} paid shift${rows.length === 1 ? '' : 's'} · ${hours.toFixed(2)} h · ${fmtRand(amount)}${missed.length ? ` <span style="opacity:.85">(includes ${missed.length} missed: ${mH.toFixed(2)} h · ${fmtRand(mA)})</span>` : ''}${g.drafts.length ? ` <span style="opacity:.7">· ${g.drafts.length} still awaiting Final Submission (not counted)</span>` : ''}</td></tr>`
   }).join('')
@@ -3790,12 +3938,21 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         <div id="bw-open-reviews-list" style="margin-top:6px">${lines}</div>
       </section>`
     })()}
+    ${(() => {
+      const sorted = ruleDiffsAll.slice().sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
+      const head = `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div style="font-weight:800;color:#93c5fd">⚖ Pay-rule check — ${gRuleDays ? gRuleDays + ' day' + (gRuleDays === 1 ? '' : 's') + ' differ from the rule: paid ' + fmtRand(gRuleOver) + ' more and ' + fmtRand(gRuleUnder) + ' less than the rule (net ' + (gRuleAmount >= 0 ? '+' : '−') + fmtRand(Math.abs(gRuleAmount)) + ')' : 'every paid day matches the rule'}</div>${gRuleDays ? `<a href="#" onclick="var b=document.getElementById('bw-rule-list');b.style.display=b.style.display==='none'?'block':'none';return false" style="color:#e2b93b;font-weight:700;font-size:12px">show / hide list</a>` : ''}</div>
+        <div style="font-size:12px;opacity:.8;margin-top:3px">Rule used: all of a person's entries on the same day are joined, then: more than 4 h inside 07:00–16:00 = R750, up to 4 h = R375; every hour before 07:00 / after 16:00 = R90 (Music Bus R130); Sunday × 1,2. House / Garden and Tsotlego stay on their own hourly rates. <strong>Nothing is changed by this check</strong> — it only shows where the amount paid differs, so you can decide.</div>`
+      if (!sorted.length) return `<section id="bw-rule-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(20,83,45,.18);border:1px solid rgba(96,165,250,.35)">${head}</section>`
+      const lines = sorted.map((c) => `<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid rgba(255,255,255,.08);font-size:12.5px"><span style="flex:0 0 auto">${c.diff > 0 ? pill('OVER', '#7f1d1d', '#fff') : pill('UNDER', '#1e3a8a', '#fff')}</span><div style="flex:1"><strong>${escapeHtmlText(c.name)}</strong> · ${escapeHtmlText(c.date)} (${dayName(c.date)}) · ${escapeHtmlText(c.rule.span)} · paid <strong>${fmtRand(c.paid)}</strong> vs rule <strong>${fmtRand(c.rule.amount)}</strong> → <strong>${c.diff > 0 ? '+' : '−'}${fmtRand(Math.abs(c.diff))}</strong><a href="#" onclick="var b=document.getElementById('bw-rule-top-${c.staffId}-${c.date}');if(b){b.style.display=b.style.display==='none'?'block':'none'}return false" style="margin-left:8px;color:#e2b93b;font-weight:700">Open ▾</a><div id="bw-rule-top-${c.staffId}-${c.date}" style="display:none;margin-top:2px">${ruleDetailTop(c)}</div></div></div>`).join('')
+      return `<section id="bw-rule-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(30,58,138,.12);border:1px solid rgba(96,165,250,.5)">${head}<div id="bw-rule-list" style="margin-top:6px">${lines}</div></section>`
+    })()}
     <div style="display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 12px;font-size:13px">
       <div><span style="opacity:.7">Paid shifts</span><br><strong style="font-size:18px">${gShifts}</strong></div>
       <div><span style="opacity:.7">Total hours</span><br><strong style="font-size:18px">${gHours.toFixed(2)}</strong></div>
       <div><span style="opacity:.7">Total wages (incl. missed)</span><br><strong style="font-size:18px;color:#e2b93b">${fmtRand(gAmount)}</strong></div>
       <div><span style="opacity:.7">of which missed shifts</span><br><strong style="font-size:18px">${gMissedH.toFixed(2)} h · ${fmtRand(gMissedA)}</strong></div>
       <div><span style="opacity:.7">Open reviews</span><br><strong style="font-size:18px;color:${gOpenReviews ? '#fca5a5' : '#86efac'}">${gOpenReviews}</strong></div>
+      <div><span style="opacity:.7">Days differing from pay rule</span><br><strong style="font-size:18px;color:${gRuleDays ? '#93c5fd' : '#86efac'}">${gRuleDays}</strong>${gRuleDays ? `<span style="font-size:12px;opacity:.8"> · net ${gRuleAmount >= 0 ? '+' : '−'}${fmtRand(Math.abs(gRuleAmount))}</span>` : ''}</div>
       <div><span style="opacity:.7">Awaiting Final Submission</span><br><strong style="font-size:18px">${gDrafts}</strong></div>
     </div>
     <div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
