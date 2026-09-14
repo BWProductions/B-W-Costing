@@ -2037,7 +2037,28 @@ label[for="bw-missed-work-date"] {
     if (genericPill && descPill && descPill !== genericPill) descPill.remove()
   }
 
+  function ensureRealDateMissedBadge(card) {
+    const dateNode = Array.from(card.querySelectorAll('.muted')).find((n) => /^\\d{4}-\\d{2}-\\d{2}\\s*·/.test(elementText(n)))
+    if (!dateNode) return
+    const iso = elementText(dateNode).slice(0, 10)
+    const cardDate = parseFlexibleDate(iso)
+    const weekStart = parseFlexibleDate(currentPayrollWeekStartValue())
+    if (!cardDate || !weekStart || cardDate.getTime() >= weekStart.getTime()) return
+    if (Array.from(card.querySelectorAll('.pill')).some((p) => /MISSED SHIFT|hours missed/i.test(elementText(p)))) return
+    const descPill = Array.from(card.querySelectorAll('.pill')).find((p) => !/submitted|draft|locked|editable/i.test(elementText(p)))
+    const work = descPill ? elementText(descPill) : ''
+    const label = WEEKDAY_LABELS[cardDate.getUTCDay()].slice(0, 3) + ' ' + cardDate.getUTCDate() + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][cardDate.getUTCMonth()] + ' ' + cardDate.getUTCFullYear()
+    const pill = document.createElement('div')
+    pill.className = 'pill bw-missed-detail'
+    pill.textContent = 'MISSED SHIFT – actual date ' + label + (work ? ' – ' + work : '')
+    const statusPill = Array.from(card.querySelectorAll('.pill')).find((p) => /draft|submitted/i.test(elementText(p)))
+    if (statusPill) statusPill.insertAdjacentElement('beforebegin', pill)
+    else card.appendChild(pill)
+    if (descPill) descPill.remove()
+  }
+
   function showMissedShiftDetails() {
+    Array.from(document.querySelectorAll('.shift')).forEach((card) => { if (card instanceof HTMLElement) ensureRealDateMissedBadge(card) })
     // Every shift card must show the full "MISSED SHIFT \u2013 actual date <Day D Mon YYYY> \u2013 <work>" text
     // (auditor + office need to see exactly which real date is being claimed).
     Array.from(document.querySelectorAll('.shift')).forEach((card) => {
@@ -3239,6 +3260,142 @@ async function buildUpstreamRequest(c: any, incomingUrl: URL, upstreamUrl: URL, 
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// Real-date restore for previous-payroll shifts (2026-09-14).
+// Upstream only ACCEPTS a previous-week shift when booked on the current
+// payroll Saturday. Once it has created the record (and, on Final Submission,
+// calculated hours/amounts), we put the REAL work date back so the card,
+// admin dashboard, export and duplicate checks all see the true day, while
+// payroll_week_start keeps it paid in the current week. This is the exact
+// shape upstream itself produced for earlier missed shifts (e.g. wage_shifts
+// 9586: work_date 2026-09-04, payroll_week_start 2026-09-05, missed=1).
+// Never creates rows. Never touches status. Only rows upstream just touched.
+// ---------------------------------------------------------------------------
+const MISSED_MARKER_RE = /MISSED SHIFT\s*[-\u2013]\s*actual date\s+[A-Za-z]{3}\s+(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})\s*(?:[-\u2013]\s*)?/i
+const MONTHS3 = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']
+
+function realDateFromMarker(text: string) {
+  const m = (text || '').match(MISSED_MARKER_RE)
+  if (!m) return null
+  const mi = MONTHS3.indexOf(m[2].toLowerCase())
+  if (mi < 0) return null
+  const iso = `${m[3]}-${String(mi + 1).padStart(2, '0')}-${String(Number(m[1])).padStart(2, '0')}`
+  return parseProxyIsoDate(iso) ? iso : null
+}
+
+function stripMissedMarker(text: string) {
+  return (text || '').replace(new RegExp('^(?:' + MISSED_MARKER_RE.source + ')+', 'i'), '').trim()
+}
+
+function proxyEndOfPayrollWeek(weekStartIso: string) {
+  const d = parseProxyIsoDate(weekStartIso)
+  if (!d) return weekStartIso
+  d.setUTCDate(d.getUTCDate() + 6)
+  return formatProxyIsoDate(d)
+}
+
+async function restoreRealDateForMissedShift(env: Bindings | undefined, staffId: number, realDateIso: string, startTime: string, endTime: string, draftIdHint: number) {
+  const db = env?.DB
+  if (!db || !staffId || !realDateIso) return { ok: false as const, reason: 'missing' }
+  const captureWeekStart = currentProxyPayrollWeekStart()
+  const captureWeekEnd = proxyEndOfPayrollWeek(captureWeekStart)
+  const note = `Real work date ${realDateIso}; paid in current payroll ${captureWeekStart} to ${captureWeekEnd}; flagged for payroll cross-check.`
+
+  // Draft row: the one upstream just saved on the Saturday for this worker/time.
+  const draftRow = draftIdHint
+    ? await db.prepare(`SELECT id, work_description, final_shift_id FROM wage_shift_drafts WHERE id = ? AND staff_id = ?`).bind(draftIdHint, staffId).first<{ id: number, work_description: string | null, final_shift_id: number | null }>()
+    : await db.prepare(`SELECT id, work_description, final_shift_id FROM wage_shift_drafts
+        WHERE staff_id = ? AND work_date = ? AND start_time = ? AND end_time = ?
+          AND (work_description LIKE 'MISSED SHIFT%' OR missed_previous_week = 1)
+        ORDER BY updated_at DESC, id DESC LIMIT 1`).bind(staffId, captureWeekStart, startTime, endTime).first<{ id: number, work_description: string | null, final_shift_id: number | null }>()
+  if (!draftRow?.id) return { ok: false as const, reason: 'no_draft' }
+
+  const cleanDescription = stripMissedMarker(draftRow.work_description || '')
+  await db.prepare(`UPDATE wage_shift_drafts
+      SET work_date = ?, payroll_week_start = ?, missed_previous_week = 1,
+          work_description = CASE WHEN ? <> '' THEN ? ELSE work_description END,
+          payroll_note = ?
+      WHERE id = ? AND staff_id = ?`)
+    .bind(realDateIso, captureWeekStart, cleanDescription, cleanDescription, note, draftRow.id, staffId).run()
+
+  let shiftId = draftRow.final_shift_id || 0
+  if (!shiftId) {
+    const shiftRow = await db.prepare(`SELECT id FROM wage_shifts WHERE source_draft_id = ? AND staff_id = ? ORDER BY id DESC LIMIT 1`).bind(draftRow.id, staffId).first<{ id: number }>()
+    shiftId = shiftRow?.id || 0
+  }
+  if (shiftId) {
+    await db.prepare(`UPDATE wage_shifts
+        SET work_date = ?, payroll_week_start = ?, missed_previous_week = 1,
+            work_description = CASE WHEN ? <> '' THEN ? ELSE work_description END,
+            payroll_note = CASE
+              WHEN COALESCE(payroll_note,'') = '' THEN ?
+              WHEN instr(payroll_note, 'Real work date') > 0 THEN payroll_note
+              ELSE ? || ' | ' || payroll_note END
+        WHERE id = ? AND staff_id = ?`)
+      .bind(realDateIso, captureWeekStart, cleanDescription, cleanDescription, note, note, shiftId, staffId).run()
+  }
+  return { ok: true as const, draftId: draftRow.id, shiftId }
+}
+
+async function staffIdFromWageSession(env: Bindings | undefined, cookieHeader: string) {
+  const db = env?.DB
+  if (!db) return 0
+  const m = (cookieHeader || '').match(/(?:^|;\s*)bw_wage_session=([^;]+)/)
+  if (!m) return 0
+  const token = decodeURIComponent(m[1])
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
+  const hex = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('')
+  const row = await db.prepare(`SELECT staff_id FROM wage_sessions WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP`).bind(hex).first<{ staff_id: number }>()
+  return Number(row?.staff_id || 0)
+}
+
+
+function proxyLongDate(iso: string) {
+  const d = parseProxyIsoDate(iso)
+  return d ? formatProxyLongDate(d) : iso
+}
+
+function escapeHtmlText(value: string) {
+  return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+class MissedPaidSectionInjector {
+  constructor(private html: string) {}
+  element(element: Element) {
+    element.after(this.html, { html: true })
+  }
+}
+
+class TextReplaceInjector {
+  constructor(private value: string) {}
+  element(element: Element) {
+    element.setInnerContent(this.value)
+  }
+}
+
+async function buildMissedPaidSection(env: Bindings | undefined, staffId: number) {
+  const db = env?.DB
+  if (!db || !staffId) return null
+  const weekStart = currentProxyPayrollWeekStart()
+  const weekEnd = proxyEndOfPayrollWeek(weekStart)
+  const rows = await db.prepare(`SELECT id, work_date, start_time, end_time, outlet_venue, work_description, hours_worked
+      FROM wage_shifts WHERE staff_id = ? AND payroll_week_start = ? AND work_date < ? ORDER BY work_date, start_time`)
+    .bind(staffId, weekStart, weekStart).all()
+  const shifts = (rows.results || []) as Array<{ id: number, work_date: string, start_time: string, end_time: string, outlet_venue: string, work_description: string, hours_worked: number }>
+  const inWeek = await db.prepare(`SELECT COALESCE(SUM(hours_worked),0) AS h, COUNT(*) AS n FROM wage_shifts WHERE staff_id = ? AND work_date BETWEEN ? AND ?`)
+    .bind(staffId, weekStart, weekEnd).first<{ h: number, n: number }>()
+  const missedHours = shifts.reduce((sum, r) => sum + Number(r.hours_worked || 0), 0)
+  const totalHours = Number(inWeek?.h || 0) + missedHours
+  const totalCount = Number(inWeek?.n || 0) + shifts.length
+  if (!shifts.length) return { html: '', totalHours, totalCount, missedHours }
+  const cards = shifts.map((r) => `
+        <article class="shift"><div class="row"><div><div class="shift-title">${escapeHtmlText(r.outlet_venue)}</div><div class="muted small">${escapeHtmlText(r.work_date)} · ${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)}</div><div class="muted small">Missed shift · ${Number(r.hours_worked || 0).toFixed(2)} h</div></div><strong>${Number(r.hours_worked || 0).toFixed(2)} h</strong></div><div class="pill">Submitted — locked</div><div class="pill bw-missed-detail">MISSED SHIFT – actual date ${escapeHtmlText(proxyLongDate(r.work_date))} – ${escapeHtmlText(r.work_description)}</div></article>`).join('')
+  const html = `
+    <section class="card bw-missed-paid"><h2>Missed shifts from last week — paid in this payroll</h2><p class="muted">These shifts show their real work date. They are included in this payroll week (${weekStart} to ${weekEnd}).</p>${cards}</section>`
+  return { html, totalHours, totalCount, missedHours }
+}
+
 async function proxyRequest(c: any) {
   const incomingUrl = new URL(c.req.url)
   const upstreamUrl = new URL(incomingUrl.pathname + incomingUrl.search, ORIGIN)
@@ -3274,9 +3431,91 @@ async function proxyRequest(c: any) {
 
   const upstreamHeaders = rewriteRequestHeaders(c.req.raw.headers, incomingUrl, upstreamUrl)
 
+  // Real-date restore bookkeeping (see restoreRealDateForMissedShift).
+  let realDateRestore: { staffId: number, realDateIso: string, startTime: string, endTime: string, draftIdHint: number } | null = null
+  if (method === 'POST' && isProxyFormPost && /^\/wages\/drafts(?:\/\d+)?\/?$/.test(incomingUrl.pathname)) {
+    try {
+      const peek = await c.req.raw.clone().formData()
+      const realIso = normalizeProxyFieldValue(peek.get('bw_actual_work_date')) || normalizeProxyFieldValue(peek.get('work_date'))
+      const realDate = parseProxyIsoDate(realIso)
+      const captureDate = parseProxyIsoDate(currentProxyPayrollWeekStart())
+      if (realDate && captureDate && realDate.getTime() < captureDate.getTime()) {
+        const idMatch = incomingUrl.pathname.match(/^\/wages\/drafts\/(\d+)/)
+        const staffId = await staffIdFromWageSession(c.env, c.req.raw.headers.get('cookie') || '')
+        realDateRestore = {
+          staffId,
+          realDateIso: realIso,
+          startTime: normalizeProxyFieldValue(peek.get('start_time')),
+          endTime: normalizeProxyFieldValue(peek.get('end_time')),
+          draftIdHint: idMatch ? Number(idMatch[1]) : 0,
+        }
+      }
+    } catch (err) {}
+  }
+  const finalSubmitMatch = method === 'POST' ? incomingUrl.pathname.match(/^\/wages\/drafts\/(\d+)\/final-submit\/?$/) : null
+
+  // A draft stored with its REAL (previous-week) date would be rejected by
+  // upstream's lock check on final-check / final-submit / edit. Park it on the
+  // current Saturday for the duration of this one request, then restore.
+  let parkedDraft: { draftId: number, staffId: number, realDateIso: string, startTime: string, endTime: string } | null = null
+  const draftStepMatch = incomingUrl.pathname.match(/^\/wages\/drafts\/(\d+)\/(final-check|final-submit|edit)\/?$/)
+  if (draftStepMatch && c.env?.DB) {
+    try {
+      const draftId = Number(draftStepMatch[1])
+      const staffId = await staffIdFromWageSession(c.env, c.req.raw.headers.get('cookie') || '')
+      if (staffId) {
+        const d = await c.env.DB.prepare(`SELECT work_date, start_time, end_time, status FROM wage_shift_drafts WHERE id = ? AND staff_id = ?`).bind(draftId, staffId).first<{ work_date: string, start_time: string, end_time: string, status: string }>()
+        const captureWeekStart = currentProxyPayrollWeekStart()
+        const realDate = parseProxyIsoDate(d?.work_date || '')
+        const captureDate = parseProxyIsoDate(captureWeekStart)
+        if (d && d.status === 'draft' && realDate && captureDate && realDate.getTime() < captureDate.getTime()) {
+          await c.env.DB.prepare(`UPDATE wage_shift_drafts SET work_date = ?, missed_previous_week = 1 WHERE id = ? AND staff_id = ? AND status = 'draft'`).bind(captureWeekStart, draftId, staffId).run()
+          parkedDraft = { draftId, staffId, realDateIso: d.work_date, startTime: d.start_time, endTime: d.end_time }
+        }
+      }
+    } catch (err) {}
+  }
+
   const { upstreamRequest, debugCapture } = await buildUpstreamRequest(c, incomingUrl, upstreamUrl, upstreamHeaders)
 
-  const upstreamResponse = await fetch(upstreamRequest)
+  let upstreamResponse: Response
+  try {
+    upstreamResponse = await fetch(upstreamRequest)
+  } finally {
+    if (parkedDraft) {
+      // Always restore the real date on the draft (and on the paid shift if one was just created).
+      try { await restoreRealDateForMissedShift(c.env, parkedDraft.staffId, parkedDraft.realDateIso, parkedDraft.startTime, parkedDraft.endTime, parkedDraft.draftId) } catch (err) {
+        try { await c.env.DB.prepare(`UPDATE wage_shift_drafts SET work_date = ? WHERE id = ? AND staff_id = ?`).bind(parkedDraft.realDateIso, parkedDraft.draftId, parkedDraft.staffId).run() } catch (err2) {}
+      }
+    }
+  }
+
+  // After upstream ACCEPTED (302 without error) put the real date back.
+  const upstreamLocation = upstreamResponse.headers.get('location') || ''
+  const upstreamAccepted = upstreamResponse.status === 302 && !/[?&]error=/.test(upstreamLocation)
+  if (upstreamAccepted && realDateRestore && !realDateRestore.staffId) {
+    await captureWagesDebug(c.env, { request_path: incomingUrl.pathname + incomingUrl.search, request_method: 'POST', original_payload_json: JSON.stringify(realDateRestore), rewritten_payload_json: '{}', rewrite_applied: 1, response_status: upstreamResponse.status, response_location: upstreamLocation, response_error_text: 'real-date restore skipped: no staff session resolved' })
+  }
+  if (upstreamAccepted && realDateRestore?.staffId) {
+    try { await restoreRealDateForMissedShift(c.env, realDateRestore.staffId, realDateRestore.realDateIso, realDateRestore.startTime, realDateRestore.endTime, realDateRestore.draftIdHint) } catch (err) {
+      await captureWagesDebug(c.env, { request_path: incomingUrl.pathname + incomingUrl.search, request_method: 'POST', original_payload_json: JSON.stringify(realDateRestore), rewritten_payload_json: '{}', rewrite_applied: 1, response_status: upstreamResponse.status, response_location: upstreamLocation, response_error_text: 'real-date restore failed: ' + describeProxyError(err) })
+    }
+  }
+  if (upstreamAccepted && finalSubmitMatch && c.env?.DB && !parkedDraft) {
+    // Final Submission of a missed draft: the paid wage_shifts row was just created
+    // from the draft. Carry the draft's real date onto it.
+    try {
+      const draftId = Number(finalSubmitMatch[1])
+      const staffId = await staffIdFromWageSession(c.env, c.req.raw.headers.get('cookie') || '')
+      const d = await c.env.DB.prepare(`SELECT work_date, missed_previous_week, payroll_week_start, work_description, start_time, end_time FROM wage_shift_drafts WHERE id = ? AND staff_id = ?`).bind(draftId, staffId).first<{ work_date: string, missed_previous_week: number, payroll_week_start: string | null, work_description: string | null, start_time: string, end_time: string }>()
+      const captureDate = parseProxyIsoDate(currentProxyPayrollWeekStart())
+      const realFromDate = parseProxyIsoDate(d?.work_date || '')
+      const realIso = (realFromDate && captureDate && realFromDate.getTime() < captureDate.getTime()) ? d!.work_date : realDateFromMarker(d?.work_description || '')
+      if (d && staffId && realIso) await restoreRealDateForMissedShift(c.env, staffId, realIso, d.start_time, d.end_time, draftId)
+    } catch (err) {
+      await captureWagesDebug(c.env, { request_path: incomingUrl.pathname, request_method: 'POST', original_payload_json: '{}', rewritten_payload_json: '{}', rewrite_applied: 1, response_status: upstreamResponse.status, response_location: upstreamLocation, response_error_text: 'real-date restore (final) failed: ' + describeProxyError(err) })
+    }
+  }
   if (debugCapture) {
     const responseDebug = await describeWagesDebugResponse(upstreamResponse.clone())
     await captureWagesDebug(c.env, {
@@ -3292,6 +3531,21 @@ async function proxyRequest(c: any) {
   }
   const headers = rewriteHeaders(upstreamResponse, incomingUrl.origin)
   const contentType = headers.get('content-type') || ''
+
+  if (parkedDraft && method === 'GET' && contentType.includes('text/html') && upstreamResponse.status === 200) {
+    // The page upstream rendered shows the parked Saturday; show the real date instead.
+    const bodyText = await upstreamResponse.text()
+    const saturday = currentProxyPayrollWeekStart()
+    const swapped = bodyText
+      .split(saturday + ' · ').join(parkedDraft.realDateIso + ' · ')
+      .split('value="' + saturday + '"').join('value="' + parkedDraft.realDateIso + '"')
+    headers.delete('content-length')
+    const swappedResponse = new Response(swapped, { status: 200, statusText: upstreamResponse.statusText, headers })
+    const rewriterSwap = new HTMLRewriter()
+    rewriterSwap.on('body', new WagesUiInjector())
+    headers.set('cache-control', 'no-store, no-cache, must-revalidate, max-age=0')
+    return rewriterSwap.transform(swappedResponse)
+  }
 
   if (['GET', 'HEAD'].includes(c.req.raw.method) && contentType.includes('text/html')) {
     headers.set('cache-control', 'no-store, no-cache, must-revalidate, max-age=0')
@@ -3336,6 +3590,20 @@ async function proxyRequest(c: any) {
   }
 
   const rewriter = new HTMLRewriter()
+  if (path === '/wages/me' && upstreamResponse.status === 200 && c.env?.DB) {
+    // Missed shifts stored with their REAL date fall outside the dashboard's
+    // work_date window, so list them and correct the week total (the payroll
+    // export already counts them by payroll_week_start).
+    try {
+      const staffId = await staffIdFromWageSession(c.env, c.req.raw.headers.get('cookie') || '')
+      const section = staffId ? await buildMissedPaidSection(c.env, staffId) : null
+      if (section && section.missedHours > 0) {
+        rewriter.on('section.actions', new MissedPaidSectionInjector(section.html))
+        rewriter.on('section.summary .big-number', new TextReplaceInjector(section.totalHours.toFixed(2)))
+        rewriter.on('section.summary .row strong', new TextReplaceInjector(section.totalCount + ' submitted shifts'))
+      }
+    } catch (err) {}
+  }
   if (needsWagesButton) rewriter.on('#topbar-actions', new DashboardButtonInjector())
   if (needsWagesButton) rewriter.on('main', new WagesHealthBannerInjector())
   if (needsTeamInit) rewriter.on('body', new TeamPickerInitInjector())
