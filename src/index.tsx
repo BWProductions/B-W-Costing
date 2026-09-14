@@ -6,7 +6,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-14-9'
+const WAGES_UI_VERSION = 'v2026-09-14-10'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3805,7 +3805,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     </form>`
   }
 
-  function reviewCell(list: AdminReviewRow[], withForm = true) {
+  function reviewCell(list: AdminReviewRow[], withForm = true, editHtml = '') {
     if (!list.length) return '<span style="opacity:.45">—</span>'
     return list.map((v) => {
       let snap: any = null
@@ -3822,9 +3822,15 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         : (v.status !== 'OPEN' && v.decision_reason ? `<div style="margin-top:3px;color:#86efac"><strong>${escapeHtmlText(v.status)}</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''} — ${escapeHtmlText(v.decision_reason)}</div>` : '')
       const summary = openRed ? '' : `<div style="opacity:.8">${escapeHtmlText((v.issue_summary || '').replace(/^Manual overlap review — [^—]+— /, 'Overlap check — '))}</div>`
       const detail = openRed ? `<div style="opacity:.9;margin-top:2px">${escapeHtmlText(snap?.humanReason || v.warning_reason || '')}</div>` : (open ? `<div style="opacity:.75;margin-top:2px">${escapeHtmlText((v.warning_reason || '').replace(/ Do not block staff entry.*$/i, ''))}</div>` : '')
-      return `<div id="bw-review-${v.id}" style="font-size:12px;line-height:1.35;margin-bottom:6px">${head}<span style="opacity:.6">#${v.id}</span>${summary}${detail}${rec}${reason}${decided}${withForm ? decisionForm(v, snap) : ''}</div>`
+      return `<div id="bw-review-${v.id}" style="font-size:12px;line-height:1.35;margin-bottom:6px">${head}<span style="opacity:.6">#${v.id}</span>${summary}${detail}${rec}${reason}${decided}${withForm ? decisionForm(v, snap) : ''}${editHtml}</div>`
     }).join('')
   }
+
+  // Owner-approved (2026-09-14): edit buttons that only LINK to the engine's own
+  // manager-correction form (/admin/wages/shifts/:id/edit) — nothing new in the backend.
+  const editHref = (shiftId: number) => `/admin/wages/shifts/${shiftId}/edit?from=${encodeURIComponent(weekStart)}&to=${encodeURIComponent(weekEnd)}&sort=employee`
+  const editBtn = (shiftId: number, label = '✎ Edit shift') => `<a href="${editHref(shiftId)}" style="display:inline-block;margin-top:6px;padding:4px 9px;border-radius:7px;border:1px solid rgba(226,185,59,.6);color:#e2b93b;font-weight:700;font-size:12px;text-decoration:none;white-space:nowrap" title="Opens the manager correction form for this paid shift (asks for a reason; keeps the audit trail)">${label}</a>`
+  const workerAppBtn = (staffId: number, _draftId: number) => `<a href="/wages/login?staff=${staffId}" target="_blank" rel="noopener" style="display:inline-block;margin-top:6px;padding:4px 9px;border-radius:7px;border:1px solid rgba(255,255,255,.3);color:#fff;font-weight:700;font-size:12px;text-decoration:none;white-space:nowrap" title="Not final-submitted yet — edit it in the worker's own app">Open in worker app ↗</a>`
 
   function missedCell(r: AdminPaidRow) {
     if (r.work_date >= weekStart) return '<span style="opacity:.45">—</span>'
@@ -3836,6 +3842,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     else check = pill('CLEAR', '#e7f6ec', '#14532d') + `<span style="font-size:12px">nothing else paid for this day</span>`
     return pill('MISSED SHIFT – actual date ' + escapeHtmlText(proxyLongDate(r.work_date)) + ' – ' + escapeHtmlText(r.work_description || ''), '#fdecec', '#7f1d1d')
       + `<div style="font-size:12px;opacity:.8;margin:2px 0 4px">Worked ${escapeHtmlText(proxyLongDate(r.work_date))} (previous payroll), not captured that week; final-submitted and paid in payroll ${escapeHtmlText(weekStart)} to ${escapeHtmlText(weekEnd)}.</div>` + check
+      + `<div>${editBtn(r.id)}</div>`
   }
 
   const byStaff: Record<number, { name: string, paid: AdminPaidRow[], drafts: AdminDraftRow[] }> = {}
@@ -3919,7 +3926,8 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         ${td(Number(r.hours_worked || 0).toFixed(2), 'text-align:right;white-space:nowrap')}
         ${td(fmtRand(r.amount), 'text-align:right;white-space:nowrap;font-weight:700')}
         ${td(missedCell(r), 'min-width:240px')}
-        ${td(reviewCell(revs) + (r.manager_update_reason ? `<div style="font-size:12px;color:#86efac">Corrected: ${escapeHtmlText(r.manager_update_reason)}</div>` : ''), 'min-width:260px')}
+        ${td(reviewCell(revs, true, editBtn(r.id)) + (r.manager_update_reason ? `<div style="font-size:12px;color:#86efac">Corrected: ${escapeHtmlText(r.manager_update_reason)}</div>` : ''), 'min-width:260px')}
+        ${td(editBtn(r.id, '✎'), 'text-align:center;white-space:nowrap')}
       </tr>`
     }).join('')
 
@@ -3938,7 +3946,8 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         ${td('<span style="opacity:.5">not paid</span>', 'text-align:right;white-space:nowrap')}
         ${td('<span style="opacity:.5">R0,00</span>', 'text-align:right;white-space:nowrap')}
         ${td(isMissed ? pill('MISSED SHIFT – actual date ' + escapeHtmlText(proxyLongDate(d.work_date)) + ' – ' + escapeHtmlText(d.work_description || ''), '#fdecec', '#7f1d1d') + '<div style="font-size:12px;opacity:.8">Saved temporarily by the worker; will be paid in this payroll once Final Submission is pressed.</div>' : '<div style="font-size:12px;opacity:.8">Saved temporarily by the worker; not yet final-submitted, so not yet in the payroll.</div>')}
-        ${td(reviewCell(revs), 'min-width:260px')}
+        ${td(reviewCell(revs, true, workerAppBtn(sid, d.id)), 'min-width:260px')}
+        ${td(workerAppBtn(sid, d.id), 'text-align:center;white-space:nowrap')}
       </tr>`
     }).join('')
 
@@ -3995,11 +4004,11 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         : pill('⚖ all days match pay rule', '#1f5f3a', '#fff'))
       : pill('fixed weekly – rule check not applied', '#374151', '#fff')
     const flagsSummary = ruleSummaryPill + (openRev ? `<a href="#" onclick="var b=document.getElementById('bw-person-reviews-${sid}');if(b){b.style.display=b.style.display==='none'?'block':'none'}return false" style="text-decoration:none">${pill('⚑ ' + openRev + ' open review' + (openRev === 1 ? '' : 's') + ' ▾', '#b45309', '#fff')}</a>` : '') + (missed.length ? pill(missed.length + ' missed shift' + (missed.length === 1 ? '' : 's') + ' · ' + mH.toFixed(2) + ' h · ' + fmtRand(mA), '#fdecec', '#7f1d1d') : '') + (g.drafts.length ? pill(g.drafts.length + ' not final-submitted', '#374151', '#fff') : '')
-    return `<tr><td colspan="12" style="padding:14px 10px 6px;border-top:2px solid rgba(226,185,59,.5)">
+    return `<tr><td colspan="13" style="padding:14px 10px 6px;border-top:2px solid rgba(226,185,59,.5)">
         <span style="color:#e2b93b;font-weight:800;text-transform:uppercase;font-size:11px;letter-spacing:.06em;margin-right:8px">Name</span><strong style="font-size:15px">${escapeHtmlText(g.name)}</strong>
         <span style="color:#e2b93b;font-weight:700;margin-left:10px" title="Final-submitted and paid (before review decisions)">${hours.toFixed(2)} hours · ${fmtRand(amount)}</span>${agreedHtml}${openLink}<div style="margin-top:6px">${flagsSummary}</div>${personReviewsHtml}${personRuleHtml}</td></tr>
       ${paidTrs}${draftTrs}
-      <tr><td colspan="12" style="padding:6px 10px 12px;color:#e2b93b;font-weight:700">Subtotal for ${escapeHtmlText(g.name)} — ${rows.length} paid shift${rows.length === 1 ? '' : 's'} · ${hours.toFixed(2)} h · ${fmtRand(amount)}${rows.length && !personHasOpen ? ` <span style="color:#86efac">· agreed after reviews ${agreedH.toFixed(2)} h · ${agreedApprox ? '≈' : ''}${fmtRand(agreedA)}</span>` : ''}${missed.length ? ` <span style="opacity:.85">(includes ${missed.length} missed: ${mH.toFixed(2)} h · ${fmtRand(mA)})</span>` : ''}${g.drafts.length ? ` <span style="opacity:.7">· ${g.drafts.length} still awaiting Final Submission (not counted)</span>` : ''}</td></tr>`
+      <tr><td colspan="13" style="padding:6px 10px 12px;color:#e2b93b;font-weight:700">Subtotal for ${escapeHtmlText(g.name)} — ${rows.length} paid shift${rows.length === 1 ? '' : 's'} · ${hours.toFixed(2)} h · ${fmtRand(amount)}${rows.length && !personHasOpen ? ` <span style="color:#86efac">· agreed after reviews ${agreedH.toFixed(2)} h · ${agreedApprox ? '≈' : ''}${fmtRand(agreedA)}</span>` : ''}${missed.length ? ` <span style="opacity:.85">(includes ${missed.length} missed: ${mH.toFixed(2)} h · ${fmtRand(mA)})</span>` : ''}${g.drafts.length ? ` <span style="opacity:.7">· ${g.drafts.length} still awaiting Final Submission (not counted)</span>` : ''}</td></tr>`
   }).join('')
 
   const filterNote = employeeFilter && /^\d+$/.test(employeeFilter) ? ' — one employee selected' : ''
@@ -4048,9 +4057,9 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       <div><span style="opacity:.7">Awaiting Final Submission</span><br><strong style="font-size:18px">${gDrafts}</strong></div>
     </div>
     <div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
-      <thead><tr>${th('Name')}${th('Date / day')}${th('Flags')}${th('Outlet / venue')}${th('Event')}${th('Description')}${th('Time worked')}${th('Work type')}${th('Hours', 'text-align:right')}${th('Amount', 'text-align:right')}${th('Missed shift detail & cross-check')}${th('Review / correction')}</tr></thead>
+      <thead><tr>${th('Name')}${th('Date / day')}${th('Flags')}${th('Outlet / venue')}${th('Event')}${th('Description')}${th('Time worked')}${th('Work type')}${th('Hours', 'text-align:right')}${th('Amount', 'text-align:right')}${th('Missed shift detail & cross-check')}${th('Review / correction')}${th('Edit')}</tr></thead>
       <tbody>${sections}</tbody>
-      <tfoot><tr style="border-top:2px solid rgba(226,185,59,.6);font-weight:800"><td colspan="8" style="padding:12px 10px">GRAND TOTAL (incl. missed shifts) — ${gShifts} paid shifts</td><td style="padding:12px 10px;text-align:right">${gHours.toFixed(2)}</td><td style="padding:12px 10px;text-align:right;color:#e2b93b;font-size:15px">${fmtRand(gAmount)}</td><td colspan="2" style="padding:12px 10px;opacity:.8">Missed shifts included: ${gMissedH.toFixed(2)} h · ${fmtRand(gMissedA)}</td></tr></tfoot>
+      <tfoot><tr style="border-top:2px solid rgba(226,185,59,.6);font-weight:800"><td colspan="8" style="padding:12px 10px">GRAND TOTAL (incl. missed shifts) — ${gShifts} paid shifts</td><td style="padding:12px 10px;text-align:right">${gHours.toFixed(2)}</td><td style="padding:12px 10px;text-align:right;color:#e2b93b;font-size:15px">${fmtRand(gAmount)}</td><td colspan="3" style="padding:12px 10px;opacity:.8">Missed shifts included: ${gMissedH.toFixed(2)} h · ${fmtRand(gMissedA)}</td></tr></tfoot>
     </table></div>
   </section>`
 }
