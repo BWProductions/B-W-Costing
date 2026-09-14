@@ -6,6 +6,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
+const WAGES_UI_VERSION = 'v2026-09-14-4'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -127,6 +128,13 @@ function renderWagesLandingHtml() {
 class WagesUiInjector {
   element(element: Element) {
     element.append(
+      WAGES_UI_INJECT_HTML,
+      { html: true },
+    )
+  }
+}
+
+const WAGES_UI_INJECT_HTML = (
       `<style>
 .bw-return-dashboard { font-weight: 800 !important; color: #8b6914 !important; }
 .bw-shift-actions-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
@@ -2180,8 +2188,32 @@ label[for="bw-missed-work-date"] {
     insertionPoint.parentElement?.insertBefore(panel, insertionPoint)
   }
 
+  const BW_UI_VERSION = '__BW_UI_VERSION__'
+  function guardAgainstStalePage() {
+    // If this page's built-in version differs from the server's current version,
+    // the browser is showing an old copy (office PC, phone home-screen, etc.).
+    // Reload from the server once, bypassing cache. Never loops: version is
+    // remembered per page load.
+    if (window.__bwVersionChecked) return
+    window.__bwVersionChecked = true
+    try {
+      fetch('/wages-version?_=' + Date.now(), { cache: 'no-store', credentials: 'include' })
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => {
+          if (!data || !data.version || data.version === BW_UI_VERSION) return
+          try { window.sessionStorage.removeItem(ACTIVE_STAFF_PROFILE_KEY) } catch (err) {}
+          try { window.localStorage.removeItem(ACTIVE_STAFF_PROFILE_KEY) } catch (err) {}
+          const url = new URL(window.location.href)
+          url.searchParams.set('_bwv', data.version)
+          window.location.replace(url.toString())
+        })
+        .catch(() => {})
+    } catch (err) {}
+  }
+
   function runEnhancements() {
     if (!window.location.pathname.startsWith('/wages')) return
+    guardAgainstStalePage()
     forceWagesProxyRouting()
     consumeMissedQueryFlag()
     detectAndPersistActiveStaffProfile()
@@ -2213,11 +2245,7 @@ label[for="bw-missed-work-date"] {
   const observer = new MutationObserver(() => scheduleRun())
   observer.observe(document.documentElement, { childList: true, subtree: true })
 })();
-</script>`,
-      { html: true },
-    )
-  }
-}
+</script>`).split('__BW_UI_VERSION__').join(WAGES_UI_VERSION)
 
 function buildPrompt() {
   return `You are extracting equipment order details from a photo of an events order sheet used by B&W Productions, a South African events company.
@@ -3396,6 +3424,34 @@ async function buildMissedPaidSection(env: Bindings | undefined, staffId: number
   return { html, totalHours, totalCount, missedHours }
 }
 
+
+// Server-side work-type enforcement (2026-09-14). Identified from the login
+// cookie, never from the page, so a cached/stale page on any device cannot
+// submit a work type the worker is not allowed to bill.
+const STAFF_ALLOWED_WORK_TYPES: Record<number, string[]> = {
+  1: ['House/Garden', 'Warehouse Team'],
+  2: ['House/Garden', 'Warehouse Team'],
+  3: ['Normal', 'Warehouse Team'],
+  4: ['Normal', 'Warehouse Team'],
+  5: ['Music Bus', 'Normal'],
+  6: ['Normal'],
+  7: ['Music Bus', 'Normal'],
+  8: ['Normal'],
+  9: ['Normal'],
+  10: ['Normal'],
+  11: ['Normal'],
+  12: ['Music Bus', 'Normal'],
+  13: ['Normal'],
+  14: ['Normal'],
+  15: ['Music Bus', 'Normal'],
+  16: ['Normal'],
+}
+
+function allowedWorkTypesFor(staffId: number) {
+  return STAFF_ALLOWED_WORK_TYPES[staffId] || ['Normal']
+}
+
+
 async function proxyRequest(c: any) {
   const incomingUrl = new URL(c.req.url)
   const upstreamUrl = new URL(incomingUrl.pathname + incomingUrl.search, ORIGIN)
@@ -3430,6 +3486,24 @@ async function proxyRequest(c: any) {
   void isProxyFormPost
 
   const upstreamHeaders = rewriteRequestHeaders(c.req.raw.headers, incomingUrl, upstreamUrl)
+
+  // Work-type enforcement on every save (server side).
+  if (method === 'POST' && isProxyFormPost && /^\/wages\/drafts(?:\/\d+)?\/?$/.test(incomingUrl.pathname) && c.env?.DB) {
+    try {
+      const peek = await c.req.raw.clone().formData()
+      const submittedType = normalizeProxyFieldValue(peek.get('work_type'))
+      const staffId = await staffIdFromWageSession(c.env, c.req.raw.headers.get('cookie') || '')
+      if (staffId && submittedType) {
+        const allowed = allowedWorkTypesFor(staffId)
+        if (!allowed.some((t) => t.toLowerCase() === submittedType.toLowerCase())) {
+          const back = incomingUrl.pathname === '/wages/drafts' ? '/wages/shift/new' : incomingUrl.pathname + '/edit'
+          const msg = 'Work type "' + submittedType + '" is not available for you. Your options are: ' + allowed.join(', ') + '. Please refresh the page and choose again.'
+          await captureWagesDebug(c.env, { request_path: incomingUrl.pathname + incomingUrl.search, request_method: 'POST', original_payload_json: JSON.stringify({ staff_id: String(staffId), work_type: submittedType }), rewritten_payload_json: '{}', rewrite_applied: 0, response_status: 302, response_location: back, response_error_text: 'work type rejected: ' + submittedType })
+          return new Response(null, { status: 302, headers: { location: back + '?error=' + encodeURIComponent(msg), 'cache-control': 'no-store, no-cache, must-revalidate, max-age=0', pragma: 'no-cache', expires: '0' } })
+        }
+      }
+    } catch (err) {}
+  }
 
   // Real-date restore bookkeeping (see restoreRealDateForMissedShift).
   let realDateRestore: { staffId: number, realDateIso: string, startTime: string, endTime: string, draftIdHint: number } | null = null
@@ -3612,6 +3686,7 @@ async function proxyRequest(c: any) {
 }
 
 app.get('/health', (c) => c.json({ status: 'ok', mode: 'safe-proxy', origin: ORIGIN }))
+app.get('/wages-version', (c) => c.json({ version: WAGES_UI_VERSION }, 200, { 'cache-control': 'no-store, no-cache, must-revalidate, max-age=0', pragma: 'no-cache', expires: '0' }))
 
 // Wages integrity self-check. Read-only. Reports any "blank" submission
 // (status='submitted' with no paid wage_shifts row) so the problem of
