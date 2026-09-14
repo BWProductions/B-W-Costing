@@ -6,7 +6,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-14-6'
+const WAGES_UI_VERSION = 'v2026-09-14-7'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -2354,6 +2354,35 @@ label[for="bw-missed-work-date"] {
     hideOvernightPrompt()
     showMissedShiftDetails()
     addBulkFinalSubmission()
+    singleTickFinalCheck()
+  }
+
+  // Final Shift Check: ONE tick box for the worker. The engine still requires its
+  // three yes-answers, so the single box drives the three original (hidden) boxes.
+  function singleTickFinalCheck() {
+    const form = document.querySelector('form[action*="/final-submit"], form[action*="/final-check"]')
+    if (!form || form.querySelector('.bw-single-tick')) return
+    const boxes = Array.from(form.querySelectorAll('input[type="checkbox"]')).filter((b) => /time_correct|end_time_correct|information_complete/.test(b.name || ''))
+    if (boxes.length < 2) return
+    const list = form.querySelector('.check-list') || boxes[0].closest('.check-list, div')
+    const row = document.createElement('label')
+    row.className = 'check-row bw-single-tick'
+    row.style.cssText = 'display:flex;gap:12px;align-items:flex-start;font-weight:700;font-size:17px;line-height:1.35'
+    const one = document.createElement('input')
+    one.type = 'checkbox'
+    one.className = 'bw-single-tick-box'
+    one.style.cssText = 'width:26px;height:26px;flex:0 0 auto;margin-top:1px'
+    const txt = document.createElement('span')
+    txt.textContent = 'I have checked my start time, my end time and all my shift information — everything is correct.'
+    row.appendChild(one); row.appendChild(txt)
+    const sync = () => { boxes.forEach((b) => { b.checked = one.checked }) }
+    one.addEventListener('change', sync)
+    boxes.forEach((b) => { b.checked = false; const r = b.closest('label, .check-row'); if (r) r.style.display = 'none'; b.required = false })
+    if (list) list.insertBefore(row, list.firstChild); else form.insertBefore(row, form.firstChild)
+    form.addEventListener('submit', (ev) => {
+      if (!one.checked) { ev.preventDefault(); one.focus(); window.alert('Please tick the box to confirm your shift is correct, then press YES – FINAL SUBMISSION.'); return }
+      sync()
+    }, true)
   }
 
   const scheduleRun = () => window.requestAnimationFrame(runEnhancements)
@@ -3509,6 +3538,13 @@ async function restoreRealDateForMissedShift(env: Bindings | undefined, staffId:
   return { ok: true as const, draftId: draftRow.id, shiftId }
 }
 
+let realDateTableReady = false
+async function ensureRealDateTable(env: Bindings | undefined) {
+  if (realDateTableReady || !env?.DB) return
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS wage_draft_real_dates (draft_id INTEGER PRIMARY KEY, staff_id INTEGER NOT NULL, real_date TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`).run()
+  realDateTableReady = true
+}
+
 async function staffIdFromWageSession(env: Bindings | undefined, cookieHeader: string) {
   const db = env?.DB
   if (!db) return 0
@@ -3687,7 +3723,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   const staffIds = Array.from(new Set([...paid.map((r) => r.staff_id), ...drafts.map((r) => r.staff_id)]))
   const ph = staffIds.map(() => '?').join(',')
   const revRes = await db.prepare(`SELECT id, issue_key, status, severity, staff_id, work_date, subject_source, subject_shift_id, compared_shift_id, original_hours, previously_paid_hours,
-        system_proposed_payable_hours, approved_payable_hours, decision_type, decision_reason, reviewed_by_name, issue_summary, warning_reason, system_snapshot_json
+        system_proposed_payable_hours, approved_payable_hours, approved_start_time, approved_end_time, decision_type, decision_reason, reviewed_by_name, issue_summary, warning_reason, system_snapshot_json
       FROM wage_payroll_reviews WHERE staff_id IN (${ph}) AND status <> 'VOID' AND (work_date BETWEEN date(?, '-7 days') AND ?)`).bind(...staffIds, weekStart, weekEnd).all()
   const reviewsAll = (revRes.results || []) as AdminReviewRow[]
   const paidIds = new Set(paid.map((r) => r.id)), paidDraftIds = new Set(paid.map((r) => r.source_draft_id).filter(Boolean) as number[]), draftIds = new Set(drafts.map((d) => d.id))
@@ -3786,7 +3822,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   drafts.forEach((d) => { (byStaff[d.staff_id] = byStaff[d.staff_id] || { name: d.display_name, paid: [], drafts: [] }).drafts.push(d) })
   const order = Object.keys(byStaff).map(Number).sort((a, b) => byStaff[a].name.localeCompare(byStaff[b].name))
 
-  let gHours = 0, gAmount = 0, gShifts = 0, gMissedH = 0, gMissedA = 0, gDrafts = 0, gOpenReviews = 0, gRuleDays = 0, gRuleOver = 0, gRuleUnder = 0, gRuleAmount = 0
+  let gHours = 0, gAmount = 0, gShifts = 0, gMissedH = 0, gMissedA = 0, gDrafts = 0, gOpenReviews = 0, gRuleDays = 0, gRuleOver = 0, gRuleUnder = 0, gRuleAmount = 0, gAgreedH = 0, gAgreedA = 0, gAgreedPending = 0
   type RuleDayCheck = { staffId: number, name: string, date: string, paid: number, rule: RuleDayResult, diff: number, entries: string[], shiftIds: number[], priorIncluded: boolean }
   const ruleDiffsAll: RuleDayCheck[] = []
   const th = (t: string, extra = '') => `<th style="padding:8px 10px;text-align:left;color:#e2b93b;font-size:11px;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;${extra}">${t}</th>`
@@ -3886,6 +3922,38 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     }).join('')
 
     const openLink = `<a href="/wages/login?staff=${sid}" target="_blank" rel="noopener" style="display:inline-block;padding:5px 10px;border-radius:8px;background:#e2b93b;color:#111;font-weight:800;font-size:12px;text-decoration:none;margin-left:10px">Open ${escapeHtmlText(g.name.split(' ')[0])}'s worker app ↗</a>`
+
+    // AGREED figures (owner's request 2026-09-14): what the person is owed after
+    // the office's recorded review decisions. Paid rows without a review keep
+    // their paid figures; rows with a decided review take the approved hours.
+    // Amount for adjusted hours is priced with the owner's pay rule on the
+    // approved window when known, otherwise proportionally (marked ≈). Display only.
+    let agreedH = 0, agreedA = 0, agreedApprox = false, agreedChanged = 0
+    const personHasOpen = openRev > 0
+    rows.forEach((r) => {
+      const decided = reviewsForPaid(r).filter((v) => v.status === 'RESOLVED' && v.approved_payable_hours !== null && v.approved_payable_hours !== undefined).sort((a, b) => b.id - a.id)[0]
+      const paidH = Number(r.hours_worked || 0), paidA = Number(r.amount || 0)
+      if (!decided) { agreedH += paidH; agreedA += paidA; return }
+      const ah = Number(decided.approved_payable_hours)
+      agreedH += ah
+      if (Math.abs(ah - paidH) < 0.01) { agreedA += paidA; return }
+      agreedChanged++
+      if (ah <= 0) return
+      let snap: any = null
+      try { snap = decided.system_snapshot_json ? JSON.parse(decided.system_snapshot_json) : null } catch (err) {}
+      const st = (decided as any).approved_start_time || snap?.recommendedStart, en = (decided as any).approved_end_time || snap?.recommendedEnd
+      if (st && en && timeToMinutes(st) !== null && timeToMinutes(en) !== null && ruleApplies(sid)) {
+        agreedA += computeRuleDay(r.work_date, [ruleSegmentFor(sid, r.work_type, st, en)]).amount
+      } else if (paidH > 0) {
+        agreedA += Math.round(paidA * (ah / paidH) * 100) / 100; agreedApprox = true
+      }
+    })
+    gAgreedH += agreedH; gAgreedA += agreedA; if (personHasOpen) gAgreedPending++
+    const agreedHtml = rows.length
+      ? (personHasOpen
+        ? `<span style="margin-left:10px;padding:3px 9px;border-radius:8px;background:rgba(180,83,9,.25);color:#fbbf24;font-weight:800;font-size:13px" title="Agreed figure appears once every open review for this person has a recorded decision">agreed: ${openRev} review${openRev === 1 ? '' : 's'} still open</span>`
+        : `<span style="margin-left:10px;padding:3px 9px;border-radius:8px;background:rgba(20,83,45,.35);color:#86efac;font-weight:800;font-size:13px" title="After your recorded review decisions${agreedChanged ? ` (${agreedChanged} shift${agreedChanged === 1 ? '' : 's'} adjusted)` : ' (no adjustments)'}">✔ agreed: ${agreedH.toFixed(2)} h · ${agreedApprox ? '≈' : ''}${fmtRand(agreedA)}${agreedChanged ? '' : ' (as paid)'}</span>`)
+      : ''
     const personOpenReviews = [...rows.flatMap((r) => reviewsForPaid(r)), ...g.drafts.flatMap((d) => reviewsForDraft(d))].filter((v) => v.status === 'OPEN')
     const personReviewsHtml = personOpenReviews.length
       ? `<div id="bw-person-reviews-${sid}" style="display:none;margin:8px 0 4px;padding:10px 12px;border-radius:10px;background:rgba(180,83,9,.12);border:1px solid rgba(180,83,9,.5)"><div style="font-weight:800;color:#f59e0b;margin-bottom:6px">Open reviews for ${escapeHtmlText(g.name)} — ${personOpenReviews.length}</div>${personOpenReviews.map((v) => {
@@ -3906,9 +3974,9 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     const flagsSummary = ruleSummaryPill + (openRev ? `<a href="#" onclick="var b=document.getElementById('bw-person-reviews-${sid}');if(b){b.style.display=b.style.display==='none'?'block':'none'}return false" style="text-decoration:none">${pill('⚑ ' + openRev + ' open review' + (openRev === 1 ? '' : 's') + ' ▾', '#b45309', '#fff')}</a>` : '') + (missed.length ? pill(missed.length + ' missed shift' + (missed.length === 1 ? '' : 's') + ' · ' + mH.toFixed(2) + ' h · ' + fmtRand(mA), '#fdecec', '#7f1d1d') : '') + (g.drafts.length ? pill(g.drafts.length + ' not final-submitted', '#374151', '#fff') : '')
     return `<tr><td colspan="12" style="padding:14px 10px 6px;border-top:2px solid rgba(226,185,59,.5)">
         <span style="color:#e2b93b;font-weight:800;text-transform:uppercase;font-size:11px;letter-spacing:.06em;margin-right:8px">Name</span><strong style="font-size:15px">${escapeHtmlText(g.name)}</strong>
-        <span style="color:#e2b93b;font-weight:700;margin-left:10px">${hours.toFixed(2)} hours · ${fmtRand(amount)}</span>${openLink}<div style="margin-top:6px">${flagsSummary}</div>${personReviewsHtml}${personRuleHtml}</td></tr>
+        <span style="color:#e2b93b;font-weight:700;margin-left:10px" title="Final-submitted and paid (before review decisions)">${hours.toFixed(2)} hours · ${fmtRand(amount)}</span>${agreedHtml}${openLink}<div style="margin-top:6px">${flagsSummary}</div>${personReviewsHtml}${personRuleHtml}</td></tr>
       ${paidTrs}${draftTrs}
-      <tr><td colspan="12" style="padding:6px 10px 12px;color:#e2b93b;font-weight:700">Subtotal for ${escapeHtmlText(g.name)} — ${rows.length} paid shift${rows.length === 1 ? '' : 's'} · ${hours.toFixed(2)} h · ${fmtRand(amount)}${missed.length ? ` <span style="opacity:.85">(includes ${missed.length} missed: ${mH.toFixed(2)} h · ${fmtRand(mA)})</span>` : ''}${g.drafts.length ? ` <span style="opacity:.7">· ${g.drafts.length} still awaiting Final Submission (not counted)</span>` : ''}</td></tr>`
+      <tr><td colspan="12" style="padding:6px 10px 12px;color:#e2b93b;font-weight:700">Subtotal for ${escapeHtmlText(g.name)} — ${rows.length} paid shift${rows.length === 1 ? '' : 's'} · ${hours.toFixed(2)} h · ${fmtRand(amount)}${rows.length && !personHasOpen ? ` <span style="color:#86efac">· agreed after reviews ${agreedH.toFixed(2)} h · ${agreedApprox ? '≈' : ''}${fmtRand(agreedA)}</span>` : ''}${missed.length ? ` <span style="opacity:.85">(includes ${missed.length} missed: ${mH.toFixed(2)} h · ${fmtRand(mA)})</span>` : ''}${g.drafts.length ? ` <span style="opacity:.7">· ${g.drafts.length} still awaiting Final Submission (not counted)</span>` : ''}</td></tr>`
   }).join('')
 
   const filterNote = employeeFilter && /^\d+$/.test(employeeFilter) ? ' — one employee selected' : ''
@@ -3950,6 +4018,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       <div><span style="opacity:.7">Paid shifts</span><br><strong style="font-size:18px">${gShifts}</strong></div>
       <div><span style="opacity:.7">Total hours</span><br><strong style="font-size:18px">${gHours.toFixed(2)}</strong></div>
       <div><span style="opacity:.7">Total wages (incl. missed)</span><br><strong style="font-size:18px;color:#e2b93b">${fmtRand(gAmount)}</strong></div>
+      <div><span style="opacity:.7">Agreed after reviews</span><br><strong style="font-size:18px;color:${gAgreedPending ? '#fbbf24' : '#86efac'}">${gAgreedH.toFixed(2)} h · ${fmtRand(gAgreedA)}</strong>${gAgreedPending ? `<span style="font-size:12px;opacity:.85"> · ${gAgreedPending} person${gAgreedPending === 1 ? '' : 's'} with open reviews (their paid figures used meanwhile)</span>` : ''}</div>
       <div><span style="opacity:.7">of which missed shifts</span><br><strong style="font-size:18px">${gMissedH.toFixed(2)} h · ${fmtRand(gMissedA)}</strong></div>
       <div><span style="opacity:.7">Open reviews</span><br><strong style="font-size:18px;color:${gOpenReviews ? '#fca5a5' : '#86efac'}">${gOpenReviews}</strong></div>
       <div><span style="opacity:.7">Days differing from pay rule</span><br><strong style="font-size:18px;color:${gRuleDays ? '#93c5fd' : '#86efac'}">${gRuleDays}</strong>${gRuleDays ? `<span style="font-size:12px;opacity:.8"> · net ${gRuleAmount >= 0 ? '+' : '−'}${fmtRand(Math.abs(gRuleAmount))}</span>` : ''}</div>
@@ -4181,19 +4250,38 @@ async function proxyRequest(c: any) {
   // upstream's lock check on final-check / final-submit / edit. Park it on the
   // current Saturday for the duration of this one request, then restore.
   let parkedDraft: { draftId: number, staffId: number, realDateIso: string, startTime: string, endTime: string } | null = null
+  // Real date to DISPLAY on edit / final-check pages. Set whenever the draft is a
+  // previous-week (missed) shift — including when another request has it parked
+  // on the Saturday at this very moment — so a worker never sees the Saturday.
+  let displayRealDate: { staffId: number, realDateIso: string } | null = null
   const draftStepMatch = incomingUrl.pathname.match(/^\/wages\/drafts\/(\d+)\/(final-check|final-submit|edit)\/?$/)
   if (draftStepMatch && c.env?.DB) {
     try {
       const draftId = Number(draftStepMatch[1])
       const staffId = await staffIdFromWageSession(c.env, c.req.raw.headers.get('cookie') || '')
       if (staffId) {
-        const d = await c.env.DB.prepare(`SELECT work_date, start_time, end_time, status FROM wage_shift_drafts WHERE id = ? AND staff_id = ?`).bind(draftId, staffId).first<{ work_date: string, start_time: string, end_time: string, status: string }>()
+        const d = await c.env.DB.prepare(`SELECT work_date, start_time, end_time, status, missed_previous_week, payroll_note FROM wage_shift_drafts WHERE id = ? AND staff_id = ?`).bind(draftId, staffId).first<{ work_date: string, start_time: string, end_time: string, status: string, missed_previous_week: number, payroll_note: string | null }>()
         const captureWeekStart = currentProxyPayrollWeekStart()
         const realDate = parseProxyIsoDate(d?.work_date || '')
         const captureDate = parseProxyIsoDate(captureWeekStart)
+        let realIso: string | null = null
         if (d && d.status === 'draft' && realDate && captureDate && realDate.getTime() < captureDate.getTime()) {
+          realIso = d.work_date
+          // Remember the real date in our own table (the engine never touches it), so a
+          // concurrent request that finds the draft parked still knows the real date.
+          await ensureRealDateTable(c.env)
+          await c.env.DB.prepare(`INSERT INTO wage_draft_real_dates (draft_id, staff_id, real_date, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+              ON CONFLICT(draft_id) DO UPDATE SET real_date = excluded.real_date, updated_at = CURRENT_TIMESTAMP`).bind(draftId, staffId, realIso).run()
+        } else if (d && d.status === 'draft' && d.work_date === captureWeekStart && d.missed_previous_week === 1) {
+          // Parked by a concurrent request right now: take the real date from our table.
+          await ensureRealDateTable(c.env)
+          const rd = await c.env.DB.prepare(`SELECT real_date FROM wage_draft_real_dates WHERE draft_id = ? AND staff_id = ?`).bind(draftId, staffId).first<{ real_date: string }>()
+          if (rd?.real_date && rd.real_date < captureWeekStart) realIso = rd.real_date
+        }
+        if (d && realIso) {
           await c.env.DB.prepare(`UPDATE wage_shift_drafts SET work_date = ?, missed_previous_week = 1 WHERE id = ? AND staff_id = ? AND status = 'draft'`).bind(captureWeekStart, draftId, staffId).run()
-          parkedDraft = { draftId, staffId, realDateIso: d.work_date, startTime: d.start_time, endTime: d.end_time }
+          parkedDraft = { draftId, staffId, realDateIso: realIso, startTime: d.start_time, endTime: d.end_time }
+          displayRealDate = { staffId, realDateIso: realIso }
         }
       }
     } catch (err) {}
@@ -4202,15 +4290,25 @@ async function proxyRequest(c: any) {
   const { upstreamRequest, debugCapture } = await buildUpstreamRequest(c, incomingUrl, upstreamUrl, upstreamHeaders)
 
   let upstreamResponse: Response
+  const restoreParked = async () => {
+    if (!parkedDraft) return
+    // Always restore the real date on the draft (and on the paid shift if one was just created).
+    try { await restoreRealDateForMissedShift(c.env, parkedDraft.staffId, parkedDraft.realDateIso, parkedDraft.startTime, parkedDraft.endTime, parkedDraft.draftId) } catch (err) {
+      try { await c.env.DB.prepare(`UPDATE wage_shift_drafts SET work_date = ? WHERE id = ? AND staff_id = ?`).bind(parkedDraft.realDateIso, parkedDraft.draftId, parkedDraft.staffId).run() } catch (err2) {}
+    }
+  }
   try {
     upstreamResponse = await fetch(upstreamRequest)
-  } finally {
-    if (parkedDraft) {
-      // Always restore the real date on the draft (and on the paid shift if one was just created).
-      try { await restoreRealDateForMissedShift(c.env, parkedDraft.staffId, parkedDraft.realDateIso, parkedDraft.startTime, parkedDraft.endTime, parkedDraft.draftId) } catch (err) {
-        try { await c.env.DB.prepare(`UPDATE wage_shift_drafts SET work_date = ? WHERE id = ? AND staff_id = ?`).bind(parkedDraft.realDateIso, parkedDraft.draftId, parkedDraft.staffId).run() } catch (err2) {}
-      }
+    // Concurrency guard: if another request for the same draft restored the real
+    // date between our parking and the engine's read, the engine answers with its
+    // "payroll week locked" redirect. Park again and retry once (GET pages only).
+    if (parkedDraft && ['GET', 'HEAD'].includes(method) && upstreamResponse.status === 302 && /already been paid and is locked/i.test(decodeURIComponent(upstreamResponse.headers.get('location') || ''))) {
+      await c.env!.DB.prepare(`UPDATE wage_shift_drafts SET work_date = ?, missed_previous_week = 1 WHERE id = ? AND staff_id = ? AND status = 'draft'`).bind(currentProxyPayrollWeekStart(), parkedDraft.draftId, parkedDraft.staffId).run()
+      const retry = await buildUpstreamRequest(c, incomingUrl, upstreamUrl, upstreamHeaders)
+      upstreamResponse = await fetch(retry.upstreamRequest)
     }
+  } finally {
+    await restoreParked()
   }
 
   // After upstream ACCEPTED (302 without error) put the real date back.
@@ -4263,17 +4361,17 @@ async function proxyRequest(c: any) {
   const headers = rewriteHeaders(upstreamResponse, incomingUrl.origin)
   const contentType = headers.get('content-type') || ''
 
-  if (parkedDraft && method === 'GET' && contentType.includes('text/html') && upstreamResponse.status === 200) {
+  if (displayRealDate && method === 'GET' && contentType.includes('text/html') && upstreamResponse.status === 200) {
     // The page upstream rendered shows the parked Saturday; show the real date instead.
     const bodyText = await upstreamResponse.text()
     const saturday = currentProxyPayrollWeekStart()
     const swapped = bodyText
-      .split(saturday + ' · ').join(parkedDraft.realDateIso + ' · ')
-      .split('value="' + saturday + '"').join('value="' + parkedDraft.realDateIso + '"')
+      .split(saturday + ' · ').join(displayRealDate.realDateIso + ' · ')
+      .split('value="' + saturday + '"').join('value="' + displayRealDate.realDateIso + '"')
     headers.delete('content-length')
     const swappedResponse = new Response(swapped, { status: 200, statusText: upstreamResponse.statusText, headers })
     const rewriterSwap = new HTMLRewriter()
-    if (parkedDraft.staffId) rewriterSwap.on('html', new SessionStaffStampInjector(parkedDraft.staffId))
+    if (displayRealDate.staffId) rewriterSwap.on('html', new SessionStaffStampInjector(displayRealDate.staffId))
     rewriterSwap.on('body', new WagesUiInjector())
     headers.set('cache-control', 'no-store, no-cache, must-revalidate, max-age=0')
     return rewriterSwap.transform(swappedResponse)
