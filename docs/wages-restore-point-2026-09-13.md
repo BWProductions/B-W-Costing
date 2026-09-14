@@ -13,7 +13,7 @@ This document records the current working wages state as a restore-point handove
 ## Backup archive restore point
 - **Project backup (previous):** https://www.genspark.ai/api/files/s/6k3morJo
 - **Code commit for this restore point:** see `git log` — "Remove orphan missed-shift helper text and pin per-worker work types"
-- **Cloudflare Pages production deployment:** https://e930c675.bw-productions.pages.dev (custom domain https://bwprodsystem.co.za)
+- **Cloudflare Pages production deployment:** https://d62391be.bw-productions.pages.dev (custom domain https://bwprodsystem.co.za) — UI version `v2026-09-14-5`
 
 ## What is working in this restore point
 - Workers use a single **Add Current Shift** flow.
@@ -70,6 +70,16 @@ The proxy’s direct writes produced `status='submitted'` drafts with **no** pai
 - `/admin/wages` shows a green/red banner from that report on every load. Red lists the exact blank rows.
 - Nothing for staff or admin to change. No new accounts, no new steps.
 
+## 2026-09-14 (midday) — edit-page "Choose a valid work date.", wrong dropdown on a shared PC, old deployment links
+
+Three faults found from the proxy log after the office reported missed shifts being rejected and Joshua's dropdown missing Music Bus:
+
+1. **Edit page lost the date.** On `/wages/drafts/:id/edit` the upstream form keeps its real `work_date` in a hidden input inside the legacy "Date worked" block. The page enhancer removes that block (it carries the Saturday/Monday selector), so the save reached the engine with **no `work_date`** and the engine answered `Choose a valid work date.` — for every edit-and-save, current week or missed. Two fixes, belt and braces: the enhancer now recreates/mirrors the hidden `work_date` from the calendar (`WorkDateMirrorSafe`), and the proxy (`ensureWorkDateOnSubmission`) fills a missing `work_date` from `bw_visible_work_date` / `bw_actual_work_date` before forwarding. Verified on the preview: old-style payload without `work_date` → `draft_saved=1` for both a 10 Sep (missed) and a 12 Sep (current) date; real edit page → save → final-check → final-submit produced a paid row with the real date (test rows deleted).
+2. **Shared PC carried the previous worker's identity.** The enhancer trusted a remembered `bw_staff_id` (localStorage / URL tag) before the real login. Thandanani's saves went out tagged `bw_staff_id=8` (Erence); Joshua saw Erence's Normal-only list. The proxy now stamps the real session worker on every worker page (`<html data-bw-session-staff="N">`, from the `bw_wage_session` cookie) and the enhancer uses that first, clearing any stale memory when it differs. Verified live for all 16 workers with a poisoned localStorage + `?bw_staff_id=8`: each got exactly their own list.
+3. **Old deployment links kept serving yesterday's code.** Every Pages deployment stays live on its own `<hash>.bw-productions.pages.dev`. Three of Thandanani's saves at 11:33–11:36 came through a 13 Sep hash address (no date conversion, errors hidden) and were rejected by the engine. Now: any `/wages*` request on a hash host 302s to `https://bwprodsystem.co.za` (`redirectStaleHostIfNeeded`), and the 79 proxy deployments from 10–14 Sep were deleted via the Cloudflare API. **Kept:** the live production deployment, the `realdate-test` preview alias, and the wages engine `3c3bcb89` (never touch) plus `88167ced`. Proxy log retention raised from 20 to 300 rows.
+
+Also: real-date draft cards whose description no longer carries the marker now build the `MISSED SHIFT – actual date … – <work>` text from the card date (Thandanani 674/715/716 verified).
+
 ## Stale pages and work-type enforcement (2026-09-14, later)
 - Every wages page carries `WAGES_UI_VERSION`. On load it asks `/wages-version`; if the server is newer the page
   reloads itself once and clears the device-stored dropdown profile. Old copies on office PCs / phone home screens
@@ -123,7 +133,7 @@ The proxy’s direct writes produced `status='submitted'` drafts with **no** pai
 |---|---|
 | Givemore Chifetete Kuziwa | House/Garden, Warehouse Team |
 | Takavaudza Chokuda (Takka) | House/Garden, Warehouse Team |
-| Thina Dyani | Normal, Warehouse Team |
+| Thina Dyani | Normal (changed 2026-09-14 on the owner's instruction; was Normal, Warehouse Team) |
 | Tsotlego Petrus Malakoane | Normal, Warehouse Team |
 | Bhekizitha Maphosa (Bheki) | Music Bus, Normal |
 | John Simbarashe Mhlanga (Jay) | Music Bus, Normal |

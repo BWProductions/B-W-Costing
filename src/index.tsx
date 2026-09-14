@@ -6,7 +6,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-14-4'
+const WAGES_UI_VERSION = 'v2026-09-14-5'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -407,7 +407,7 @@ label[for="bw-missed-work-date"] {
   const STAFF_WORK_TYPE_PROFILES = [
     { ids: ['1'], names: ['givemore chifetete kuziwa', 'givemore'], options: ['House/Garden', 'Warehouse Team'] },
     { ids: ['2'], names: ['takavaudza chokuda', 'takavaudza', 'takka'], options: ['House/Garden', 'Warehouse Team'] },
-    { ids: ['3'], names: ['thina dyani', 'thina'], options: ['Normal', 'Warehouse Team'] },
+    { ids: ['3'], names: ['thina dyani', 'thina'], options: ['Normal'] },
     { ids: ['4'], names: ['tsotlego petrus malakoane', 'tsotlego'], options: ['Normal', 'Warehouse Team'] },
     { ids: ['5'], names: ['bhekizitha maphosa', 'bheki'], options: ['Music Bus', 'Normal'] },
     { ids: ['6'], names: ['isaac mbele', 'isaac'], options: ['Normal'] },
@@ -480,7 +480,29 @@ label[for="bw-missed-work-date"] {
     return readStored(window.sessionStorage) || readStored(window.localStorage)
   }
 
+  // The proxy stamps the REAL logged-in worker (from the session cookie) on
+  // every worker page. It always wins over a remembered ID / URL tag, so a
+  // shared phone or office PC can never carry one worker's identity (and
+  // dropdown) into the next worker's session.
+  function sessionStaffId() {
+    const stamped = normalize(document.documentElement.getAttribute('data-bw-session-staff') || '')
+    return /^\\d+$/.test(stamped) ? stamped : ''
+  }
+
+  function syncSessionStaffContext() {
+    const live = sessionStaffId()
+    if (!live) return
+    const stored = getStoredActiveStaffId()
+    if (stored && stored !== live) clearStoredStaffContext()
+    persistActiveStaffId(live)
+  }
+
   function resolveActiveStaffId(scope) {
+    const live = sessionStaffId()
+    if (live) {
+      persistActiveStaffId(live)
+      return live
+    }
     try {
       const currentUrl = new URL(window.location.href)
       const directStaffId = normalize(currentUrl.searchParams.get('bw_staff_id') || currentUrl.searchParams.get('staff') || '')
@@ -1559,6 +1581,14 @@ label[for="bw-missed-work-date"] {
 
   function detectAndPersistActiveStaffProfile() {
     bindStaffPickerPersistence()
+    syncSessionStaffContext()
+
+    const liveStaffId = sessionStaffId()
+    if (liveStaffId) {
+      const liveProfile = STAFF_WORK_TYPE_PROFILES.find((profile) => profile.ids.includes(liveStaffId)) || NORMAL_ONLY_PROFILE
+      if (liveProfile !== NORMAL_ONLY_PROFILE) persistActiveStaffProfile(liveProfile)
+      return liveProfile
+    }
 
     const currentUrl = new URL(window.location.href)
     const directStaffId = normalize(currentUrl.searchParams.get('bw_staff_id') || currentUrl.searchParams.get('staff'))
@@ -1601,6 +1631,10 @@ label[for="bw-missed-work-date"] {
   }
 
   function resolveStaffWorkTypeProfile(form) {
+    const liveStaffId = sessionStaffId()
+    if (liveStaffId) {
+      return STAFF_WORK_TYPE_PROFILES.find((profile) => profile.ids.includes(liveStaffId)) || NORMAL_ONLY_PROFILE
+    }
     const idFields = Array.from(form.querySelectorAll('input[name="staff_id"], input[name="person_id"], input[name="worker_id"], input[name="employee_id"], select[name="staff_id"], select[name="person_id"], select[name="worker_id"], select[name="employee_id"]'))
     const idValues = idFields.map((field) => normalize(field.value || field.getAttribute('value') || ''))
     for (const profile of STAFF_WORK_TYPE_PROFILES) {
@@ -1944,7 +1978,24 @@ label[for="bw-missed-work-date"] {
       const claimWeekHidden = ensureHiddenField(form, 'payroll_week_start')
       const previousPayrollHidden = ensureHiddenField(form, 'missed_previous_week')
       const reviewNoteHidden = ensureHiddenField(form, 'payroll_note')
-      const workDateHidden = workDateBinding.hiddenField || ensureHiddenField(form, 'work_date')
+      // The edit page's original hidden work_date lives inside the legacy
+      // "Date worked" block that gets removed above. If it is no longer in the
+      // form, recreate it and keep it mirrored from the calendar, otherwise
+      // the save reaches upstream with NO work_date -> "Choose a valid work date."
+      let workDateHidden = workDateBinding.hiddenField
+      if (!(workDateHidden instanceof HTMLElement) || !form.contains(workDateHidden)) {
+        workDateHidden = ensureHiddenField(form, 'work_date')
+        workDateBinding.hiddenField = workDateHidden
+      }
+      if (workDateHidden !== workDateField) {
+        if (!workDateHidden.value && currentWorkDateValue) workDateHidden.value = currentWorkDateValue
+        if (once(workDateField, 'WorkDateMirrorSafe')) {
+          const mirror = () => { workDateHidden.value = workDateField.value || '' }
+          workDateField.addEventListener('input', mirror)
+          workDateField.addEventListener('change', mirror)
+          form.addEventListener('submit', mirror)
+        }
+      }
       const actualWorkDateHidden = ensureHiddenField(form, 'bw_actual_work_date')
       const claimWeekMarkerHidden = ensureHiddenField(form, 'bw_claim_week_start')
       const missedModeHidden = ensureHiddenField(form, 'bw_missed_shift_mode')
@@ -2093,7 +2144,21 @@ label[for="bw-missed-work-date"] {
             const doc = new DOMParser().parseFromString(html, 'text/html')
             const field = doc.querySelector('#work_description, [name="work_description"]')
             const value = normalize(field?.getAttribute('value') || field?.value || field?.textContent || '')
-            missedDetailCache[draftId] = MISSED_DETAIL_RE.test(value) ? value : ''
+            if (MISSED_DETAIL_RE.test(value)) {
+              missedDetailCache[draftId] = value
+            } else {
+              // Real-date draft: description has no marker any more, build the
+              // full text from the card's own (real) date + the description.
+              const dateNode = Array.from(card.querySelectorAll('.muted')).find((n) => /^\\d{4}-\\d{2}-\\d{2}\\s*·/.test(elementText(n)))
+              const cardDate = dateNode ? parseFlexibleDate(elementText(dateNode).slice(0, 10)) : null
+              const weekStart = parseFlexibleDate(currentPayrollWeekStartValue())
+              if (cardDate && weekStart && cardDate.getTime() < weekStart.getTime()) {
+                const label = WEEKDAY_LABELS[cardDate.getUTCDay()].slice(0, 3) + ' ' + cardDate.getUTCDate() + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][cardDate.getUTCMonth()] + ' ' + cardDate.getUTCFullYear()
+                missedDetailCache[draftId] = 'MISSED SHIFT – actual date ' + label + (value ? ' – ' + value : '')
+              } else {
+                missedDetailCache[draftId] = ''
+              }
+            }
             if (missedDetailCache[draftId]) scheduleRun()
           })
           .catch(() => { missedDetailCache[draftId] = '' })
@@ -2608,6 +2673,24 @@ function rewriteMissedShiftObjectPayload(payload: unknown, upstreamUrl: URL) {
   })
 }
 
+// Safety net for every shift save (2026-09-14): if the page failed to send
+// work_date (seen on the edit page, where the original hidden field sat inside
+// a block the enhancer removes) rebuild it from the calendar fields so upstream
+// never answers "Choose a valid work date." for a shift the worker did date.
+function ensureWorkDateOnSubmission(formData: FormData) {
+  const current = normalizeProxyFieldValue(formData.get('work_date'))
+  if (parseProxyIsoDate(current)) return false
+  const candidate = normalizeProxyFieldValue(formData.get('bw_visible_work_date'))
+    || normalizeProxyFieldValue(formData.get('bw_actual_work_date'))
+    || normalizeProxyFieldValue(formData.get('date_worked'))
+    || normalizeProxyFieldValue(formData.get('actual_work_date'))
+    || normalizeProxyFieldValue(formData.get('exact_work_date'))
+  if (!parseProxyIsoDate(candidate)) return false
+  formData.set('work_date', candidate)
+  if (!normalizeProxyFieldValue(formData.get('bw_actual_work_date'))) formData.set('bw_actual_work_date', candidate)
+  return true
+}
+
 function shouldRewriteMissedShiftSubmission(formData: FormData) {
   const explicitMarker = normalizeProxyFieldValue(formData.get('bw_missed_shift_mode')) === '1'
   const previousPayrollFlag = normalizeProxyFieldValue(formData.get('missed_previous_week')) === '1'
@@ -3095,7 +3178,7 @@ async function captureWagesDebug(env: Bindings | undefined, entry: {
 
     await db.prepare(`DELETE FROM wage_debug_capture
       WHERE id NOT IN (
-        SELECT id FROM wage_debug_capture ORDER BY id DESC LIMIT 20
+        SELECT id FROM wage_debug_capture ORDER BY id DESC LIMIT 300
       )`).run()
   } catch (err) {
     console.warn('wage debug capture failed', err)
@@ -3141,9 +3224,11 @@ async function buildUpstreamRequest(c: any, incomingUrl: URL, upstreamUrl: URL, 
     const originalSnapshot = shouldCaptureDebug
       ? { _content_type: contentType || '(none)', ...extractInterestingFormFields(formData) }
       : null
-    const rewriteApplied = shouldRewriteMissedShiftSubmission(formData)
+    const isShiftSave = /^\/wages\/drafts(?:\/\d+)?\/?$/.test(incomingUrl.pathname)
+    const workDateFilled = isShiftSave && ensureWorkDateOnSubmission(formData)
+    const rewriteApplied = shouldRewriteMissedShiftSubmission(formData) || workDateFilled
 
-    if (rewriteApplied) {
+    if (shouldRewriteMissedShiftSubmission(formData)) {
       rewriteMissedShiftSubmission(formData, upstreamUrl)
     }
 
@@ -3245,8 +3330,10 @@ async function buildUpstreamRequest(c: any, incomingUrl: URL, upstreamUrl: URL, 
     const originalSnapshot = shouldCaptureDebug
       ? { ...debugPrefix, ...extractInterestingFormFields(looseFormData) }
       : null
-    const rewriteApplied = shouldRewriteMissedShiftSubmission(looseFormData)
-    if (rewriteApplied) {
+    const looseIsShiftSave = /^\/wages\/drafts(?:\/\d+)?\/?$/.test(incomingUrl.pathname)
+    const looseWorkDateFilled = looseIsShiftSave && ensureWorkDateOnSubmission(looseFormData)
+    const rewriteApplied = shouldRewriteMissedShiftSubmission(looseFormData) || looseWorkDateFilled
+    if (shouldRewriteMissedShiftSubmission(looseFormData)) {
       rewriteMissedShiftSubmission(looseFormData, upstreamUrl)
     }
     const rewrittenSnapshot = shouldCaptureDebug
@@ -3402,6 +3489,17 @@ class TextReplaceInjector {
   }
 }
 
+// Stamps the REAL logged-in worker (resolved from the session cookie) onto
+// <html data-bw-session-staff="N"> so the page enhancer never has to guess
+// from remembered IDs or URL tags.
+class SessionStaffStampInjector {
+  constructor(private staffId: number) {}
+  element(element: Element) {
+    if (this.staffId > 0) element.setAttribute('data-bw-session-staff', String(this.staffId))
+    else element.removeAttribute('data-bw-session-staff')
+  }
+}
+
 async function buildMissedPaidSection(env: Bindings | undefined, staffId: number) {
   const db = env?.DB
   if (!db || !staffId) return null
@@ -3431,7 +3529,7 @@ async function buildMissedPaidSection(env: Bindings | undefined, staffId: number
 const STAFF_ALLOWED_WORK_TYPES: Record<number, string[]> = {
   1: ['House/Garden', 'Warehouse Team'],
   2: ['House/Garden', 'Warehouse Team'],
-  3: ['Normal', 'Warehouse Team'],
+  3: ['Normal'],
   4: ['Normal', 'Warehouse Team'],
   5: ['Music Bus', 'Normal'],
   6: ['Normal'],
@@ -3452,9 +3550,26 @@ function allowedWorkTypesFor(staffId: number) {
 }
 
 
+// Every Cloudflare Pages deployment stays reachable forever on its own
+// <hash>.bw-productions.pages.dev address and keeps serving the code it was
+// built with. A worker on a bookmarked old address gets yesterday's proxy
+// (no date conversion, hidden errors). Send worker pages on any hash address
+// to the live domain. The wages engine's own hash (ORIGIN) is never proxied
+// here, and the named preview alias stays usable for testing.
+const LIVE_WORKER_HOST = 'bwprodsystem.co.za'
+function redirectStaleHostIfNeeded(incomingUrl: URL, method: string): Response | null {
+  if (method !== 'GET' && method !== 'HEAD') return null
+  if (!/^[0-9a-f]{8}\.bw-productions\.pages\.dev$/i.test(incomingUrl.hostname)) return null
+  if (!(incomingUrl.pathname === '/wages' || incomingUrl.pathname.startsWith('/wages/'))) return null
+  const target = 'https://' + LIVE_WORKER_HOST + incomingUrl.pathname + incomingUrl.search
+  return new Response(null, { status: 302, headers: { location: target, 'cache-control': 'no-store, no-cache, must-revalidate, max-age=0', pragma: 'no-cache', expires: '0' } })
+}
+
 async function proxyRequest(c: any) {
   const incomingUrl = new URL(c.req.url)
   const upstreamUrl = new URL(incomingUrl.pathname + incomingUrl.search, ORIGIN)
+  const staleHostRedirect = redirectStaleHostIfNeeded(incomingUrl, (c.req.raw.method || 'GET').toUpperCase())
+  if (staleHostRedirect) return staleHostRedirect
   rewritePreviousPayrollGetRequest(incomingUrl, upstreamUrl)
 
   const method = (c.req.raw.method || 'GET').toUpperCase()
@@ -3616,6 +3731,7 @@ async function proxyRequest(c: any) {
     headers.delete('content-length')
     const swappedResponse = new Response(swapped, { status: 200, statusText: upstreamResponse.statusText, headers })
     const rewriterSwap = new HTMLRewriter()
+    if (parkedDraft.staffId) rewriterSwap.on('html', new SessionStaffStampInjector(parkedDraft.staffId))
     rewriterSwap.on('body', new WagesUiInjector())
     headers.set('cache-control', 'no-store, no-cache, must-revalidate, max-age=0')
     return rewriterSwap.transform(swappedResponse)
@@ -3676,6 +3792,12 @@ async function proxyRequest(c: any) {
         rewriter.on('section.summary .big-number', new TextReplaceInjector(section.totalHours.toFixed(2)))
         rewriter.on('section.summary .row strong', new TextReplaceInjector(section.totalCount + ' submitted shifts'))
       }
+    } catch (err) {}
+  }
+  if (needsWagesUi && c.env?.DB) {
+    try {
+      const sessionStaffId = await staffIdFromWageSession(c.env, c.req.raw.headers.get('cookie') || '')
+      rewriter.on('html', new SessionStaffStampInjector(sessionStaffId))
     } catch (err) {}
   }
   if (needsWagesButton) rewriter.on('#topbar-actions', new DashboardButtonInjector())
