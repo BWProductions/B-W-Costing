@@ -6,7 +6,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-14-8'
+const WAGES_UI_VERSION = 'v2026-09-14-9'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3970,10 +3970,12 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       }
     })
     gAgreedH += agreedH; gAgreedA += agreedA; if (personHasOpen) gAgreedPending++
+    // Green text directly to the right of the yellow claimed figure (owner's spec):
+    // "Admin approved: X hours · RY". Display only.
     const agreedHtml = rows.length
       ? (personHasOpen
-        ? `<span style="margin-left:10px;padding:3px 9px;border-radius:8px;background:rgba(180,83,9,.25);color:#fbbf24;font-weight:800;font-size:13px" title="Agreed figure appears once every open review for this person has a recorded decision">agreed: ${openRev} review${openRev === 1 ? '' : 's'} still open</span>`
-        : `<span style="margin-left:10px;padding:3px 9px;border-radius:8px;background:rgba(20,83,45,.35);color:#86efac;font-weight:800;font-size:13px" title="After your recorded review decisions${agreedChanged ? ` (${agreedChanged} shift${agreedChanged === 1 ? '' : 's'} adjusted)` : ' (no adjustments)'}">✔ agreed: ${agreedH.toFixed(2)} h · ${agreedApprox ? '≈' : ''}${fmtRand(agreedA)}${agreedChanged ? '' : ' (as paid)'}</span>`)
+        ? `<span style="color:#fbbf24;font-weight:700;margin-left:12px" title="The approved figure shows once every open review for this person has a recorded decision">Admin approved: ${openRev} review${openRev === 1 ? '' : 's'} still open</span>`
+        : `<span style="color:#86efac;font-weight:700;margin-left:12px" title="Claimed hours less what your resolved reviews took off">Admin approved: ${agreedH.toFixed(2)} hours · ${agreedApprox ? '≈' : ''}${fmtRand(agreedA)}</span>`)
       : ''
     const personOpenReviews = [...rows.flatMap((r) => reviewsForPaid(r)), ...g.drafts.flatMap((d) => reviewsForDraft(d))].filter((v) => v.status === 'OPEN')
     const personReviewsHtml = personOpenReviews.length
