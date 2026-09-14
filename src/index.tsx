@@ -48,36 +48,60 @@ class DashboardButtonInjector {
 class WagesHealthBannerInjector {
   element(element: Element) {
     element.append(
-      `<div id="bw-wages-health" style="margin:12px 0;padding:12px 16px;border-radius:12px;font-weight:600;background:#eef2f7;color:#334155">Checking wages integrity…</div>
+      `<style>[data-bw-hidden-on-behalf="1"]{display:none !important}</style>
+<div id="bw-wages-health" style="margin:12px 0;padding:12px 16px;border-radius:12px;font-weight:600;background:#eef2f7;color:#334155">Checking wages integrity…</div>
 <script>
 (function(){
-  function hideOnBehalfBlock(){
-    var heads=Array.prototype.slice.call(document.querySelectorAll('h1,h2,h3,h4,legend,.eyebrow,.title'));
-    heads.forEach(function(h){
-      var t=(h.textContent||'').replace(/\\s+/g,' ').trim();
-      if(!/^add a shift on behalf of an employee$/i.test(t)) return;
-      // Walk up to the card/section that contains the form, but never past <main>.
-      var node=h, target=null;
-      while(node && node!==document.body && node.tagName!=='MAIN'){
-        if(node.querySelector && node.querySelector('form') && node!==h){ target=node; break; }
-        node=node.parentElement;
-      }
-      var tooBig=!target || target.tagName==='MAIN' || target.querySelector('table') || /wage sheet|grand total/i.test(target.textContent||'');
-      if(!tooBig){
-        if(!target.dataset.bwHiddenOnBehalf){ target.dataset.bwHiddenOnBehalf='1'; target.style.display='none'; }
-        return;
-      }
-      // Fallback: hide only the heading, its intro line and the first form after it.
-      h.style.display='none';
-      var sib=h.nextElementSibling; if(sib && sib.tagName==='P'){ sib.style.display='none'; sib=sib.nextElementSibling; }
-      var form=(sib && sib.tagName==='FORM')?sib:null;
-      if(!form){ var all=Array.prototype.slice.call(document.querySelectorAll('form')); form=all.find(function(f){ return (h.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_FOLLOWING) && !f.querySelector('table') && /employee/i.test(f.textContent||''); })||null; }
-      if(form){ form.style.display='none'; }
-    });
+  var ONB=/add a shift on behalf of an employee/i;
+  function ownText(el){ var t=''; for(var i=0;i<el.childNodes.length;i++){ var n=el.childNodes[i]; if(n.nodeType===3) t+=n.nodeValue; } return (t||el.textContent||'').replace(/\\s+/g,' ').trim(); }
+  function isSheetish(el){ return !el || el.tagName==='MAIN' || el.tagName==='BODY' || el.querySelector('table') || /wage sheet|grand total|worker entries are locked/i.test(el.textContent||''); }
+  function findOnBehalfForm(){
+    var forms=Array.prototype.slice.call(document.querySelectorAll('form'));
+    return forms.find(function(f){
+      if(f.querySelector('table')) return false;
+      var hasStaff=f.querySelector('select[name="staff_id"], select[name="employee_id"], select[name="worker_id"], select[name="person_id"]');
+      var hasDate=f.querySelector('input[type="date"][name="work_date"], input[name="work_date"], input[type="date"]');
+      var hasTime=f.querySelector('input[type="time"], input[name="start_time"]');
+      return !!(hasStaff && hasDate && hasTime);
+    })||null;
   }
-  try{ hideOnBehalfBlock(); }catch(e){}
+  function hideEl(el){ if(!el||el.dataset.bwHiddenOnBehalf==='1') return; el.dataset.bwHiddenOnBehalf='1'; el.style.setProperty('display','none','important'); el.setAttribute('hidden',''); }
+  function reportOnce(info){
+    try{ if(window.__bwOnBehalfReported) return; window.__bwOnBehalfReported=true;
+      fetch('/wages-admin-ui-log',{method:'POST',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify(info)}).catch(function(){});
+    }catch(e){}
+  }
+  function hideOnBehalfBlock(){
+    var hidden=false, info={};
+    // 1) Heading-based: any element whose own text is the heading.
+    var all=Array.prototype.slice.call(document.querySelectorAll('h1,h2,h3,h4,h5,legend,div,span,p,strong,b'));
+    var heads=all.filter(function(el){ return ONB.test(ownText(el)) && ownText(el).length<80; });
+    heads.forEach(function(h){
+      var node=h.parentElement, target=null, hops=0;
+      while(node && hops<8 && node.tagName!=='MAIN' && node.tagName!=='BODY'){
+        if(node.querySelector('form')){ target=node; break; }
+        node=node.parentElement; hops++;
+      }
+      info.headTag=h.tagName; info.headParentChain=(function(){var c=[],n=h;while(n&&n.tagName!=='BODY'&&c.length<8){c.push(n.tagName+(n.id?'#'+n.id:'')+(n.className?'.'+String(n.className).replace(/\\s+/g,'.'):''));n=n.parentElement;}return c.join(' < ')})();
+      if(target && !isSheetish(target)){ hideEl(target); hidden=true; info.mode='card'; return; }
+      hideEl(h); var sib=h.nextElementSibling; if(sib && /capture work completed/i.test(sib.textContent||'')) hideEl(sib);
+      hidden=true; info.mode='heading-only';
+    });
+    // 2) Form-based (works even if the heading was missed).
+    var f=findOnBehalfForm();
+    if(f){
+      info.formAction=f.getAttribute('action')||''; info.formChain=(function(){var c=[],n=f;while(n&&n.tagName!=='BODY'&&c.length<8){c.push(n.tagName+(n.id?'#'+n.id:'')+(n.className?'.'+String(n.className).replace(/\\s+/g,'.'):''));n=n.parentElement;}return c.join(' < ')})();
+      var wrap=f.parentElement, hops=0;
+      while(wrap && hops<4 && !isSheetish(wrap) && wrap.parentElement && !isSheetish(wrap.parentElement) && ONB.test(wrap.parentElement.textContent||'') && !/wage sheet|grand total/i.test(wrap.parentElement.textContent||'')){ wrap=wrap.parentElement; hops++; }
+      hideEl(!isSheetish(wrap)?wrap:f); hidden=true; info.mode=(info.mode||'')+'+form';
+    }
+    info.hidden=hidden; info.stillVisible=!!Array.prototype.slice.call(document.querySelectorAll('h1,h2,h3,h4,legend,div')).find(function(el){ return ONB.test(ownText(el)) && el.offsetParent!==null; });
+    if(!hidden || info.stillVisible) reportOnce(info); else reportOnce(info);
+  }
+  try{ hideOnBehalfBlock(); }catch(e){ reportOnce({error:String(e)}); }
   document.addEventListener('DOMContentLoaded',function(){ try{ hideOnBehalfBlock(); }catch(e){} });
   setTimeout(function(){ try{ hideOnBehalfBlock(); }catch(e){} },400);
+  setTimeout(function(){ try{ hideOnBehalfBlock(); }catch(e){} },1500);
   var box=document.getElementById('bw-wages-health'); if(!box) return;
   fetch('/wages-health',{credentials:'include',cache:'no-store'}).then(function(r){return r.json()}).then(function(h){
     if(h.status==='ok'){
@@ -3840,6 +3864,19 @@ async function proxyRequest(c: any) {
 }
 
 app.get('/health', (c) => c.json({ status: 'ok', mode: 'safe-proxy', origin: ORIGIN }))
+// Admin page self-report: the /admin/wages hide script posts the real DOM
+// structure of the "Add a shift on behalf" block here so it can be inspected
+// in wage_debug_capture without an admin login. Admin cookie required.
+app.post('/wages-admin-ui-log', async (c) => {
+  try {
+    const cookie = c.req.raw.headers.get('cookie') || ''
+    if (!/bw_session=/.test(cookie)) return c.json({ ok: false }, 401)
+    const body = await c.req.raw.text()
+    await captureWagesDebug(c.env, { request_path: '/admin/wages (ui-report)', request_method: 'POST', original_payload_json: body.slice(0, 4000), rewritten_payload_json: '{}', rewrite_applied: 0, response_status: 200, response_location: '', response_error_text: 'on-behalf block report' })
+  } catch (err) {}
+  return c.json({ ok: true })
+})
+
 app.get('/wages-version', (c) => c.json({ version: WAGES_UI_VERSION }, 200, { 'cache-control': 'no-store, no-cache, must-revalidate, max-age=0', pragma: 'no-cache', expires: '0' }))
 
 // Wages integrity self-check. Read-only. Reports any "blank" submission
