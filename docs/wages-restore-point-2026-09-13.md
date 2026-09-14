@@ -13,7 +13,7 @@ This document records the current working wages state as a restore-point handove
 ## Backup archive restore point
 - **Project backup (previous):** https://www.genspark.ai/api/files/s/6k3morJo
 - **Code commit for this restore point:** see `git log` — "Remove orphan missed-shift helper text and pin per-worker work types"
-- **Cloudflare Pages production deployment:** https://7b726eaf.bw-productions.pages.dev (custom domain https://bwprodsystem.co.za)
+- **Cloudflare Pages production deployment:** https://e0a76b52.bw-productions.pages.dev (custom domain https://bwprodsystem.co.za)
 
 ## What is working in this restore point
 - Workers use a single **Add Current Shift** flow.
@@ -58,6 +58,17 @@ The proxy’s direct writes produced `status='submitted'` drafts with **no** pai
 **Verified live:** Lebo test — previous-week date saved → visible in drafts → Final Submission → paid `wage_shifts` row
 (2.00 h, R125, missed flag 1) → dashboard 2.00 h. Test rows deleted afterwards.
 **Rule going forward:** the proxy must never write to `wage_shift_drafts` / `wage_shifts`. Never hide upstream errors.
+
+## Permanent backend guard (2026-09-14) — blanks are now impossible
+- Migration `0040_block_blank_submissions.sql` (applied to production): two D1 `BEFORE INSERT/UPDATE` triggers on
+  `wage_shift_drafts` **refuse** any row with `status='submitted'` and no `final_shift_id` (paid shift). The database
+  itself rejects the write, whatever code tried it. Verified live: real Final Submission still works (status and paid
+  shift are set together by the wages app); a direct attempt to create a blank is rejected with
+  `BLOCKED: shift cannot be marked submitted without a paid shift record`.
+- `GET https://bwprodsystem.co.za/wages-health` — read-only integrity report: guard triggers present, blank submissions
+  this payroll (with worker/date/time), last paid shift time. Returns HTTP 200 `ok` or 503 `ATTENTION`.
+- `/admin/wages` shows a green/red banner from that report on every load. Red lists the exact blank rows.
+- Nothing for staff or admin to change. No new accounts, no new steps.
 
 ## Sign out / Switch person (2026-09-13, later)
 - The worker **Sign out** button is hidden. Workers use **‹ Switch person** only.
