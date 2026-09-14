@@ -3607,7 +3607,9 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   const revRes = await db.prepare(`SELECT id, status, severity, staff_id, work_date, subject_source, subject_shift_id, compared_shift_id, original_hours, previously_paid_hours,
         system_proposed_payable_hours, approved_payable_hours, decision_type, decision_reason, reviewed_by_name, issue_summary, warning_reason, system_snapshot_json
       FROM wage_payroll_reviews WHERE staff_id IN (${ph}) AND status <> 'VOID' AND (work_date BETWEEN date(?, '-7 days') AND ?)`).bind(...staffIds, weekStart, weekEnd).all()
-  const reviews = (revRes.results || []) as AdminReviewRow[]
+  const reviewsAll = (revRes.results || []) as AdminReviewRow[]
+  const paidIds = new Set(paid.map((r) => r.id)), paidDraftIds = new Set(paid.map((r) => r.source_draft_id).filter(Boolean) as number[]), draftIds = new Set(drafts.map((d) => d.id))
+  const reviews = reviewsAll.filter((v) => (v.subject_source === 'shift' && paidIds.has(v.subject_shift_id)) || (v.subject_source === 'draft' && (paidDraftIds.has(v.subject_shift_id) || draftIds.has(v.subject_shift_id))))
 
   // Cross-check source: everything paid to these workers on the missed real dates in EARLIER payrolls.
   const missedDates = Array.from(new Set(paid.filter((r) => r.work_date < weekStart).map((r) => r.work_date)))
@@ -3623,7 +3625,28 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   const dayName = (iso: string) => { const d = parseProxyIsoDate(iso); return d ? ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d.getUTCDay()] : '' }
   const pill = (text: string, bg: string, fg: string) => `<span style="display:inline-block;padding:3px 8px;border-radius:999px;background:${bg};color:${fg};font-weight:700;font-size:11.5px;line-height:1.3;margin:2px 4px 2px 0">${text}</span>`
 
-  function reviewCell(list: AdminReviewRow[]) {
+  function decisionForm(v: AdminReviewRow, snap: any) {
+    if (v.status !== 'OPEN') return ''
+    const rec = v.system_proposed_payable_hours
+    const recReason = snap?.recommendedReason || ''
+    const orig = v.original_hours
+    return `<form method="post" action="/wages-admin/review-decision" class="bw-review-decide" style="margin-top:6px;padding:8px;border-radius:8px;background:rgba(255,255,255,.05);font-size:12px">
+      <input type="hidden" name="review_id" value="${v.id}">
+      <input type="hidden" name="return_to" value="__RETURN__">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <label style="display:flex;align-items:center;gap:4px">Approve hours <input type="number" step="0.25" min="0" name="approved_hours" value="${rec !== null && rec !== undefined ? Number(rec).toFixed(2) : (orig !== null && orig !== undefined ? Number(orig).toFixed(2) : '')}" style="width:80px;padding:4px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.2);background:#0f172a;color:#fff"></label>
+        <input type="text" name="reason" placeholder="Reason (recorded with your name)" value="${escapeHtmlText(recReason)}" required style="flex:1;min-width:180px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.2);background:#0f172a;color:#fff">
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+        <button type="submit" name="decision" value="approve" style="padding:5px 10px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer">Record decision</button>
+        ${orig !== null && orig !== undefined ? `<button type="submit" name="decision" value="approve_original" style="padding:5px 10px;border-radius:6px;border:1px solid rgba(255,255,255,.25);background:transparent;color:#fff;cursor:pointer">Pay as claimed (${Number(orig).toFixed(2)} h)</button>` : ''}
+        <button type="submit" name="decision" value="dismiss" style="padding:5px 10px;border-radius:6px;border:1px solid rgba(255,255,255,.25);background:transparent;color:#fff;cursor:pointer">No issue – pay as claimed</button>
+      </div>
+      <div style="opacity:.6;margin-top:4px">Records your decision on review #${v.id} (status, hours, reason, your name, time). It does not change the paid shift itself — do that with the manager correction if hours must change.</div>
+    </form>`
+  }
+
+  function reviewCell(list: AdminReviewRow[], withForm = true) {
     if (!list.length) return '<span style="opacity:.45">—</span>'
     return list.map((v) => {
       let snap: any = null
@@ -3637,10 +3660,10 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       const reason = snap?.recommendedReason ? `<div style="margin-top:2px;opacity:.85">Reason to record: “${escapeHtmlText(snap.recommendedReason)}”</div>` : ''
       const decided = v.approved_payable_hours !== null && v.approved_payable_hours !== undefined
         ? `<div style="margin-top:3px;color:#86efac"><strong>Decided: ${Number(v.approved_payable_hours).toFixed(2)} h</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''}${v.decision_reason ? ' — ' + escapeHtmlText(v.decision_reason) : ''}</div>`
-        : ''
+        : (v.status !== 'OPEN' && v.decision_reason ? `<div style="margin-top:3px;color:#86efac"><strong>${escapeHtmlText(v.status)}</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''} — ${escapeHtmlText(v.decision_reason)}</div>` : '')
       const summary = openRed ? '' : `<div style="opacity:.8">${escapeHtmlText((v.issue_summary || '').replace(/^Manual overlap review — [^—]+— /, 'Overlap check — '))}</div>`
-      const detail = openRed ? `<div style="opacity:.9;margin-top:2px">${escapeHtmlText(snap?.humanReason || v.warning_reason || '')}</div>` : ''
-      return `<div style="font-size:12px;line-height:1.35;margin-bottom:6px">${head}<span style="opacity:.6">#${v.id}</span>${summary}${detail}${rec}${reason}${decided}</div>`
+      const detail = openRed ? `<div style="opacity:.9;margin-top:2px">${escapeHtmlText(snap?.humanReason || v.warning_reason || '')}</div>` : (open ? `<div style="opacity:.75;margin-top:2px">${escapeHtmlText((v.warning_reason || '').replace(/ Do not block staff entry.*$/i, ''))}</div>` : '')
+      return `<div id="bw-review-${v.id}" style="font-size:12px;line-height:1.35;margin-bottom:6px">${head}<span style="opacity:.6">#${v.id}</span>${summary}${detail}${rec}${reason}${decided}${withForm ? decisionForm(v, snap) : ''}</div>`
     }).join('')
   }
 
@@ -3723,10 +3746,19 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     }).join('')
 
     const openLink = `<a href="/wages/login?staff=${sid}" target="_blank" rel="noopener" style="display:inline-block;padding:5px 10px;border-radius:8px;background:#e2b93b;color:#111;font-weight:800;font-size:12px;text-decoration:none;margin-left:10px">Open ${escapeHtmlText(g.name.split(' ')[0])}'s worker app ↗</a>`
-    const flagsSummary = (openRev ? pill('⚑ ' + openRev + ' open review' + (openRev === 1 ? '' : 's'), '#b45309', '#fff') : '') + (missed.length ? pill(missed.length + ' missed shift' + (missed.length === 1 ? '' : 's') + ' · ' + mH.toFixed(2) + ' h · ' + fmtRand(mA), '#fdecec', '#7f1d1d') : '') + (g.drafts.length ? pill(g.drafts.length + ' not final-submitted', '#374151', '#fff') : '')
+    const personOpenReviews = [...rows.flatMap((r) => reviewsForPaid(r)), ...g.drafts.flatMap((d) => reviewsForDraft(d))].filter((v) => v.status === 'OPEN')
+    const personReviewsHtml = personOpenReviews.length
+      ? `<div id="bw-person-reviews-${sid}" style="display:none;margin:8px 0 4px;padding:10px 12px;border-radius:10px;background:rgba(180,83,9,.12);border:1px solid rgba(180,83,9,.5)"><div style="font-weight:800;color:#f59e0b;margin-bottom:6px">Open reviews for ${escapeHtmlText(g.name)} — ${personOpenReviews.length}</div>${personOpenReviews.map((v) => {
+          const subj = v.subject_source === 'shift' ? rows.find((r) => r.id === v.subject_shift_id) : rows.find((r) => r.source_draft_id === v.subject_shift_id)
+          const dr = !subj && v.subject_source === 'draft' ? g.drafts.find((d) => d.id === v.subject_shift_id) : null
+          const line = subj ? `${escapeHtmlText(subj.work_date)} (${dayName(subj.work_date)}) ${escapeHtmlText(subj.start_time)}–${escapeHtmlText(subj.end_time)} · ${escapeHtmlText(subj.outlet_venue)} · ${Number(subj.hours_worked || 0).toFixed(2)} h · ${fmtRand(subj.amount)}` : dr ? `${escapeHtmlText(dr.work_date)} (${dayName(dr.work_date)}) ${escapeHtmlText(dr.start_time)}–${escapeHtmlText(dr.end_time)} · ${escapeHtmlText(dr.outlet_venue)} · not final-submitted` : escapeHtmlText(v.work_date)
+          return `<div style="padding:6px 0;border-top:1px solid rgba(255,255,255,.08)"><div style="font-size:12.5px;margin-bottom:2px"><strong>${line}</strong></div>${reviewCell([v])}</div>`
+        }).join('')}</div>`
+      : ''
+    const flagsSummary = (openRev ? `<a href="#" onclick="var b=document.getElementById('bw-person-reviews-${sid}');if(b){b.style.display=b.style.display==='none'?'block':'none'}return false" style="text-decoration:none">${pill('⚑ ' + openRev + ' open review' + (openRev === 1 ? '' : 's') + ' ▾', '#b45309', '#fff')}</a>` : '') + (missed.length ? pill(missed.length + ' missed shift' + (missed.length === 1 ? '' : 's') + ' · ' + mH.toFixed(2) + ' h · ' + fmtRand(mA), '#fdecec', '#7f1d1d') : '') + (g.drafts.length ? pill(g.drafts.length + ' not final-submitted', '#374151', '#fff') : '')
     return `<tr><td colspan="12" style="padding:14px 10px 6px;border-top:2px solid rgba(226,185,59,.5)">
         <span style="color:#e2b93b;font-weight:800;text-transform:uppercase;font-size:11px;letter-spacing:.06em;margin-right:8px">Name</span><strong style="font-size:15px">${escapeHtmlText(g.name)}</strong>
-        <span style="color:#e2b93b;font-weight:700;margin-left:10px">${hours.toFixed(2)} hours · ${fmtRand(amount)}</span>${openLink}<div style="margin-top:6px">${flagsSummary}</div></td></tr>
+        <span style="color:#e2b93b;font-weight:700;margin-left:10px">${hours.toFixed(2)} hours · ${fmtRand(amount)}</span>${openLink}<div style="margin-top:6px">${flagsSummary}</div>${personReviewsHtml}</td></tr>
       ${paidTrs}${draftTrs}
       <tr><td colspan="12" style="padding:6px 10px 12px;color:#e2b93b;font-weight:700">Subtotal for ${escapeHtmlText(g.name)} — ${rows.length} paid shift${rows.length === 1 ? '' : 's'} · ${hours.toFixed(2)} h · ${fmtRand(amount)}${missed.length ? ` <span style="opacity:.85">(includes ${missed.length} missed: ${mH.toFixed(2)} h · ${fmtRand(mA)})</span>` : ''}${g.drafts.length ? ` <span style="opacity:.7">· ${g.drafts.length} still awaiting Final Submission (not counted)</span>` : ''}</td></tr>`
   }).join('')
@@ -3735,6 +3767,29 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   return `<section id="bw-combined-sheet" class="card" style="margin:14px 0;padding:16px 18px;border-radius:14px;border:1px solid rgba(226,185,59,.45)">
     <h2 style="margin:0 0 4px">Wage sheet — combined (${escapeHtmlText(weekStart)} to ${escapeHtmlText(weekEnd)})${filterNote}</h2>
     <p style="margin:0 0 10px;opacity:.8">Every worker with anything in this payroll, all their shifts together: in-week shifts <strong>and</strong> missed shifts paid this week (shown at their real date), review flags with the recommended figure and the reason to record, and shifts still waiting for Final Submission. Totals here <strong>include</strong> missed shifts, so they are the true payroll figures. Use the worker-app link on each name to open that person's own page and edit or final-submit for them.</p>
+    ${(() => {
+      const allOpen = reviews.filter((v) => v.status === 'OPEN' && staffIds.includes(v.staff_id)).sort((a, b) => (a.severity === 'red' ? 0 : 1) - (b.severity === 'red' ? 0 : 1) || (byStaff[a.staff_id]?.name || '').localeCompare(byStaff[b.staff_id]?.name || '') || a.work_date.localeCompare(b.work_date))
+      if (!allOpen.length) return `<div style="margin:6px 0 12px;padding:8px 12px;border-radius:10px;background:rgba(20,83,45,.25);color:#86efac;font-weight:700">No open reviews for this payroll week.</div>`
+      const lines = allOpen.map((v) => {
+        const grp = byStaff[v.staff_id]
+        const subj = grp ? (v.subject_source === 'shift' ? grp.paid.find((r) => r.id === v.subject_shift_id) : grp.paid.find((r) => r.source_draft_id === v.subject_shift_id)) : undefined
+        const dr = grp && !subj && v.subject_source === 'draft' ? grp.drafts.find((d) => d.id === v.subject_shift_id) : undefined
+        const what = subj ? `${escapeHtmlText(subj.start_time)}–${escapeHtmlText(subj.end_time)} · ${escapeHtmlText(subj.outlet_venue)} · ${Number(subj.hours_worked || 0).toFixed(2)} h · ${fmtRand(subj.amount)}` : dr ? `${escapeHtmlText(dr.start_time)}–${escapeHtmlText(dr.end_time)} · ${escapeHtmlText(dr.outlet_venue)} · not final-submitted` : ''
+        const red = v.severity === 'red'
+        const recTxt = v.system_proposed_payable_hours !== null && v.system_proposed_payable_hours !== undefined ? ` → recommend <strong>${Number(v.system_proposed_payable_hours).toFixed(2)} h</strong>` : ''
+        return `<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid rgba(255,255,255,.08);font-size:12.5px">
+          <span style="flex:0 0 auto">${red ? pill('ACTION', '#7f1d1d', '#fff') : pill('check', '#b45309', '#fff')}</span>
+          <div style="flex:1"><strong>${escapeHtmlText(grp?.name || ('staff ' + v.staff_id))}</strong> · ${escapeHtmlText(v.work_date)} (${dayName(v.work_date)}) · ${what}${recTxt}
+            <span style="opacity:.6"> #${v.id}</span>
+            <a href="#" onclick="var b=document.getElementById('bw-top-review-${v.id}');if(b){b.style.display=b.style.display==='none'?'block':'none'}return false" style="margin-left:8px;color:#e2b93b;font-weight:700">Open ▾</a>
+            <div id="bw-top-review-${v.id}" style="display:none;margin-top:4px">${reviewCell([v])}</div>
+          </div></div>`
+      }).join('')
+      return `<section id="bw-open-reviews" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(180,83,9,.10);border:1px solid rgba(180,83,9,.55)">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div style="font-weight:800;color:#f59e0b">⚑ Open reviews — ${allOpen.length} (${allOpen.filter((v) => v.severity === 'red').length} need action)</div><a href="#" onclick="var b=document.getElementById('bw-open-reviews-list');b.style.display=b.style.display==='none'?'block':'none';return false" style="color:#e2b93b;font-weight:700;font-size:12px">show / hide list</a></div>
+        <div id="bw-open-reviews-list" style="margin-top:6px">${lines}</div>
+      </section>`
+    })()}
     <div style="display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 12px;font-size:13px">
       <div><span style="opacity:.7">Paid shifts</span><br><strong style="font-size:18px">${gShifts}</strong></div>
       <div><span style="opacity:.7">Total hours</span><br><strong style="font-size:18px">${gHours.toFixed(2)}</strong></div>
@@ -4139,7 +4194,13 @@ async function proxyRequest(c: any) {
       const fromDate = parseProxyIsoDate(fromRaw)
       const weekStart = fromDate ? formatProxyIsoDate(proxyStartOfPayrollWeek(fromDate)) : currentProxyPayrollWeekStart()
       const employeeFilter = (incomingUrl.searchParams.get('staff_id') || incomingUrl.searchParams.get('employee') || incomingUrl.searchParams.get('staff') || '').trim()
-      const tableHtml = await buildAdminCombinedSheet(c.env, weekStart, employeeFilter)
+      const tableHtmlRaw = await buildAdminCombinedSheet(c.env, weekStart, employeeFilter)
+      const cleanReturn = new URL(incomingUrl.toString()); cleanReturn.searchParams.delete('msg'); cleanReturn.searchParams.delete('error')
+      const flashMsg = incomingUrl.searchParams.get('msg') || ''
+      const flashErr = incomingUrl.searchParams.get('error') || ''
+      const flash = flashErr ? `<div style="margin:10px 0;padding:10px 14px;border-radius:10px;background:#fdecec;color:#7f1d1d;font-weight:700">${escapeHtmlText(flashErr)}</div>`
+        : flashMsg ? `<div style="margin:10px 0;padding:10px 14px;border-radius:10px;background:#e7f6ec;color:#14532d;font-weight:700">${escapeHtmlText(flashMsg)}</div>` : ''
+      const tableHtml = (tableHtmlRaw ? flash + tableHtmlRaw : '').split('__RETURN__').join(escapeHtmlText(cleanReturn.pathname + cleanReturn.search))
       if (tableHtml) { rewriter.on('main', new AdminMissedPaidInjector(tableHtml)); rewriter.on('body', new AdminCombinedPlacementInjector()) }
     } catch (err) {}
   }
@@ -4152,6 +4213,77 @@ app.get('/health', (c) => c.json({ status: 'ok', mode: 'safe-proxy', origin: ORI
 // Admin page self-report: the /admin/wages hide script posts the real DOM
 // structure of the "Add a shift on behalf" block here so it can be inspected
 // in wage_debug_capture without an admin login. Admin cookie required.
+// ---------------------------------------------------------------------------
+// Admin review decisions (2026-09-14). Records the office's decision on a
+// wage_payroll_reviews row: status RESOLVED / DISMISSED, approved hours, the
+// reason, the admin's name (from the verified bw_session cookie) and time.
+// It NEVER changes wage_shifts — pay changes still go through the engine's
+// manager correction. Same secret/HMAC scheme the engine uses for bw_session.
+const ADMIN_SESSION_SECRET = 'bw-productions-session-secret-2024-change-in-prod'
+async function adminUserFromCookie(cookieHeader: string): Promise<{ id: number, name: string, email: string, role: string } | null> {
+  try {
+    const m = (cookieHeader || '').match(/(?:^|;\s*)bw_session=([^;]*)/)
+    if (!m) return null
+    const token = decodeURIComponent(m[1])
+    const [b64, sig] = token.split('.')
+    if (!b64 || !sig) return null
+    const enc = new TextEncoder()
+    const key = await crypto.subtle.importKey('raw', enc.encode(ADMIN_SESSION_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+    const mac = await crypto.subtle.sign('HMAC', key, enc.encode(b64))
+    const expected = Array.from(new Uint8Array(mac)).map((b) => b.toString(16).padStart(2, '0')).join('')
+    if (expected !== sig) return null
+    const payload = JSON.parse(atob(b64))
+    if (!payload || (payload.exp && payload.exp < Date.now())) return null
+    return { id: Number(payload.id) || 0, name: String(payload.name || payload.email || 'Office'), email: String(payload.email || ''), role: String(payload.role || '') }
+  } catch (err) { return null }
+}
+
+app.post('/wages-admin/review-decision', async (c) => {
+  const db = c.env?.DB
+  const admin = await adminUserFromCookie(c.req.raw.headers.get('cookie') || '')
+  const back = (v: string) => new Response(null, { status: 302, headers: { location: v, 'cache-control': 'no-store' } })
+  if (!db) return c.text('no database', 500)
+  if (!admin) return back('/login?next=' + encodeURIComponent('/admin/wages'))
+  let form: FormData
+  try { form = await c.req.raw.formData() } catch (err) { return back('/admin/wages?error=' + encodeURIComponent('Could not read the decision form.')) }
+  const reviewId = Number(normalizeProxyFieldValue(form.get('review_id')))
+  const decision = normalizeProxyFieldValue(form.get('decision'))
+  const reason = normalizeProxyFieldValue(form.get('reason')).slice(0, 500)
+  const hoursRaw = normalizeProxyFieldValue(form.get('approved_hours'))
+  const returnTo = normalizeProxyFieldValue(form.get('return_to')) || '/admin/wages'
+  const safeReturn = /^\/admin\/wages(\?|$)/.test(returnTo) ? returnTo : '/admin/wages'
+  const sep = safeReturn.includes('?') ? '&' : '?'
+  if (!reviewId || !['approve', 'approve_original', 'dismiss'].includes(decision)) return back(safeReturn + sep + 'error=' + encodeURIComponent('Invalid review decision.'))
+  if (!reason) return back(safeReturn + sep + 'error=' + encodeURIComponent('Please give a reason for review #' + reviewId + '.'))
+  try {
+    const row = await db.prepare(`SELECT id, status, original_hours, previously_paid_hours, system_proposed_payable_hours FROM wage_payroll_reviews WHERE id = ?`).bind(reviewId).first<{ id: number, status: string, original_hours: number | null, previously_paid_hours: number | null, system_proposed_payable_hours: number | null }>()
+    if (!row) return back(safeReturn + sep + 'error=' + encodeURIComponent('Review #' + reviewId + ' not found.'))
+    if (row.status !== 'OPEN') return back(safeReturn + sep + 'msg=' + encodeURIComponent('Review #' + reviewId + ' was already ' + row.status + '.'))
+    // Engine vocabulary (DB CHECK constraints): status OPEN/REOPENED/RESOLVED/VOID;
+    // decision_type approve_original / approve_adjusted / approve_additional_hours_only / already_paid_r0 / reject.
+    let approvedHours: number | null = null
+    const status = 'RESOLVED'
+    let decisionType = 'approve_original'
+    if (decision === 'approve_original') { approvedHours = row.original_hours; decisionType = 'approve_original' }
+    else if (decision === 'approve') {
+      const h = Number(hoursRaw)
+      if (!Number.isFinite(h) || h < 0) return back(safeReturn + sep + 'error=' + encodeURIComponent('Approved hours must be a number (0 or more) for review #' + reviewId + '.'))
+      approvedHours = h
+      if (h === 0) decisionType = 'already_paid_r0'
+      else if (row.original_hours !== null && Math.abs(Number(row.original_hours) - h) < 0.001) decisionType = 'approve_original'
+      else if (row.previously_paid_hours !== null && Number(row.previously_paid_hours) > 0) decisionType = 'approve_additional_hours_only'
+      else decisionType = 'approve_adjusted'
+    } else { approvedHours = row.original_hours; decisionType = 'approve_original' } // "Dismiss – no issue": pay as claimed, recorded as such
+    await db.prepare(`UPDATE wage_payroll_reviews SET status = ?, decision_type = ?, decision_reason = ?, approved_payable_hours = ?, reviewed_by_user_id = ?, reviewed_by_name = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'OPEN'`)
+      .bind(status, decisionType, reason, approvedHours, admin.id || null, admin.name, reviewId).run()
+    await captureWagesDebug(c.env, { request_path: '/wages-admin/review-decision', request_method: 'POST', original_payload_json: JSON.stringify({ review_id: reviewId, decision, approved_hours: approvedHours, reason, by: admin.name }), rewritten_payload_json: '{}', rewrite_applied: 0, response_status: 302, response_location: safeReturn, response_error_text: '' })
+    const msg = 'Review #' + reviewId + ' resolved by ' + admin.name + ': ' + (approvedHours === null ? 'as claimed' : Number(approvedHours).toFixed(2) + ' h') + ' (' + decisionType.replace(/_/g, ' ') + '). The paid shift itself is unchanged — use the manager correction if the hours must change.'
+    return back(safeReturn + sep + 'msg=' + encodeURIComponent(msg) + '#bw-review-' + reviewId)
+  } catch (err) {
+    return back(safeReturn + sep + 'error=' + encodeURIComponent('Could not record the decision: ' + describeProxyError(err)))
+  }
+})
+
 app.post('/wages-admin-ui-log', async (c) => {
   try {
     const cookie = c.req.raw.headers.get('cookie') || ''
