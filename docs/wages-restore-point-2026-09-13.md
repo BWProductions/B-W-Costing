@@ -13,7 +13,7 @@ This document records the current working wages state as a restore-point handove
 ## Backup archive restore point
 - **Project backup (previous):** https://www.genspark.ai/api/files/s/6k3morJo
 - **Code commit for this restore point:** see `git log` — "Remove orphan missed-shift helper text and pin per-worker work types"
-- **Cloudflare Pages production deployment:** https://cadb54b4.bw-productions.pages.dev (custom domain https://bwprodsystem.co.za)
+- **Cloudflare Pages production deployment:** https://7b726eaf.bw-productions.pages.dev (custom domain https://bwprodsystem.co.za)
 
 ## What is working in this restore point
 - Workers use a single **Add Current Shift** flow.
@@ -40,6 +40,24 @@ This document records the current working wages state as a restore-point handove
   "Saturday or Monday only".
 - Work-type dropdown is now pinned per worker (see table below). A worker with no special list
   always gets **Normal** only. A shared phone can no longer show the previous worker's list.
+
+## CRITICAL FIX 2026-09-14 — Final Submission was not creating paid hours
+**Symptom:** worker presses Final Submission, dashboard stays at 0.00 hours, shift disappears from draft list.
+**Cause:** two changes deployed 2026-09-13 16:50–17:04 UTC made the proxy write drafts straight into D1
+(“Fix wages final submission proxy fallback”, “Always direct-save previous payroll missed shifts”).
+Only the upstream wages app creates paid `wage_shifts` rows (hours, overtime, Sunday, amounts).
+The proxy’s direct writes produced `status='submitted'` drafts with **no** paid shift.
+**Fix:**
+- Proxy never intercepts `POST /wages/drafts` or `POST /wages/drafts/:id/final-submit` again. Everything is forwarded to upstream.
+- Single calendar kept. A previous-payroll date is converted into the only format upstream accepts:
+  booked on the **current payroll Saturday**, `missed_previous_week=1`, description prefixed
+  `MISSED SHIFT - actual date <Day D Mon YYYY> - <worker text>`. Admin/export see the real date in the description.
+- Migration `0039_preserve_worker_missed_flag.sql`: the 0037/0038 D1 triggers were resetting `missed_previous_week` to 0
+  because upstream never sets `payroll_week_start`. Applied to production.
+- Locked-payroll rejection text is now rewritten to “This shift was NOT saved…” instead of hidden.
+**Verified live:** Lebo test — previous-week date saved → visible in drafts → Final Submission → paid `wage_shifts` row
+(2.00 h, R125, missed flag 1) → dashboard 2.00 h. Test rows deleted afterwards.
+**Rule going forward:** the proxy must never write to `wage_shift_drafts` / `wage_shifts`. Never hide upstream errors.
 
 ## Sign out / Switch person (2026-09-13, later)
 - The worker **Sign out** button is hidden. Workers use **‹ Switch person** only.
