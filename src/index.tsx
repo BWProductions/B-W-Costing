@@ -6,7 +6,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-14-7'
+const WAGES_UI_VERSION = 'v2026-09-14-8'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -2237,6 +2237,8 @@ label[for="bw-missed-work-date"] {
       })
 
       if (!finalButton) return
+      // Only drafts can be final-submitted: skip cards already "Submitted — locked".
+      if (Array.from(shift.querySelectorAll('.pill')).some((p) => /submitted\\s*[—-]\\s*locked/i.test(elementText(p)))) return
       let checkbox = shift.querySelector('.bw-shift-select input[type="checkbox"]')
       if (!checkbox) {
         const wrapper = document.createElement('label')
@@ -2282,24 +2284,43 @@ label[for="bw-missed-work-date"] {
       submit.disabled = true
       submit.textContent = 'Submitting ' + chosen.length + ' shift' + (chosen.length === 1 ? '' : 's') + '…'
 
+      // Each selected shift is final-submitted with the SAME request the
+      // "YES – FINAL SUBMISSION" button sends (the three confirmations answered
+      // yes). The card's control is a link to the Final Shift Check page, so it
+      // must never be "clicked" here – that only navigates and submits nothing.
+      const failures = []
+      let done = 0
       try {
         for (const item of chosen) {
+          let action = ''
           const form = item.button.closest('form')
-          if (!form) {
-            item.button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-            continue
+          const formData = new FormData(form || undefined)
+          if (form) {
+            action = form.getAttribute('action') || ''
+            if (item.button.name) formData.append(item.button.name, item.button.value || '1')
+          } else {
+            const href = item.button.getAttribute('href') || ''
+            const m = href.match(/\\/wages\\/drafts\\/(\\d+)\\//)
+            if (!m) { failures.push('one shift had no submission link'); continue }
+            action = '/wages/drafts/' + m[1] + '/final-submit'
           }
-          const action = form.getAttribute('action') || window.location.pathname
-          const method = (form.getAttribute('method') || 'POST').toUpperCase()
-          const formData = new FormData(form)
-          if (item.button instanceof HTMLInputElement && item.button.name) formData.append(item.button.name, item.button.value || '1')
-          if (item.button instanceof HTMLButtonElement && item.button.name) formData.append(item.button.name, item.button.value || '1')
-          await fetch(action, { method, body: formData, credentials: 'include' })
+          if (!/final-submit/.test(action)) action = action.replace(/final-check\\/?(\\?.*)?$/, 'final-submit')
+          formData.set('time_correct', 'yes'); formData.set('end_time_correct', 'yes'); formData.set('information_complete', 'yes')
+          const res = await fetch(action, { method: 'POST', body: formData, credentials: 'include', redirect: 'follow' })
+          const landed = res.url || ''
+          const errParam = (landed.match(/[?&]error=([^&]*)/) || [])[1]
+          if (errParam) failures.push(decodeURIComponent(errParam.replace(/\\+/g, ' ')))
+          else if (!res.ok) failures.push('server answered ' + res.status)
+          else done++
+          submit.textContent = 'Submitting… ' + (done + failures.length) + ' of ' + chosen.length
+        }
+        if (failures.length) {
+          window.alert(done + ' shift' + (done === 1 ? '' : 's') + ' final-submitted. ' + failures.length + ' could not be submitted: ' + failures.join(' / '))
         }
         window.location.reload()
       } catch (err) {
         console.error('bulk final submission failed', err)
-        window.alert('Bulk final submission failed. Please try again.')
+        window.alert('Final submission did not go through (' + (done) + ' of ' + chosen.length + ' done). Please check your connection and try again.')
         submit.disabled = false
         submit.textContent = 'Submit selected'
       }
