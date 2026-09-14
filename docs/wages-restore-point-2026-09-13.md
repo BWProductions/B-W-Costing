@@ -13,7 +13,7 @@ This document records the current working wages state as a restore-point handove
 ## Backup archive restore point
 - **Project backup (previous):** https://www.genspark.ai/api/files/s/6k3morJo
 - **Code commit for this restore point:** see `git log` — "Remove orphan missed-shift helper text and pin per-worker work types"
-- **Cloudflare Pages production deployment:** https://d62391be.bw-productions.pages.dev (custom domain https://bwprodsystem.co.za) — UI version `v2026-09-14-5`
+- **Cloudflare Pages production deployment:** https://5cca8c4b.bw-productions.pages.dev (custom domain https://bwprodsystem.co.za) — UI version `v2026-09-14-5` — git tag `restore-2026-09-14-combined-sheet` (commit e3d5fb4)
 
 ## What is working in this restore point
 - Workers use a single **Add Current Shift** flow.
@@ -69,6 +69,27 @@ The proxy’s direct writes produced `status='submitted'` drafts with **no** pai
   this payroll (with worker/date/time), last paid shift time. Returns HTTP 200 `ok` or 503 `ATTENTION`.
 - `/admin/wages` shows a green/red banner from that report on every load. Red lists the exact blank rows.
 - Nothing for staff or admin to change. No new accounts, no new steps.
+
+## RESTORE POINT 2026-09-14 (afternoon) — approved by the owner: "It looks beautiful. I'm happy with this design."
+
+Git tag `restore-2026-09-14-combined-sheet`. To go back to exactly this state: `git checkout restore-2026-09-14-combined-sheet && npm run build && npx wrangler pages deploy dist --project-name bw-productions --branch main`. No database changes are needed to restore (all D1 migrations through 0040 are already applied).
+
+### Admin `/admin/wages` in this state
+- **Combined per-person wage sheet** (`buildAdminCombinedSheet`) replaces the engine's wage-sheet card (engine card hidden, "show original" link kept). One section per worker for the payroll week in the page filter: header with name, hours, Rands, an **"Open <name>'s worker app ↗"** button (`/wages/login?staff=N`), and flag pills (open reviews / missed shifts / not final-submitted). Rows in date order, all types mixed: in-week paid shifts; **missed shifts at their real date** with the `MISSED SHIFT – actual date … – <work>` badge, the plain-English reason and a **CLEAR / OVERLAP** cross-check against what was already paid that day in earlier payrolls; **drafts not yet final-submitted** greyed with "NOT FINAL-SUBMITTED · not paid · R0,00" (not counted). Every row has a **Review / correction** column: `⚑ REVIEW – ACTION NEEDED #id` (red, OPEN + severity red) with the recommended payable hours and the exact reason text to record; `⚑ review – open` (orange) for routine engine overlap checks; "Decided: X h by … — reason" once `approved_payable_hours` is set; "Corrected: …" if `manager_update_reason` exists. Subtotals and the **Grand Total include missed shifts** (true payroll figure); the missed portion is shown separately.
+- Meaning of "NOT FINAL-SUBMITTED · MISSED · not paid": the worker saved the shift temporarily but has not pressed Final Submission; the engine has not calculated hours/Rands; it is not in the payroll until they (or the office via the worker-app link) final-submit.
+- "Add a shift on behalf of an employee" block hidden (display only; engine route untouched).
+- Green/red integrity banner from `/wages-health`.
+- Review findings written into the engine's own OPEN reviews for Joshua (9616: Mon 7 Sep 16:00–18:00 double claim → recommend 0.00 h; 9622: Thu 10 Sep 05:00–14:00 partial overlap → recommend 2.00 h, 05:00–07:00 only). **No paid record was changed**; the owner makes the corrections.
+
+### Worker pages in this state
+- Real logged-in worker stamped server-side (`data-bw-session-staff`); dropdown never inherits another worker. Thina = Normal only.
+- Edit-page saves keep `work_date` (enhancer mirror + proxy `ensureWorkDateOnSubmission`).
+- Previous-week dates stored at the real date, paid in the current payroll (park/restore around edit/final-check/final-submit).
+- **Final-check POST safety net** (added this afternoon after Patrick's phone posted the confirmation to `/final-check` five times and the engine answered with the ADMIN `/login` redirect): a POST to `/wages/drafts/:id/final-check` is treated as the real `/final-submit` with all three confirmations and flows through the normal handling (parking, real-date restore). If the engine still refuses, the worker is sent back to the confirmation page with a message — never to `/login`. Verified on preview: real-date draft → paid at real date, payroll week current, missed=1; current-week draft → paid; no-session POST → back to confirmation page. Test rows deleted.
+- Any `/wages*` request on a `<hash>.bw-productions.pages.dev` host redirects to bwprodsystem.co.za; the 79 old proxy deployments were deleted. Proxy log keeps 300 rows.
+
+### Backend health at this restore point (checked 2026-09-14 ~13:50 UTC)
+`/wages` 200 · `/wages-version` v2026-09-14-5 · `/wages-health` ok, 0 blank submissions, guard triggers installed · `/admin/wages` → login as expected · engine `3c3bcb89` 200 · every worker save since the 10:43 UTC deploy accepted (0 rejections) · today's Final Submissions (Erick ×4, Patrick, Joshua ×4, Erence ×5, Solomon ×2) all produced paid rows with hours and Rands.
 
 ## 2026-09-14 (midday) — edit-page "Choose a valid work date.", wrong dropdown on a shared PC, old deployment links
 
