@@ -3566,71 +3566,187 @@ function shiftsOverlap(aStart: string, aEnd: string, bStart: string, bEnd: strin
   return s1 < e2 && s2 < e1
 }
 
-async function buildAdminMissedPaidTable(env: Bindings | undefined, weekStart: string) {
+type AdminPaidRow = { id: number, staff_id: number, display_name: string, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, work_type: string, outlet_venue: string, area: string, event_name: string, work_description: string, payroll_week_start: string | null, missed_previous_week: number, overnight_confirmed: number, source_draft_id: number | null, manager_update_reason: string | null }
+type AdminDraftRow = { id: number, staff_id: number, display_name: string, work_date: string, start_time: string, end_time: string, outlet_venue: string, work_type: string, work_description: string, status: string, missed_previous_week: number }
+type AdminReviewRow = { id: number, status: string, severity: string, staff_id: number, work_date: string, subject_source: string, subject_shift_id: number, compared_shift_id: number | null, original_hours: number | null, previously_paid_hours: number | null, system_proposed_payable_hours: number | null, approved_payable_hours: number | null, decision_type: string | null, decision_reason: string | null, reviewed_by_name: string | null, issue_summary: string, warning_reason: string, system_snapshot_json: string | null }
+
+// Combined per-person wage sheet (2026-09-14, owner's spec): for the payroll
+// week in the page filter, ONE section per worker containing every paid shift
+// (in-week AND real-date missed shifts), review flags on the row with the
+// recommendation and reason, drafts still awaiting Final Submission, a link into
+// that worker's app, and totals that include the missed shifts. Read-only.
+async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: string, employeeFilter: string) {
   const db = env?.DB
   if (!db || !parseProxyIsoDate(weekStart)) return ''
   const weekEnd = proxyEndOfPayrollWeek(weekStart)
-  const rows = await db.prepare(`SELECT w.id, w.staff_id, s.display_name, w.work_date, w.start_time, w.end_time, w.hours_worked,
-        COALESCE(w.gross_wage, w.total_amount, 0) AS amount, w.work_type, w.outlet_venue, w.area, w.work_description, w.payroll_note
+
+  const paidRes = await db.prepare(`SELECT w.id, w.staff_id, s.display_name, w.work_date, w.start_time, w.end_time, w.hours_worked,
+        COALESCE(w.gross_wage, w.total_amount, 0) AS amount, w.work_type, w.outlet_venue, w.area, w.event_name, w.work_description,
+        w.payroll_week_start, w.missed_previous_week, w.overnight_confirmed, w.source_draft_id, w.manager_update_reason
       FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id
-      WHERE w.payroll_week_start = ? AND w.work_date < ?
-      ORDER BY s.display_name, w.work_date, w.start_time`).bind(weekStart, weekStart).all()
-  const shifts = (rows.results || []) as Array<{ id: number, staff_id: number, display_name: string, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, work_type: string, outlet_venue: string, area: string, work_description: string, payroll_note: string | null }>
-  if (!shifts.length) return ''
+      WHERE (w.work_date BETWEEN ? AND ? AND (w.payroll_week_start IS NULL OR w.payroll_week_start = ?))
+         OR (w.payroll_week_start = ? AND w.work_date < ?)
+      ORDER BY s.display_name, w.work_date, w.start_time`).bind(weekStart, weekEnd, weekStart, weekStart, weekStart).all()
+  let paid = (paidRes.results || []) as AdminPaidRow[]
 
-  // Cross-check: what was this worker already paid for on that real date (any earlier payroll)?
-  const staffIds = Array.from(new Set(shifts.map((r) => r.staff_id)))
-  const dates = Array.from(new Set(shifts.map((r) => r.work_date)))
-  const prior = await db.prepare(`SELECT id, staff_id, work_date, start_time, end_time, hours_worked, outlet_venue, payroll_week_start
-      FROM wage_shifts WHERE staff_id IN (${staffIds.map(() => '?').join(',')}) AND work_date IN (${dates.map(() => '?').join(',')})
-        AND (payroll_week_start IS NULL OR payroll_week_start < ?)`).bind(...staffIds, ...dates, weekStart).all()
-  const priorRows = (prior.results || []) as Array<{ id: number, staff_id: number, work_date: string, start_time: string, end_time: string, hours_worked: number, outlet_venue: string, payroll_week_start: string | null }>
+  const draftRes = await db.prepare(`SELECT d.id, d.staff_id, s.display_name, d.work_date, d.start_time, d.end_time, d.outlet_venue, d.work_type, d.work_description, d.status, d.missed_previous_week
+      FROM wage_shift_drafts d JOIN wage_staff s ON s.id = d.staff_id
+      WHERE d.status = 'draft' AND ((d.work_date BETWEEN ? AND ?) OR d.payroll_week_start = ? OR (d.missed_previous_week = 1 AND d.work_date >= date(?, '-7 days') AND d.work_date < ?))
+      ORDER BY s.display_name, d.work_date, d.start_time`).bind(weekStart, weekEnd, weekStart, weekStart, weekStart).all()
+  let drafts = (draftRes.results || []) as AdminDraftRow[]
 
-  let totalHours = 0, totalAmount = 0
-  const byWorker: Record<string, typeof shifts> = {}
-  shifts.forEach((r) => { (byWorker[r.display_name] = byWorker[r.display_name] || []).push(r); totalHours += Number(r.hours_worked || 0); totalAmount += Number(r.amount || 0) })
+  if (employeeFilter && /^\d+$/.test(employeeFilter)) {
+    const sid = Number(employeeFilter)
+    paid = paid.filter((r) => r.staff_id === sid)
+    drafts = drafts.filter((r) => r.staff_id === sid)
+  }
+  if (!paid.length && !drafts.length) return ''
 
-  const sections = Object.keys(byWorker).map((name) => {
-    const list = byWorker[name]
-    const subH = list.reduce((a, r) => a + Number(r.hours_worked || 0), 0)
-    const subA = list.reduce((a, r) => a + Number(r.amount || 0), 0)
-    const trs = list.map((r) => {
-      const sameDay = priorRows.filter((p) => p.staff_id === r.staff_id && p.work_date === r.work_date)
-      const clash = sameDay.filter((p) => shiftsOverlap(r.start_time, r.end_time, p.start_time, p.end_time))
-      let check: string, checkStyle: string
-      if (clash.length) {
-        check = 'OVERLAP — already paid ' + clash.map((p) => p.start_time + '–' + p.end_time + ' (' + escapeHtmlText(p.outlet_venue) + ', payroll ' + (p.payroll_week_start || 'n/a') + ')').join('; ') + '. Check before paying.'
-        checkStyle = 'background:#fdecec;color:#7f1d1d'
-      } else if (sameDay.length) {
-        check = 'CLEAR — worked that day too (' + sameDay.map((p) => p.start_time + '–' + p.end_time).join(', ') + ' already paid), these hours are outside those times.'
-        checkStyle = 'background:#e7f6ec;color:#14532d'
-      } else {
-        check = 'CLEAR — nothing else paid for this worker on that day.'
-        checkStyle = 'background:#e7f6ec;color:#14532d'
-      }
-      const why = 'Worked ' + proxyLongDate(r.work_date) + ' (previous payroll), not captured that week; final-submitted and paid in payroll ' + weekStart + ' to ' + weekEnd + '.'
-      return `<tr style="border-top:1px solid rgba(255,255,255,.08)">
-        <td style="padding:8px 10px;font-weight:700;white-space:nowrap">${escapeHtmlText(name)}</td>
-        <td style="padding:8px 10px;white-space:nowrap"><strong>${escapeHtmlText(proxyLongDate(r.work_date))}</strong><br><span style="opacity:.7">${escapeHtmlText(r.work_date)}</span></td>
-        <td style="padding:8px 10px;white-space:nowrap">${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)}</td>
-        <td style="padding:8px 10px">${escapeHtmlText(r.outlet_venue)}${r.area ? '<br><span style="opacity:.7">' + escapeHtmlText(r.area) + '</span>' : ''}</td>
-        <td style="padding:8px 10px">${escapeHtmlText(r.work_type || '')}</td>
-        <td style="padding:8px 10px"><span style="display:inline-block;padding:3px 8px;border-radius:999px;background:#fdecec;color:#7f1d1d;font-weight:700;font-size:12px">MISSED SHIFT – actual date ${escapeHtmlText(proxyLongDate(r.work_date))} – ${escapeHtmlText(r.work_description || '')}</span><br><span style="opacity:.75;font-size:12px">${escapeHtmlText(why)}</span></td>
-        <td style="padding:8px 10px;text-align:right;white-space:nowrap">${Number(r.hours_worked || 0).toFixed(2)}</td>
-        <td style="padding:8px 10px;text-align:right;white-space:nowrap;font-weight:700">${fmtRand(r.amount)}</td>
-        <td style="padding:8px 10px;font-size:12px"><span style="display:inline-block;padding:4px 8px;border-radius:8px;${checkStyle}">${check}</span></td>
+  const staffIds = Array.from(new Set([...paid.map((r) => r.staff_id), ...drafts.map((r) => r.staff_id)]))
+  const ph = staffIds.map(() => '?').join(',')
+  const revRes = await db.prepare(`SELECT id, status, severity, staff_id, work_date, subject_source, subject_shift_id, compared_shift_id, original_hours, previously_paid_hours,
+        system_proposed_payable_hours, approved_payable_hours, decision_type, decision_reason, reviewed_by_name, issue_summary, warning_reason, system_snapshot_json
+      FROM wage_payroll_reviews WHERE staff_id IN (${ph}) AND status <> 'VOID' AND (work_date BETWEEN date(?, '-7 days') AND ?)`).bind(...staffIds, weekStart, weekEnd).all()
+  const reviews = (revRes.results || []) as AdminReviewRow[]
+
+  // Cross-check source: everything paid to these workers on the missed real dates in EARLIER payrolls.
+  const missedDates = Array.from(new Set(paid.filter((r) => r.work_date < weekStart).map((r) => r.work_date)))
+  let prior: Array<{ id: number, staff_id: number, work_date: string, start_time: string, end_time: string, outlet_venue: string, payroll_week_start: string | null }> = []
+  if (missedDates.length) {
+    const priorRes = await db.prepare(`SELECT id, staff_id, work_date, start_time, end_time, outlet_venue, payroll_week_start FROM wage_shifts
+        WHERE staff_id IN (${ph}) AND work_date IN (${missedDates.map(() => '?').join(',')}) AND (payroll_week_start IS NULL OR payroll_week_start < ?)`).bind(...staffIds, ...missedDates, weekStart).all()
+    prior = (priorRes.results || []) as typeof prior
+  }
+
+  const reviewsForPaid = (r: AdminPaidRow) => reviews.filter((v) => (v.subject_source === 'shift' && v.subject_shift_id === r.id) || (v.subject_source === 'draft' && r.source_draft_id && v.subject_shift_id === r.source_draft_id))
+  const reviewsForDraft = (d: AdminDraftRow) => reviews.filter((v) => v.subject_source === 'draft' && v.subject_shift_id === d.id)
+  const dayName = (iso: string) => { const d = parseProxyIsoDate(iso); return d ? ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d.getUTCDay()] : '' }
+  const pill = (text: string, bg: string, fg: string) => `<span style="display:inline-block;padding:3px 8px;border-radius:999px;background:${bg};color:${fg};font-weight:700;font-size:11.5px;line-height:1.3;margin:2px 4px 2px 0">${text}</span>`
+
+  function reviewCell(list: AdminReviewRow[]) {
+    if (!list.length) return '<span style="opacity:.45">—</span>'
+    return list.map((v) => {
+      let snap: any = null
+      try { snap = v.system_snapshot_json ? JSON.parse(v.system_snapshot_json) : null } catch (err) {}
+      const openRed = v.status === 'OPEN' && v.severity === 'red'
+      const open = v.status === 'OPEN'
+      const head = openRed ? pill('REVIEW – ACTION NEEDED', '#7f1d1d', '#fff') : open ? pill('REVIEW – open', '#b45309', '#fff') : pill('REVIEW – ' + escapeHtmlText(v.status), '#1f5f3a', '#fff')
+      const rec = v.system_proposed_payable_hours !== null && v.system_proposed_payable_hours !== undefined
+        ? `<div style="margin-top:3px"><strong>Recommended payable: ${Number(v.system_proposed_payable_hours).toFixed(2)} h</strong>${snap?.recommendedStart ? ' (' + escapeHtmlText(snap.recommendedStart) + '–' + escapeHtmlText(snap.recommendedEnd) + ')' : ''}${v.previously_paid_hours ? ' · already paid ' + Number(v.previously_paid_hours).toFixed(2) + ' h that day' : ''}</div>`
+        : ''
+      const reason = snap?.recommendedReason ? `<div style="margin-top:2px;opacity:.85">Reason to record: “${escapeHtmlText(snap.recommendedReason)}”</div>` : ''
+      const decided = v.approved_payable_hours !== null && v.approved_payable_hours !== undefined
+        ? `<div style="margin-top:3px;color:#86efac"><strong>Decided: ${Number(v.approved_payable_hours).toFixed(2)} h</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''}${v.decision_reason ? ' — ' + escapeHtmlText(v.decision_reason) : ''}</div>`
+        : ''
+      const summary = openRed ? '' : `<div style="opacity:.8">${escapeHtmlText((v.issue_summary || '').replace(/^Manual overlap review — [^—]+— /, 'Overlap check — '))}</div>`
+      const detail = openRed ? `<div style="opacity:.9;margin-top:2px">${escapeHtmlText(snap?.humanReason || v.warning_reason || '')}</div>` : ''
+      return `<div style="font-size:12px;line-height:1.35;margin-bottom:6px">${head}<span style="opacity:.6">#${v.id}</span>${summary}${detail}${rec}${reason}${decided}</div>`
+    }).join('')
+  }
+
+  function missedCell(r: AdminPaidRow) {
+    if (r.work_date >= weekStart) return '<span style="opacity:.45">—</span>'
+    const sameDay = prior.filter((p) => p.staff_id === r.staff_id && p.work_date === r.work_date)
+    const clash = sameDay.filter((p) => shiftsOverlap(r.start_time, r.end_time, p.start_time, p.end_time))
+    let check: string
+    if (clash.length) check = pill('OVERLAP', '#fdecec', '#7f1d1d') + `<span style="font-size:12px">already paid ${clash.map((p) => escapeHtmlText(p.start_time + '–' + p.end_time) + ' (' + escapeHtmlText(p.outlet_venue) + ', payroll ' + escapeHtmlText(p.payroll_week_start || 'n/a') + ')').join('; ')}</span>`
+    else if (sameDay.length) check = pill('CLEAR', '#e7f6ec', '#14532d') + `<span style="font-size:12px">worked ${sameDay.map((p) => escapeHtmlText(p.start_time + '–' + p.end_time)).join(', ')} that day (paid); these hours are outside those times</span>`
+    else check = pill('CLEAR', '#e7f6ec', '#14532d') + `<span style="font-size:12px">nothing else paid for this day</span>`
+    return pill('MISSED SHIFT – actual date ' + escapeHtmlText(proxyLongDate(r.work_date)) + ' – ' + escapeHtmlText(r.work_description || ''), '#fdecec', '#7f1d1d')
+      + `<div style="font-size:12px;opacity:.8;margin:2px 0 4px">Worked ${escapeHtmlText(proxyLongDate(r.work_date))} (previous payroll), not captured that week; final-submitted and paid in payroll ${escapeHtmlText(weekStart)} to ${escapeHtmlText(weekEnd)}.</div>` + check
+  }
+
+  const byStaff: Record<number, { name: string, paid: AdminPaidRow[], drafts: AdminDraftRow[] }> = {}
+  paid.forEach((r) => { (byStaff[r.staff_id] = byStaff[r.staff_id] || { name: r.display_name, paid: [], drafts: [] }).paid.push(r) })
+  drafts.forEach((d) => { (byStaff[d.staff_id] = byStaff[d.staff_id] || { name: d.display_name, paid: [], drafts: [] }).drafts.push(d) })
+  const order = Object.keys(byStaff).map(Number).sort((a, b) => byStaff[a].name.localeCompare(byStaff[b].name))
+
+  let gHours = 0, gAmount = 0, gShifts = 0, gMissedH = 0, gMissedA = 0, gDrafts = 0, gOpenReviews = 0
+  const th = (t: string, extra = '') => `<th style="padding:8px 10px;text-align:left;color:#e2b93b;font-size:11px;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;${extra}">${t}</th>`
+  const td = (t: string, extra = '') => `<td style="padding:8px 10px;vertical-align:top;${extra}">${t}</td>`
+
+  const sections = order.map((sid) => {
+    const g = byStaff[sid]
+    const rows = g.paid.slice().sort((a, b) => (a.work_date + a.start_time).localeCompare(b.work_date + b.start_time))
+    const hours = rows.reduce((a, r) => a + Number(r.hours_worked || 0), 0)
+    const amount = rows.reduce((a, r) => a + Number(r.amount || 0), 0)
+    const missed = rows.filter((r) => r.work_date < weekStart)
+    const mH = missed.reduce((a, r) => a + Number(r.hours_worked || 0), 0)
+    const mA = missed.reduce((a, r) => a + Number(r.amount || 0), 0)
+    const openRev = rows.reduce((a, r) => a + reviewsForPaid(r).filter((v) => v.status === 'OPEN').length, 0) + g.drafts.reduce((a, d) => a + reviewsForDraft(d).filter((v) => v.status === 'OPEN').length, 0)
+    gHours += hours; gAmount += amount; gShifts += rows.length; gMissedH += mH; gMissedA += mA; gDrafts += g.drafts.length; gOpenReviews += openRev
+
+    const paidTrs = rows.map((r) => {
+      const isMissed = r.work_date < weekStart
+      const revs = reviewsForPaid(r)
+      const hasRed = revs.some((v) => v.status === 'OPEN' && v.severity === 'red')
+      const rowBg = hasRed ? 'background:rgba(127,29,29,.18)' : isMissed ? 'background:rgba(226,185,59,.07)' : ''
+      const flags = [
+        isMissed ? pill('MISSED', '#fdecec', '#7f1d1d') : '',
+        hasRed ? pill('⚑ REVIEW', '#7f1d1d', '#fff') : revs.some((v) => v.status === 'OPEN') ? pill('⚑ review', '#b45309', '#fff') : '',
+        r.overnight_confirmed ? pill('next day', '#1e3a8a', '#fff') : '',
+        r.manager_update_reason ? pill('corrected', '#1f5f3a', '#fff') : '',
+      ].join('')
+      return `<tr style="border-top:1px solid rgba(255,255,255,.08);${rowBg}">
+        ${td(escapeHtmlText(g.name), 'font-weight:700;white-space:nowrap')}
+        ${td(`<strong>${escapeHtmlText(r.work_date)}</strong><br><span style="opacity:.75">${escapeHtmlText(dayName(r.work_date))}</span>`, 'white-space:nowrap')}
+        ${td(flags || '<span style="opacity:.45">—</span>')}
+        ${td(escapeHtmlText(r.outlet_venue) + (r.area ? '<br><span style="opacity:.7">' + escapeHtmlText(r.area) + '</span>' : ''))}
+        ${td(escapeHtmlText(r.event_name || ''))}
+        ${td(escapeHtmlText(r.work_description || ''))}
+        ${td(escapeHtmlText(r.start_time) + '–' + escapeHtmlText(r.end_time), 'white-space:nowrap')}
+        ${td(escapeHtmlText(r.work_type || ''))}
+        ${td(Number(r.hours_worked || 0).toFixed(2), 'text-align:right;white-space:nowrap')}
+        ${td(fmtRand(r.amount), 'text-align:right;white-space:nowrap;font-weight:700')}
+        ${td(missedCell(r), 'min-width:240px')}
+        ${td(reviewCell(revs) + (r.manager_update_reason ? `<div style="font-size:12px;color:#86efac">Corrected: ${escapeHtmlText(r.manager_update_reason)}</div>` : ''), 'min-width:260px')}
       </tr>`
     }).join('')
-    return `<tr><td colspan="9" style="padding:10px 10px 4px;color:#e2b93b;font-weight:800;text-transform:uppercase;font-size:12px;letter-spacing:.04em">${escapeHtmlText(name)} — ${list.length} missed shift${list.length === 1 ? '' : 's'} · ${subH.toFixed(2)} h · ${fmtRand(subA)}</td></tr>${trs}`
+
+    const draftTrs = g.drafts.map((d) => {
+      const revs = reviewsForDraft(d)
+      const isMissed = d.work_date < weekStart || d.missed_previous_week === 1
+      return `<tr style="border-top:1px dashed rgba(255,255,255,.12);opacity:.85">
+        ${td(escapeHtmlText(g.name), 'font-weight:700;white-space:nowrap')}
+        ${td(`<strong>${escapeHtmlText(d.work_date)}</strong><br><span style="opacity:.75">${escapeHtmlText(dayName(d.work_date))}</span>`, 'white-space:nowrap')}
+        ${td(pill('NOT FINAL-SUBMITTED', '#374151', '#fff') + (isMissed ? pill('MISSED', '#fdecec', '#7f1d1d') : '') + (revs.some((v) => v.status === 'OPEN') ? pill('⚑ review', '#b45309', '#fff') : ''))}
+        ${td(escapeHtmlText(d.outlet_venue))}
+        ${td('')}
+        ${td(escapeHtmlText(d.work_description || ''))}
+        ${td(escapeHtmlText(d.start_time) + '–' + escapeHtmlText(d.end_time), 'white-space:nowrap')}
+        ${td(escapeHtmlText(d.work_type || ''))}
+        ${td('<span style="opacity:.5">not paid</span>', 'text-align:right;white-space:nowrap')}
+        ${td('<span style="opacity:.5">R0,00</span>', 'text-align:right;white-space:nowrap')}
+        ${td(isMissed ? pill('MISSED SHIFT – actual date ' + escapeHtmlText(proxyLongDate(d.work_date)) + ' – ' + escapeHtmlText(d.work_description || ''), '#fdecec', '#7f1d1d') + '<div style="font-size:12px;opacity:.8">Saved temporarily by the worker; will be paid in this payroll once Final Submission is pressed.</div>' : '<div style="font-size:12px;opacity:.8">Saved temporarily by the worker; not yet final-submitted, so not yet in the payroll.</div>')}
+        ${td(reviewCell(revs), 'min-width:260px')}
+      </tr>`
+    }).join('')
+
+    const openLink = `<a href="/wages/login?staff=${sid}" target="_blank" rel="noopener" style="display:inline-block;padding:5px 10px;border-radius:8px;background:#e2b93b;color:#111;font-weight:800;font-size:12px;text-decoration:none;margin-left:10px">Open ${escapeHtmlText(g.name.split(' ')[0])}'s worker app ↗</a>`
+    const flagsSummary = (openRev ? pill('⚑ ' + openRev + ' open review' + (openRev === 1 ? '' : 's'), '#b45309', '#fff') : '') + (missed.length ? pill(missed.length + ' missed shift' + (missed.length === 1 ? '' : 's') + ' · ' + mH.toFixed(2) + ' h · ' + fmtRand(mA), '#fdecec', '#7f1d1d') : '') + (g.drafts.length ? pill(g.drafts.length + ' not final-submitted', '#374151', '#fff') : '')
+    return `<tr><td colspan="12" style="padding:14px 10px 6px;border-top:2px solid rgba(226,185,59,.5)">
+        <span style="color:#e2b93b;font-weight:800;text-transform:uppercase;font-size:11px;letter-spacing:.06em;margin-right:8px">Name</span><strong style="font-size:15px">${escapeHtmlText(g.name)}</strong>
+        <span style="color:#e2b93b;font-weight:700;margin-left:10px">${hours.toFixed(2)} hours · ${fmtRand(amount)}</span>${openLink}<div style="margin-top:6px">${flagsSummary}</div></td></tr>
+      ${paidTrs}${draftTrs}
+      <tr><td colspan="12" style="padding:6px 10px 12px;color:#e2b93b;font-weight:700">Subtotal for ${escapeHtmlText(g.name)} — ${rows.length} paid shift${rows.length === 1 ? '' : 's'} · ${hours.toFixed(2)} h · ${fmtRand(amount)}${missed.length ? ` <span style="opacity:.85">(includes ${missed.length} missed: ${mH.toFixed(2)} h · ${fmtRand(mA)})</span>` : ''}${g.drafts.length ? ` <span style="opacity:.7">· ${g.drafts.length} still awaiting Final Submission (not counted)</span>` : ''}</td></tr>`
   }).join('')
 
-  return `<section id="bw-missed-paid-admin" class="card" style="margin:14px 0;padding:16px 18px;border-radius:14px;border:1px solid rgba(226,185,59,.45)">
-    <h2 style="margin:0 0 4px">Missed shifts paid in this payroll (${escapeHtmlText(weekStart)} to ${escapeHtmlText(weekEnd)})</h2>
-    <p style="margin:0 0 10px;opacity:.8">These shifts were worked in a previous payroll week and final-submitted late. They are <strong>paid in this payroll</strong> and counted in the export, but the wage sheet below filters by work date and does not list them. Add the totals here to the Grand Total below. The last column checks the worker's real day against what was already paid for that day.</p>
+  const filterNote = employeeFilter && /^\d+$/.test(employeeFilter) ? ' — one employee selected' : ''
+  return `<section id="bw-combined-sheet" class="card" style="margin:14px 0;padding:16px 18px;border-radius:14px;border:1px solid rgba(226,185,59,.45)">
+    <h2 style="margin:0 0 4px">Wage sheet — combined (${escapeHtmlText(weekStart)} to ${escapeHtmlText(weekEnd)})${filterNote}</h2>
+    <p style="margin:0 0 10px;opacity:.8">Every worker with anything in this payroll, all their shifts together: in-week shifts <strong>and</strong> missed shifts paid this week (shown at their real date), review flags with the recommended figure and the reason to record, and shifts still waiting for Final Submission. Totals here <strong>include</strong> missed shifts, so they are the true payroll figures. Use the worker-app link on each name to open that person's own page and edit or final-submit for them.</p>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 12px;font-size:13px">
+      <div><span style="opacity:.7">Paid shifts</span><br><strong style="font-size:18px">${gShifts}</strong></div>
+      <div><span style="opacity:.7">Total hours</span><br><strong style="font-size:18px">${gHours.toFixed(2)}</strong></div>
+      <div><span style="opacity:.7">Total wages (incl. missed)</span><br><strong style="font-size:18px;color:#e2b93b">${fmtRand(gAmount)}</strong></div>
+      <div><span style="opacity:.7">of which missed shifts</span><br><strong style="font-size:18px">${gMissedH.toFixed(2)} h · ${fmtRand(gMissedA)}</strong></div>
+      <div><span style="opacity:.7">Open reviews</span><br><strong style="font-size:18px;color:${gOpenReviews ? '#fca5a5' : '#86efac'}">${gOpenReviews}</strong></div>
+      <div><span style="opacity:.7">Awaiting Final Submission</span><br><strong style="font-size:18px">${gDrafts}</strong></div>
+    </div>
     <div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
-      <thead><tr style="text-align:left;color:#e2b93b;font-size:11px;text-transform:uppercase;letter-spacing:.06em"><th style="padding:8px 10px">Name</th><th style="padding:8px 10px">Real day worked</th><th style="padding:8px 10px">Time</th><th style="padding:8px 10px">Outlet / venue</th><th style="padding:8px 10px">Work type</th><th style="padding:8px 10px">Why it is a missed shift</th><th style="padding:8px 10px;text-align:right">Hours</th><th style="padding:8px 10px;text-align:right">Amount</th><th style="padding:8px 10px">Cross-check vs last payroll</th></tr></thead>
+      <thead><tr>${th('Name')}${th('Date / day')}${th('Flags')}${th('Outlet / venue')}${th('Event')}${th('Description')}${th('Time worked')}${th('Work type')}${th('Hours', 'text-align:right')}${th('Amount', 'text-align:right')}${th('Missed shift detail & cross-check')}${th('Review / correction')}</tr></thead>
       <tbody>${sections}</tbody>
-      <tfoot><tr style="border-top:2px solid rgba(226,185,59,.6);font-weight:800"><td colspan="6" style="padding:10px">TOTAL missed shifts paid in this payroll — ${shifts.length} shift${shifts.length === 1 ? '' : 's'}</td><td style="padding:10px;text-align:right">${totalHours.toFixed(2)}</td><td style="padding:10px;text-align:right;color:#e2b93b">${fmtRand(totalAmount)}</td><td></td></tr></tfoot>
+      <tfoot><tr style="border-top:2px solid rgba(226,185,59,.6);font-weight:800"><td colspan="8" style="padding:12px 10px">GRAND TOTAL (incl. missed shifts) — ${gShifts} paid shifts</td><td style="padding:12px 10px;text-align:right">${gHours.toFixed(2)}</td><td style="padding:12px 10px;text-align:right;color:#e2b93b;font-size:15px">${fmtRand(gAmount)}</td><td colspan="2" style="padding:12px 10px;opacity:.8">Missed shifts included: ${gMissedH.toFixed(2)} h · ${fmtRand(gMissedA)}</td></tr></tfoot>
     </table></div>
   </section>`
 }
@@ -3638,8 +3754,36 @@ async function buildAdminMissedPaidTable(env: Bindings | undefined, weekStart: s
 class AdminMissedPaidInjector {
   constructor(private html: string) {}
   element(element: Element) {
-    // Top of <main>, so it is the first thing the office sees, above the filters and wage sheet.
+    // Fallback position (top of <main>) if the engine's wage-sheet card is not found.
     if (this.html) element.prepend(this.html, { html: true })
+  }
+}
+
+// Places the combined sheet exactly where the engine's own "Wage sheet" card
+// is, and hides the engine's card (its totals exclude missed shifts). Done in
+// the browser because the card has no stable id.
+class AdminCombinedPlacementInjector {
+  element(element: Element) {
+    element.append(`<script>
+(function(){
+  function place(){
+    var mine=document.getElementById('bw-combined-sheet'); if(!mine||mine.dataset.bwPlaced) return;
+    var heads=Array.prototype.slice.call(document.querySelectorAll('h1,h2,h3,.card-title'));
+    var h=heads.find(function(x){ return /^\\s*wage sheet\\s*$/i.test((x.textContent||'')); });
+    if(!h) return;
+    var card=h.closest('section.card, .card, section'); if(!card||card===mine||card.contains(mine)) return;
+    card.parentNode.insertBefore(mine, card);
+    card.style.display='none'; card.setAttribute('data-bw-engine-sheet-hidden','1');
+    mine.dataset.bwPlaced='1';
+    var link=document.createElement('a'); link.href='#'; link.textContent='Show the engine\u2019s original wage sheet (in-week shifts only)'; link.style.cssText='display:inline-block;margin:8px 0;font-size:12px;opacity:.7;color:inherit';
+    link.onclick=function(e){ e.preventDefault(); card.style.display=''; link.remove(); };
+    mine.appendChild(link);
+  }
+  try{place()}catch(e){}
+  document.addEventListener('DOMContentLoaded',function(){try{place()}catch(e){}});
+  setTimeout(function(){try{place()}catch(e){}},300);
+})();
+</script>`, { html: true })
   }
 }
 
@@ -3969,8 +4113,9 @@ async function proxyRequest(c: any) {
       const fromRaw = (incomingUrl.searchParams.get('from') || incomingUrl.searchParams.get('week_start') || incomingUrl.searchParams.get('payroll_week_start') || '').replace(/\//g, '-')
       const fromDate = parseProxyIsoDate(fromRaw)
       const weekStart = fromDate ? formatProxyIsoDate(proxyStartOfPayrollWeek(fromDate)) : currentProxyPayrollWeekStart()
-      const tableHtml = await buildAdminMissedPaidTable(c.env, weekStart)
-      if (tableHtml) rewriter.on('main', new AdminMissedPaidInjector(tableHtml))
+      const employeeFilter = (incomingUrl.searchParams.get('staff_id') || incomingUrl.searchParams.get('employee') || incomingUrl.searchParams.get('staff') || '').trim()
+      const tableHtml = await buildAdminCombinedSheet(c.env, weekStart, employeeFilter)
+      if (tableHtml) { rewriter.on('main', new AdminMissedPaidInjector(tableHtml)); rewriter.on('body', new AdminCombinedPlacementInjector()) }
     } catch (err) {}
   }
   if (needsTeamInit) rewriter.on('body', new TeamPickerInitInjector())
