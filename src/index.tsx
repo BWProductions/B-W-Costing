@@ -213,6 +213,7 @@ class WagesUiInjector {
   width: 20px;
   height: 20px;
 }
+.pill.bw-missed-detail { background: #fde8e8 !important; color: #7f1d1d !important; font-weight: 800 !important; white-space: normal !important; line-height: 1.35; }
 .bw-final-submit-go {
   width: auto !important;
   min-width: 220px;
@@ -2005,6 +2006,74 @@ label[for="bw-missed-work-date"] {
     })
   }
 
+  const MISSED_DETAIL_RE = /MISSED SHIFT\\s*[-–]\\s*actual date\\s+[A-Za-z]{3}\\s+\\d{1,2}\\s+[A-Za-z]{3}\\s+\\d{4}(?:\\s*[-–]\\s*.*)?/i
+  const missedDetailCache = {}
+
+  function cleanMissedDetail(text) {
+    // Collapse accidental repeats: "MISSED SHIFT - actual date X - X - work" -> "MISSED SHIFT – actual date X – work"
+    const m = normalize(text).match(/^MISSED SHIFT\\s*[-–]\\s*actual date\\s+([A-Za-z]{3}\\s+\\d{1,2}\\s+[A-Za-z]{3}\\s+\\d{4})\\s*(?:[-–]\\s*)?(.*)$/i)
+    if (!m) return normalize(text)
+    const dateLabel = m[1]
+    let rest = m[2] || ''
+    for (let guard = 0; guard < 5; guard++) {
+      const lower = rest.toLowerCase()
+      const stripped = lower.startsWith(('missed shift - actual date ' + dateLabel).toLowerCase()) ? rest.slice(('missed shift - actual date ' + dateLabel).length)
+        : lower.startsWith(dateLabel.toLowerCase()) ? rest.slice(dateLabel.length)
+        : null
+      if (stripped === null) break
+      rest = stripped.replace(/^\\s*[-–]\\s*/, '').trim()
+    }
+    return 'MISSED SHIFT – actual date ' + dateLabel + (rest ? ' – ' + rest : '')
+  }
+
+  function applyMissedDetail(card, detailText) {
+    const cleaned = cleanMissedDetail(detailText)
+    const genericPill = Array.from(card.querySelectorAll('.pill')).find((p) => /hours missed|not captured from last week/i.test(elementText(p)))
+    const descPill = Array.from(card.querySelectorAll('.pill')).find((p) => MISSED_DETAIL_RE.test(elementText(p)))
+    const target = genericPill || descPill
+    if (!target) return
+    if (target.textContent !== cleaned) target.textContent = cleaned
+    target.classList.add('bw-missed-detail')
+    if (genericPill && descPill && descPill !== genericPill) descPill.remove()
+  }
+
+  function showMissedShiftDetails() {
+    // Every shift card must show the full "MISSED SHIFT \u2013 actual date <Day D Mon YYYY> \u2013 <work>" text
+    // (auditor + office need to see exactly which real date is being claimed).
+    Array.from(document.querySelectorAll('.shift')).forEach((card) => {
+      if (!(card instanceof HTMLElement)) return
+      const pills = Array.from(card.querySelectorAll('.pill'))
+      const descPill = pills.find((p) => MISSED_DETAIL_RE.test(elementText(p)))
+      const genericPill = pills.find((p) => /hours missed|not captured from last week/i.test(elementText(p)))
+      if (descPill) {
+        applyMissedDetail(card, elementText(descPill))
+        return
+      }
+      if (!genericPill) return
+      // Draft card: description is not on the card, fetch it from the edit page once.
+      const editLink = card.querySelector('a[href*="/wages/drafts/"][href*="/edit"]')
+      const href = editLink instanceof HTMLAnchorElement ? editLink.getAttribute('href') || '' : ''
+      const idMatch = href.match(/\\/wages\\/drafts\\/(\\d+)\\/edit/)
+      if (!idMatch) return
+      const draftId = idMatch[1]
+      if (missedDetailCache[draftId] === undefined) {
+        missedDetailCache[draftId] = null
+        fetch('/wages/drafts/' + draftId + '/edit', { credentials: 'include', cache: 'no-store' })
+          .then((r) => r.ok ? r.text() : '')
+          .then((html) => {
+            const doc = new DOMParser().parseFromString(html, 'text/html')
+            const field = doc.querySelector('#work_description, [name="work_description"]')
+            const value = normalize(field?.getAttribute('value') || field?.value || field?.textContent || '')
+            missedDetailCache[draftId] = MISSED_DETAIL_RE.test(value) ? value : ''
+            if (missedDetailCache[draftId]) scheduleRun()
+          })
+          .catch(() => { missedDetailCache[draftId] = '' })
+        return
+      }
+      if (missedDetailCache[draftId]) applyMissedDetail(card, missedDetailCache[draftId])
+    })
+  }
+
   function addBulkFinalSubmission() {
     const shifts = Array.from(document.querySelectorAll('.shift'))
     if (!shifts.length) return
@@ -2109,6 +2178,7 @@ label[for="bw-missed-work-date"] {
     hideLegacyMissedShiftToggle()
     hideLockedPayrollWarnings()
     hideOvernightPrompt()
+    showMissedShiftDetails()
     addBulkFinalSubmission()
   }
 
@@ -2553,10 +2623,13 @@ function rewriteMissedShiftSubmission(formData: FormData, upstreamUrl: URL) {
     formData.set('missed_previous_week', '1')
     const realDateLabel = formatProxyLongDate(actualWorkDateParsed)
     const marker = 'MISSED SHIFT - actual date ' + realDateLabel
+    // Strip any earlier marker (e.g. the worker re-saved a draft) so the
+    // description never reads "MISSED SHIFT - actual date X - actual date X - ..."
     const existingDescription = normalizeProxyFieldValue(formData.get('work_description'))
-    if (!/MISSED SHIFT - actual date/i.test(existingDescription)) {
-      formData.set('work_description', (marker + ' - ' + existingDescription).slice(0, 500))
-    }
+      .replace(/^(?:MISSED SHIFT\s*[-\u2013]\s*actual date\s+[A-Za-z]{3}\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s*[-\u2013]\s*)+/i, '')
+      .replace(/^(?:[A-Za-z]{3}\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s*[-\u2013]\s*)+/, '')
+      .trim()
+    formData.set('work_description', (marker + ' - ' + existingDescription).slice(0, 500))
   }
 
   Array.from(new Set(Array.from(upstreamUrl.searchParams.keys()))).forEach((key) => {
