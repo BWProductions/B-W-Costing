@@ -3538,6 +3538,111 @@ class MissedPaidSectionInjector {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Admin /admin/wages: "Missed shifts paid in this payroll" audit table
+// (2026-09-14). The engine's wage sheet filters by work_date, so a missed
+// shift stored with its REAL previous-week date is paid (payroll_week_start =
+// this week) but never listed and the on-screen Grand Total is short. This
+// table lists every such shift for the payroll week in the page filter, with
+// the worker, the real day, why it is a missed shift, and a cross-check
+// against what that worker was already paid for on that same day last payroll.
+// Read-only. Nothing here changes any record.
+function fmtRand(n: number) {
+  const v = Number(n || 0)
+  const s = v.toFixed(2).replace('.', ',')
+  return 'R' + s.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
+}
+
+function timeToMinutes(t: string) {
+  const m = (t || '').match(/^(\d{1,2}):(\d{2})/)
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null
+}
+
+function shiftsOverlap(aStart: string, aEnd: string, bStart: string, bEnd: string) {
+  const s1 = timeToMinutes(aStart), e1raw = timeToMinutes(aEnd), s2 = timeToMinutes(bStart), e2raw = timeToMinutes(bEnd)
+  if (s1 === null || e1raw === null || s2 === null || e2raw === null) return false
+  const e1 = e1raw <= s1 ? e1raw + 1440 : e1raw
+  const e2 = e2raw <= s2 ? e2raw + 1440 : e2raw
+  return s1 < e2 && s2 < e1
+}
+
+async function buildAdminMissedPaidTable(env: Bindings | undefined, weekStart: string) {
+  const db = env?.DB
+  if (!db || !parseProxyIsoDate(weekStart)) return ''
+  const weekEnd = proxyEndOfPayrollWeek(weekStart)
+  const rows = await db.prepare(`SELECT w.id, w.staff_id, s.display_name, w.work_date, w.start_time, w.end_time, w.hours_worked,
+        COALESCE(w.gross_wage, w.total_amount, 0) AS amount, w.work_type, w.outlet_venue, w.area, w.work_description, w.payroll_note
+      FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id
+      WHERE w.payroll_week_start = ? AND w.work_date < ?
+      ORDER BY s.display_name, w.work_date, w.start_time`).bind(weekStart, weekStart).all()
+  const shifts = (rows.results || []) as Array<{ id: number, staff_id: number, display_name: string, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, work_type: string, outlet_venue: string, area: string, work_description: string, payroll_note: string | null }>
+  if (!shifts.length) return ''
+
+  // Cross-check: what was this worker already paid for on that real date (any earlier payroll)?
+  const staffIds = Array.from(new Set(shifts.map((r) => r.staff_id)))
+  const dates = Array.from(new Set(shifts.map((r) => r.work_date)))
+  const prior = await db.prepare(`SELECT id, staff_id, work_date, start_time, end_time, hours_worked, outlet_venue, payroll_week_start
+      FROM wage_shifts WHERE staff_id IN (${staffIds.map(() => '?').join(',')}) AND work_date IN (${dates.map(() => '?').join(',')})
+        AND (payroll_week_start IS NULL OR payroll_week_start < ?)`).bind(...staffIds, ...dates, weekStart).all()
+  const priorRows = (prior.results || []) as Array<{ id: number, staff_id: number, work_date: string, start_time: string, end_time: string, hours_worked: number, outlet_venue: string, payroll_week_start: string | null }>
+
+  let totalHours = 0, totalAmount = 0
+  const byWorker: Record<string, typeof shifts> = {}
+  shifts.forEach((r) => { (byWorker[r.display_name] = byWorker[r.display_name] || []).push(r); totalHours += Number(r.hours_worked || 0); totalAmount += Number(r.amount || 0) })
+
+  const sections = Object.keys(byWorker).map((name) => {
+    const list = byWorker[name]
+    const subH = list.reduce((a, r) => a + Number(r.hours_worked || 0), 0)
+    const subA = list.reduce((a, r) => a + Number(r.amount || 0), 0)
+    const trs = list.map((r) => {
+      const sameDay = priorRows.filter((p) => p.staff_id === r.staff_id && p.work_date === r.work_date)
+      const clash = sameDay.filter((p) => shiftsOverlap(r.start_time, r.end_time, p.start_time, p.end_time))
+      let check: string, checkStyle: string
+      if (clash.length) {
+        check = 'OVERLAP — already paid ' + clash.map((p) => p.start_time + '–' + p.end_time + ' (' + escapeHtmlText(p.outlet_venue) + ', payroll ' + (p.payroll_week_start || 'n/a') + ')').join('; ') + '. Check before paying.'
+        checkStyle = 'background:#fdecec;color:#7f1d1d'
+      } else if (sameDay.length) {
+        check = 'CLEAR — worked that day too (' + sameDay.map((p) => p.start_time + '–' + p.end_time).join(', ') + ' already paid), these hours are outside those times.'
+        checkStyle = 'background:#e7f6ec;color:#14532d'
+      } else {
+        check = 'CLEAR — nothing else paid for this worker on that day.'
+        checkStyle = 'background:#e7f6ec;color:#14532d'
+      }
+      const why = 'Worked ' + proxyLongDate(r.work_date) + ' (previous payroll), not captured that week; final-submitted and paid in payroll ' + weekStart + ' to ' + weekEnd + '.'
+      return `<tr style="border-top:1px solid rgba(255,255,255,.08)">
+        <td style="padding:8px 10px;font-weight:700;white-space:nowrap">${escapeHtmlText(name)}</td>
+        <td style="padding:8px 10px;white-space:nowrap"><strong>${escapeHtmlText(proxyLongDate(r.work_date))}</strong><br><span style="opacity:.7">${escapeHtmlText(r.work_date)}</span></td>
+        <td style="padding:8px 10px;white-space:nowrap">${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)}</td>
+        <td style="padding:8px 10px">${escapeHtmlText(r.outlet_venue)}${r.area ? '<br><span style="opacity:.7">' + escapeHtmlText(r.area) + '</span>' : ''}</td>
+        <td style="padding:8px 10px">${escapeHtmlText(r.work_type || '')}</td>
+        <td style="padding:8px 10px"><span style="display:inline-block;padding:3px 8px;border-radius:999px;background:#fdecec;color:#7f1d1d;font-weight:700;font-size:12px">MISSED SHIFT – actual date ${escapeHtmlText(proxyLongDate(r.work_date))} – ${escapeHtmlText(r.work_description || '')}</span><br><span style="opacity:.75;font-size:12px">${escapeHtmlText(why)}</span></td>
+        <td style="padding:8px 10px;text-align:right;white-space:nowrap">${Number(r.hours_worked || 0).toFixed(2)}</td>
+        <td style="padding:8px 10px;text-align:right;white-space:nowrap;font-weight:700">${fmtRand(r.amount)}</td>
+        <td style="padding:8px 10px;font-size:12px"><span style="display:inline-block;padding:4px 8px;border-radius:8px;${checkStyle}">${check}</span></td>
+      </tr>`
+    }).join('')
+    return `<tr><td colspan="9" style="padding:10px 10px 4px;color:#e2b93b;font-weight:800;text-transform:uppercase;font-size:12px;letter-spacing:.04em">${escapeHtmlText(name)} — ${list.length} missed shift${list.length === 1 ? '' : 's'} · ${subH.toFixed(2)} h · ${fmtRand(subA)}</td></tr>${trs}`
+  }).join('')
+
+  return `<section id="bw-missed-paid-admin" class="card" style="margin:14px 0;padding:16px 18px;border-radius:14px;border:1px solid rgba(226,185,59,.45)">
+    <h2 style="margin:0 0 4px">Missed shifts paid in this payroll (${escapeHtmlText(weekStart)} to ${escapeHtmlText(weekEnd)})</h2>
+    <p style="margin:0 0 10px;opacity:.8">These shifts were worked in a previous payroll week and final-submitted late. They are <strong>paid in this payroll</strong> and counted in the export, but the wage sheet below filters by work date and does not list them. Add the totals here to the Grand Total below. The last column checks the worker's real day against what was already paid for that day.</p>
+    <div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="text-align:left;color:#e2b93b;font-size:11px;text-transform:uppercase;letter-spacing:.06em"><th style="padding:8px 10px">Name</th><th style="padding:8px 10px">Real day worked</th><th style="padding:8px 10px">Time</th><th style="padding:8px 10px">Outlet / venue</th><th style="padding:8px 10px">Work type</th><th style="padding:8px 10px">Why it is a missed shift</th><th style="padding:8px 10px;text-align:right">Hours</th><th style="padding:8px 10px;text-align:right">Amount</th><th style="padding:8px 10px">Cross-check vs last payroll</th></tr></thead>
+      <tbody>${sections}</tbody>
+      <tfoot><tr style="border-top:2px solid rgba(226,185,59,.6);font-weight:800"><td colspan="6" style="padding:10px">TOTAL missed shifts paid in this payroll — ${shifts.length} shift${shifts.length === 1 ? '' : 's'}</td><td style="padding:10px;text-align:right">${totalHours.toFixed(2)}</td><td style="padding:10px;text-align:right;color:#e2b93b">${fmtRand(totalAmount)}</td><td></td></tr></tfoot>
+    </table></div>
+  </section>`
+}
+
+class AdminMissedPaidInjector {
+  constructor(private html: string) {}
+  element(element: Element) {
+    // Top of <main>, so it is the first thing the office sees, above the filters and wage sheet.
+    if (this.html) element.prepend(this.html, { html: true })
+  }
+}
+
 class TextReplaceInjector {
   constructor(private value: string) {}
   element(element: Element) {
@@ -3858,6 +3963,16 @@ async function proxyRequest(c: any) {
   }
   if (needsWagesButton) rewriter.on('#topbar-actions', new DashboardButtonInjector())
   if (needsWagesButton) rewriter.on('main', new WagesHealthBannerInjector())
+  if (needsWagesButton && upstreamResponse.status === 200 && c.env?.DB) {
+    // Missed shifts paid in the payroll week shown by the page filter (?from=YYYY-MM-DD or YYYY/MM/DD).
+    try {
+      const fromRaw = (incomingUrl.searchParams.get('from') || incomingUrl.searchParams.get('week_start') || incomingUrl.searchParams.get('payroll_week_start') || '').replace(/\//g, '-')
+      const fromDate = parseProxyIsoDate(fromRaw)
+      const weekStart = fromDate ? formatProxyIsoDate(proxyStartOfPayrollWeek(fromDate)) : currentProxyPayrollWeekStart()
+      const tableHtml = await buildAdminMissedPaidTable(c.env, weekStart)
+      if (tableHtml) rewriter.on('main', new AdminMissedPaidInjector(tableHtml))
+    } catch (err) {}
+  }
   if (needsTeamInit) rewriter.on('body', new TeamPickerInitInjector())
   if (needsWagesUi) rewriter.on('body', new WagesUiInjector())
   return rewriter.transform(baseResponse)
