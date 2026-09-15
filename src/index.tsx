@@ -6,7 +6,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-15-3'
+const WAGES_UI_VERSION = 'v2026-09-15-4'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -1131,14 +1131,9 @@ label[for="bw-missed-work-date"] {
     const currentPayrollStart = parseFlexibleDate(activePayrollWeekStart) || startOfPayrollWeek(utcToday())
     const previousPayrollStart = new Date(currentPayrollStart.getTime())
     previousPayrollStart.setUTCDate(previousPayrollStart.getUTCDate() - 7)
-    const today = utcToday()
-    const rangeEnd = new Date(today.getTime())
-    if (formatForInput(today, false) === formatForInput(currentPayrollStart, false)) {
-      rangeEnd.setUTCDate(rangeEnd.getUTCDate() - 1)
-    }
-    if (rangeEnd.getTime() < previousPayrollStart.getTime()) {
-      rangeEnd.setTime(endOfPayrollWeek(previousPayrollStart).getTime())
-    }
+    // Owner rule (2026-09-15): the calendar is open from LAST payroll's Saturday up to
+    // THIS payroll's Friday (staff submit Wed/Thu/Fri in advance on Wednesday).
+    const rangeEnd = new Date(endOfPayrollWeek(currentPayrollStart).getTime())
     return {
       currentPayrollStart,
       previousPayrollStart,
