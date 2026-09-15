@@ -6,7 +6,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-15-1'
+const WAGES_UI_VERSION = 'v2026-09-15-2'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3628,7 +3628,9 @@ function shiftsOverlap(aStart: string, aEnd: string, bStart: string, bEnd: strin
 //   1. Day part: > 4 h inside 07:00–16:00 → R750; up to 4 h inside → R375; none → R0.
 //   2. Every hour outside 07:00–16:00: R90/h (staff, Warehouse Team, Team Assistance),
 //      R130/h for Music Bus entries.
-//   3. Sunday: whole day × 1.2.
+//   3. Sunday (owner 2026-09-15): day part R750 FLAT for any time inside 07–16 (no half
+//      day, no ×1.2); outside hours R90 × 1.5 = R135/h; Music Bus unchanged (R130/h).
+//      Own-rate work on Sunday stays hours × own rate.
 //   4. Own-rate work (House / House/Garden R62,50; Tsotlego R81,25 …): hours × rate.
 // Read-only: the checker only compares; it never changes a paid record.
 const RULE_WINDOW_START = 7 * 60, RULE_WINDOW_END = 16 * 60, RULE_FULL_DAY = 750, RULE_HALF_DAY = 375, RULE_HALF_MAX_MIN = 4 * 60, RULE_SUNDAY_FACTOR = 1.2
@@ -3685,10 +3687,10 @@ function computeRuleDay(dateIso: string, segments: RuleSegment[]): RuleDayResult
     }
     covered.push([m.s, m.e])
   }
-  const dayPart = insideMin === 0 ? 0 : (insideMin > RULE_HALF_MAX_MIN ? RULE_FULL_DAY : RULE_HALF_DAY)
-  const overtime = (outsideStdMin / 60) * 90 + (outsideMbMin / 60) * 130
-  const base = dayPart + overtime + ownRateAmount
-  const amount = Math.round((sunday ? base * RULE_SUNDAY_FACTOR : base) * 100) / 100
+  const dayPart = insideMin === 0 ? 0 : (sunday ? RULE_FULL_DAY : (insideMin > RULE_HALF_MAX_MIN ? RULE_FULL_DAY : RULE_HALF_DAY))
+  const stdRate = sunday ? 90 * 1.5 : 90
+  const overtime = (outsideStdMin / 60) * stdRate + (outsideMbMin / 60) * 130
+  const amount = Math.round((dayPart + overtime + ownRateAmount) * 100) / 100
   const fmtT = (mins: number) => { const mm = ((mins % 1440) + 1440) % 1440; return String(Math.floor(mm / 60)).padStart(2, '0') + ':' + String(mm % 60).padStart(2, '0') + (mins >= 1440 ? ' (next day)' : '') }
   const span = isFinite(minS) ? fmtT(minS) + '–' + fmtT(maxE) : ''
   return { amount, insideMin, outsideStdMin, outsideMbMin, ownRateAmount, dayPart, overtime, sunday, span, notes: Array.from(new Set(notes)) }
@@ -3697,11 +3699,10 @@ function computeRuleDay(dateIso: string, segments: RuleSegment[]): RuleDayResult
 function ruleBreakdownText(r: RuleDayResult) {
   const parts: string[] = []
   const h = (m: number) => (m / 60).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1') + ' h'
-  if (r.insideMin > 0) parts.push(`${h(r.insideMin)} inside 07–16 → ${r.dayPart === RULE_FULL_DAY ? 'full day R750' : 'half day R375'}`)
-  if (r.outsideStdMin > 0) parts.push(`${h(r.outsideStdMin)} outside × R90 = ${fmtRand((r.outsideStdMin / 60) * 90)}`)
+  if (r.insideMin > 0) parts.push(`${h(r.insideMin)} inside 07–16 → ${r.dayPart === RULE_FULL_DAY ? (r.sunday ? 'Sunday flat day R750' : 'full day R750') : 'half day R375'}`)
+  if (r.outsideStdMin > 0) parts.push(r.sunday ? `${h(r.outsideStdMin)} outside × R135 (Sunday R90 × 1,5) = ${fmtRand((r.outsideStdMin / 60) * 135)}` : `${h(r.outsideStdMin)} outside × R90 = ${fmtRand((r.outsideStdMin / 60) * 90)}`)
   if (r.outsideMbMin > 0) parts.push(`${h(r.outsideMbMin)} outside × R130 (Music Bus) = ${fmtRand((r.outsideMbMin / 60) * 130)}`)
   if (r.ownRateAmount > 0) parts.push(`own hourly rate = ${fmtRand(r.ownRateAmount)}`)
-  if (r.sunday) parts.push('Sunday × 1,2')
   return parts.join(' + ')
 }
 
@@ -4041,7 +4042,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     ${(() => {
       const sorted = ruleDiffsAll.slice().sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
       const head = `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div style="font-weight:800;color:#93c5fd">⚖ Pay-rule check — ${gRuleDays ? gRuleDays + ' day' + (gRuleDays === 1 ? '' : 's') + ' differ from the rule: paid ' + fmtRand(gRuleOver) + ' more and ' + fmtRand(gRuleUnder) + ' less than the rule (net ' + (gRuleAmount >= 0 ? '+' : '−') + fmtRand(Math.abs(gRuleAmount)) + ')' : 'every paid day matches the rule'}</div>${gRuleDays ? `<a href="#" onclick="var b=document.getElementById('bw-rule-list');b.style.display=b.style.display==='none'?'block':'none';return false" style="color:#e2b93b;font-weight:700;font-size:12px">show / hide list</a>` : ''}</div>
-        <div style="font-size:12px;opacity:.8;margin-top:3px">Rule used: all of a person's entries on the same day are joined, then: more than 4 h inside 07:00–16:00 = R750, up to 4 h = R375; every hour before 07:00 / after 16:00 = R90 (Music Bus R130); Sunday × 1,2. House / Garden and Tsotlego stay on their own hourly rates. <strong>Nothing is changed by this check</strong> — it only shows where the amount paid differs, so you can decide.</div>`
+        <div style="font-size:12px;opacity:.8;margin-top:3px">Rule used: all of a person's entries on the same day are joined, then: more than 4 h inside 07:00–16:00 = R750, up to 4 h = R375; every hour before 07:00 / after 16:00 = R90 (Music Bus R130). Sunday: R750 flat for any time inside 07–16, outside hours R135 (R90 × 1,5), Music Bus unchanged. House / Garden and Tsotlego stay on their own hourly rates. <strong>Nothing is changed by this check</strong> — it only shows where the amount paid differs, so you can decide.</div>`
       if (!sorted.length) return `<section id="bw-rule-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(20,83,45,.18);border:1px solid rgba(96,165,250,.35)">${head}</section>`
       const lines = sorted.map((c) => `<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid rgba(255,255,255,.08);font-size:12.5px"><span style="flex:0 0 auto">${c.diff > 0 ? pill('OVER', '#7f1d1d', '#fff') : pill('UNDER', '#1e3a8a', '#fff')}</span><div style="flex:1"><strong>${escapeHtmlText(c.name)}</strong> · ${escapeHtmlText(c.date)} (${dayName(c.date)}) · ${escapeHtmlText(c.rule.span)} · paid <strong>${fmtRand(c.paid)}</strong> vs rule <strong>${fmtRand(c.rule.amount)}</strong> → <strong>${c.diff > 0 ? '+' : '−'}${fmtRand(Math.abs(c.diff))}</strong><a href="#" onclick="var b=document.getElementById('bw-rule-top-${c.staffId}-${c.date}');if(b){b.style.display=b.style.display==='none'?'block':'none'}return false" style="margin-left:8px;color:#e2b93b;font-weight:700">Open ▾</a><div id="bw-rule-top-${c.staffId}-${c.date}" style="display:none;margin-top:2px">${ruleDetailTop(c)}</div></div></div>`).join('')
       return `<section id="bw-rule-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(30,58,138,.12);border:1px solid rgba(96,165,250,.5)">${head}<div id="bw-rule-list" style="margin-top:6px">${lines}</div></section>`
