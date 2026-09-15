@@ -6,7 +6,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-15-4'
+const WAGES_UI_VERSION = 'v2026-09-15-6'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3616,6 +3616,30 @@ async function ensureRealDateTable(env: Bindings | undefined) {
   realDateTableReady = true
 }
 
+async function applyOwnerRatesToFinalSubmission(env: Bindings | undefined, draftId: number, cookieHeader: string) {
+  const db = env?.DB
+  if (!db || !draftId) return
+  const staffId = await staffIdFromWageSession(env, cookieHeader)
+  if (!staffId) return
+  // The paid row the engine just wrote for this draft (owner match, most recent).
+  const row = await db.prepare(`SELECT w.id, w.staff_id, w.work_date, w.start_time, w.end_time, w.hours_worked, w.work_type, w.outlet_venue, w.event_name, w.work_description, w.calculation_version, w.total_amount, w.gross_wage, s.payroll_rule
+      FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id
+      WHERE w.source_draft_id = ? AND w.staff_id = ? ORDER BY w.id DESC LIMIT 1`).bind(draftId, staffId).first<{ id: number, staff_id: number, work_date: string, start_time: string, end_time: string, hours_worked: number, work_type: string, outlet_venue: string, event_name: string, work_description: string, calculation_version: number, total_amount: number, gross_wage: number, payroll_rule: string }>()
+  if (!row || Number(row.calculation_version) === OWNER_RATE_RULES_VERSION) return
+  // Real date may have been restored a moment ago; re-read to be safe.
+  const fresh = await db.prepare(`SELECT work_date FROM wage_shifts WHERE id = ?`).bind(row.id).first<{ work_date: string }>()
+  const dateIso = fresh?.work_date || row.work_date
+  const kind = ownerPayKind(row.staff_id, row.work_type, [row.outlet_venue, row.event_name, row.work_description].join(' '), row.payroll_rule)
+  const priced = ownerPayForShift(dateIso, row.start_time, row.end_time, kind)
+  if (!priced) return // gardener block / fixed weekly: engine amount stands
+  const before = Number(row.gross_wage ?? row.total_amount ?? 0)
+  await db.prepare(`UPDATE wage_shifts SET total_amount = ?, gross_wage = ?, hourly_rate_snapshot = ?, calculation_version = ?,
+        payroll_note = CASE WHEN COALESCE(payroll_note,'') = '' THEN ? ELSE payroll_note || ' | ' || ? END
+      WHERE id = ? AND staff_id = ?`)
+    .bind(priced.amount, priced.amount, priced.hourlyRate, OWNER_RATE_RULES_VERSION, 'Rate rules 2026-09-15: ' + priced.breakdown, 'Rate rules 2026-09-15: ' + priced.breakdown, row.id, staffId).run()
+  await captureWagesDebug(env, { request_path: '/wages/drafts/' + draftId + '/final-submit (owner rates)', request_method: 'POST', original_payload_json: JSON.stringify({ shift_id: row.id, engine_amount: before, kind }), rewritten_payload_json: JSON.stringify({ amount: priced.amount, rate: priced.hourlyRate, breakdown: priced.breakdown }), rewrite_applied: 1, response_status: 200, response_location: '', response_error_text: '' })
+}
+
 async function staffIdFromWageSession(env: Bindings | undefined, cookieHeader: string) {
   const db = env?.DB
   if (!db) return 0
@@ -3684,7 +3708,7 @@ function shiftsOverlap(aStart: string, aEnd: string, bStart: string, bEnd: strin
 //   4. Own-rate work (House / House/Garden R62,50; Tsotlego R81,25 …): hours × rate.
 // Read-only: the checker only compares; it never changes a paid record.
 const RULE_WINDOW_START = 7 * 60, RULE_WINDOW_END = 16 * 60, RULE_FULL_DAY = 750, RULE_HALF_DAY = 375, RULE_HALF_MAX_MIN = 4 * 60, RULE_SUNDAY_FACTOR = 1.2
-type RuleSegment = { start: string, end: string, rate: number, kind: 'standard' | 'musicbus' | 'ownrate', label: string }
+type RuleSegment = { start: string, end: string, rate: number, kind: 'event' | 'warehouse' | 'musicbus' | 'petrus' | 'ownrate' | 'standard', label: string }
 type RuleDayResult = { amount: number, insideMin: number, outsideStdMin: number, outsideMbMin: number, ownRateAmount: number, dayPart: number, overtime: number, sunday: boolean, span: string, notes: string[] }
 
 function ruleSegmentMinutes(seg: { start: string, end: string }) {
@@ -3714,46 +3738,122 @@ function subtractCovered(s: number, e: number, covered: Array<[number, number]>)
   return pieces.filter(([a, b]) => b > a)
 }
 
+// ---------------------------------------------------------------------------
+// B&W WAGES AND MUSIC BUS RATE RULES (owner, 2026-09-15). Replaces the previous
+// weekday/weekend calculations for NEW final submissions only.
+//   General staff  Mon–Fri Warehouse (wording contains "Warehouse")  R81,25/h
+//                  Mon–Fri Event/Venue  R750 fixed for 07–16 + R90/h before 07:00 / after 16:00
+//                  Saturday R95/h · Sunday R120/h (no fixed day)
+//   Music Bus      Mon–Sat R750 fixed for 07–16 + R120/h outside · Sunday R120/h
+//   Petrus (staff 4)  Mon–Fri R650 fixed for 07–16 + R81,25/h outside · Sat & Sun R95/h
+//   Gardeners (staff 1, 2)  House / House/Garden: engine's own gardener rate kept (not recalculated)
+//                  Team block (Warehouse Team / Team Assistance): general-staff rules for that day
+//   Never the old R375 half day; never the old ×1.2 / ×1.5 weekend factors.
+// ---------------------------------------------------------------------------
+const OWNER_RATE_RULES_VERSION = 4
+type OwnerPayKind = 'event' | 'warehouse' | 'musicbus' | 'petrus' | 'gardener' | 'fixed_weekly'
+function ownerPayKind(staffId: number, workType: string, wording: string, payrollRule: string): OwnerPayKind {
+  if ((payrollRule || '') === 'fixed_weekly') return 'fixed_weekly'
+  const wt = (workType || '').trim()
+  if (/music\s*bus/i.test(wt)) return 'musicbus'
+  if (staffId === 4) return 'petrus'
+  // Gardeners: only their House / House/Garden block keeps the gardener rate; the Team
+  // block (Warehouse Team / Team Assistance) is general staff for that day.
+  if ((staffId === 1 || staffId === 2) && /house|garden/i.test(wt) && !/team/i.test(wt)) return 'gardener'
+  if (/warehouse/i.test(wt) || /warehouse/i.test(wording || '')) return 'warehouse'
+  return 'event'
+}
+// Price ONE shift under the owner rules. Returns null when the engine amount must be kept.
+// Owner (2026-09-15): use the ACTUAL day the hours were worked — a shift that passes
+// midnight is priced in two parts (before midnight = start day's rate, after midnight =
+// next day's rate). It stays one shift on one row; only the pay calculation splits.
+function ownerPayForShift(dateIso: string, startTime: string, endTime: string, kind: OwnerPayKind): { amount: number, hourlyRate: number, breakdown: string } | null {
+  if (kind === 'fixed_weekly' || kind === 'gardener') return null
+  const d0 = parseProxyIsoDate(dateIso); const s0 = timeToMinutes(startTime); const e0 = timeToMinutes(endTime)
+  if (!d0 || s0 === null || e0 === null) return null
+  const end0 = e0 <= s0 ? e0 + 1440 : e0
+  if (end0 > 1440) {
+    const next = new Date(d0.getTime()); next.setUTCDate(next.getUTCDate() + 1)
+    const nextIso = next.toISOString().slice(0, 10)
+    const a = ownerPayForShift(dateIso, startTime, '24:00', kind)
+    const b = ownerPayForShift(nextIso, '00:00', String(Math.floor((end0 - 1440) / 60)).padStart(2, '0') + ':' + String((end0 - 1440) % 60).padStart(2, '0'), kind)
+    if (!a || !b) return a || b
+    return { amount: Math.round((a.amount + b.amount) * 100) / 100, hourlyRate: a.hourlyRate, breakdown: `${a.breakdown} (until midnight) + ${b.breakdown} (after midnight, ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][next.getUTCDay()]})` }
+  }
+  const d = d0; const sMin = s0; const eMin = end0
+  const dow = d.getUTCDay() // 0 Sun … 6 Sat
+  const totalH = (eMin - sMin) / 60
+  const insideMin = overlapMinutes(sMin, eMin, RULE_WINDOW_START, RULE_WINDOW_END)
+  const outsideH = ((eMin - sMin) - insideMin) / 60
+  const h = (n: number) => n.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')
+  const r2 = (n: number) => Math.round(n * 100) / 100
+  if (kind === 'musicbus') {
+    if (dow === 0) return { amount: r2(totalH * 120), hourlyRate: 120, breakdown: `Music Bus Sunday: ${h(totalH)} h × R120` }
+    const amt = (insideMin > 0 ? 750 : 0) + outsideH * 120
+    return { amount: r2(amt), hourlyRate: 120, breakdown: `Music Bus: ${insideMin > 0 ? 'R750 fixed 07–16' : 'no 07–16 time'}${outsideH > 0 ? ` + ${h(outsideH)} h outside × R120` : ''}` }
+  }
+  if (kind === 'petrus') {
+    if (dow === 0 || dow === 6) return { amount: r2(totalH * 95), hourlyRate: 95, breakdown: `Petrus ${dow === 0 ? 'Sunday' : 'Saturday'}: ${h(totalH)} h × R95` }
+    const amt = (insideMin > 0 ? 650 : 0) + outsideH * 81.25
+    return { amount: r2(amt), hourlyRate: 81.25, breakdown: `Petrus weekday: ${insideMin > 0 ? 'R650 fixed 07–16' : 'no 07–16 time'}${outsideH > 0 ? ` + ${h(outsideH)} h outside × R81,25` : ''}` }
+  }
+  // general staff (event / warehouse)
+  if (dow === 0) return { amount: r2(totalH * 120), hourlyRate: 120, breakdown: `Sunday: ${h(totalH)} h × R120` }
+  if (dow === 6) return { amount: r2(totalH * 95), hourlyRate: 95, breakdown: `Saturday: ${h(totalH)} h × R95` }
+  if (kind === 'warehouse') return { amount: r2(totalH * 81.25), hourlyRate: 81.25, breakdown: `Warehouse weekday: ${h(totalH)} h × R81,25` }
+  const amt = (insideMin > 0 ? 750 : 0) + outsideH * 90
+  return { amount: r2(amt), hourlyRate: 90, breakdown: `Event/venue weekday: ${insideMin > 0 ? 'R750 fixed 07–16' : 'no 07–16 time'}${outsideH > 0 ? ` + ${h(outsideH)} h outside × R90` : ''}` }
+}
+
 function computeRuleDay(dateIso: string, segments: RuleSegment[]): RuleDayResult {
+  // Owner rules 2026-09-15, applied per entry; the fixed day part (R750 / Petrus R650)
+  // is granted ONCE per person per day; overlapping minutes are priced once.
   const d = parseProxyIsoDate(dateIso)
   const sunday = !!d && d.getUTCDay() === 0
   const notes: string[] = []
-  let insideMin = 0, outsideStdMin = 0, outsideMbMin = 0, ownRateAmount = 0
+  const parts: string[] = []
+  let insideMin = 0, outsideStdMin = 0, outsideMbMin = 0, ownRateAmount = 0, dayPart = 0, overtime = 0
   const covered: Array<[number, number]> = []
   let minS = Infinity, maxE = -Infinity
+  const fmtT = (mins: number) => String(Math.floor((((mins % 1440) + 1440) % 1440) / 60)).padStart(2, '0') + ':' + String(mins % 60).padStart(2, '0')
   const ordered = segments.slice().sort((a, b) => (timeToMinutes(a.start) || 0) - (timeToMinutes(b.start) || 0))
   for (const seg of ordered) {
     const m = ruleSegmentMinutes(seg)
     if (!m) { notes.push('unreadable time ' + seg.start + '–' + seg.end); continue }
     minS = Math.min(minS, m.s); maxE = Math.max(maxE, m.e)
     const pieces = subtractCovered(m.s, m.e, covered)
-    if (pieces.length === 0 || pieces.reduce((a, [x, y]) => a + (y - x), 0) < (m.e - m.s)) notes.push('overlapping entries counted once')
+    if (pieces.reduce((a, [x, y]) => a + (y - x), 0) < (m.e - m.s)) notes.push('overlapping entries counted once')
+    covered.push([m.s, m.e])
     for (const [ps, pe] of pieces) {
       if (seg.kind === 'ownrate') { ownRateAmount += ((pe - ps) / 60) * seg.rate; continue }
+      const kind: OwnerPayKind = seg.kind === 'musicbus' ? 'musicbus' : seg.kind === 'petrus' ? 'petrus' : seg.kind === 'warehouse' ? 'warehouse' : 'event'
+      const priced = ownerPayForShift(dateIso, fmtT(ps), fmtT(pe), kind)
+      if (!priced) continue
       const inside = overlapMinutes(ps, pe, RULE_WINDOW_START, RULE_WINDOW_END)
       insideMin += inside
-      const outside = (pe - ps) - inside
-      if (seg.kind === 'musicbus') outsideMbMin += outside; else outsideStdMin += outside
+      if (kind === 'musicbus') outsideMbMin += (pe - ps) - inside; else outsideStdMin += (pe - ps) - inside
+      const fixed = /R750 fixed/.test(priced.breakdown) ? 750 : /R650 fixed/.test(priced.breakdown) ? 650 : 0
+      const variable = priced.amount - fixed
+      overtime += variable
+      if (fixed) {
+        if (!dayPart) dayPart = fixed
+        else notes.push('second fixed day on the same date counted once')
+      }
+      parts.push(priced.breakdown)
     }
-    covered.push([m.s, m.e])
   }
-  const dayPart = insideMin === 0 ? 0 : (sunday ? RULE_FULL_DAY : (insideMin > RULE_HALF_MAX_MIN ? RULE_FULL_DAY : RULE_HALF_DAY))
-  const stdRate = sunday ? 90 * 1.5 : 90
-  const overtime = (outsideStdMin / 60) * stdRate + (outsideMbMin / 60) * 130
   const amount = Math.round((dayPart + overtime + ownRateAmount) * 100) / 100
-  const fmtT = (mins: number) => { const mm = ((mins % 1440) + 1440) % 1440; return String(Math.floor(mm / 60)).padStart(2, '0') + ':' + String(mm % 60).padStart(2, '0') + (mins >= 1440 ? ' (next day)' : '') }
-  const span = isFinite(minS) ? fmtT(minS) + '–' + fmtT(maxE) : ''
+  const fmtT2 = (mins: number) => fmtT(mins) + (mins >= 1440 ? ' (next day)' : '')
+  const span = isFinite(minS) ? fmtT2(minS) + '–' + fmtT2(maxE) : ''
+  if (parts.length) notes.unshift(parts.join(' · '))
   return { amount, insideMin, outsideStdMin, outsideMbMin, ownRateAmount, dayPart, overtime, sunday, span, notes: Array.from(new Set(notes)) }
 }
 
 function ruleBreakdownText(r: RuleDayResult) {
   const parts: string[] = []
-  const h = (m: number) => (m / 60).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1') + ' h'
-  if (r.insideMin > 0) parts.push(`${h(r.insideMin)} inside 07–16 → ${r.dayPart === RULE_FULL_DAY ? (r.sunday ? 'Sunday flat day R750' : 'full day R750') : 'half day R375'}`)
-  if (r.outsideStdMin > 0) parts.push(r.sunday ? `${h(r.outsideStdMin)} outside × R135 (Sunday R90 × 1,5) = ${fmtRand((r.outsideStdMin / 60) * 135)}` : `${h(r.outsideStdMin)} outside × R90 = ${fmtRand((r.outsideStdMin / 60) * 90)}`)
-  if (r.outsideMbMin > 0) parts.push(`${h(r.outsideMbMin)} outside × R130 (Music Bus) = ${fmtRand((r.outsideMbMin / 60) * 130)}`)
+  if (r.notes.length && !/^(overlapping|unreadable|second fixed)/.test(r.notes[0])) parts.push(r.notes[0])
   if (r.ownRateAmount > 0) parts.push(`own hourly rate = ${fmtRand(r.ownRateAmount)}`)
-  return parts.join(' + ')
+  return parts.join(' + ') || 'no priced entries'
 }
 
 type AdminPaidRow = { id: number, staff_id: number, display_name: string, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, work_type: string, outlet_venue: string, area: string, event_name: string, work_description: string, payroll_week_start: string | null, missed_previous_week: number, overnight_confirmed: number, source_draft_id: number | null, manager_update_reason: string | null }
@@ -3817,16 +3917,14 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   const ratesRes = await db.prepare(`SELECT staff_id, work_type, hourly_rate FROM wage_work_rates WHERE active = 1 AND staff_id IN (${ph})`).bind(...staffIds).all()
   const workRates: Record<string, number> = {}
   for (const r of (ratesRes.results || []) as Array<{ staff_id: number, work_type: string, hourly_rate: number }>) workRates[r.staff_id + '|' + r.work_type] = Number(r.hourly_rate || 0)
-  const ruleSegmentFor = (staffId: number, workType: string, start: string, end: string): RuleSegment => {
+  const ruleSegmentFor = (staffId: number, workType: string, start: string, end: string, wording = ''): RuleSegment => {
     const wt = workType || ''
-    if (/music bus/i.test(wt)) return { start, end, rate: 130, kind: 'musicbus', label: wt }
-    // Own hourly rates apply only where the owner confirmed them: a work type with its own
-    // rate in wage_work_rates (House, House/Garden = R62,50) or Tsotlego (staff 4, R81,25).
-    // Everyone else is priced on the standard day rule, whatever their legacy base rate says.
-    const typeRate = workRates[staffId + '|' + wt]
-    if (typeRate !== undefined && typeRate !== 90) return { start, end, rate: typeRate, kind: 'ownrate', label: wt }
-    if (staffId === 4) return { start, end, rate: staffBase[4]?.hourly_rate || 81.25, kind: 'ownrate', label: wt }
-    return { start, end, rate: 90, kind: 'standard', label: wt }
+    const kind = ownerPayKind(staffId, wt, wording, staffBase[staffId]?.payroll_rule || 'hourly')
+    if (kind === 'gardener') return { start, end, rate: workRates[staffId + '|' + wt] ?? 62.5, kind: 'ownrate', label: wt }
+    if (kind === 'musicbus') return { start, end, rate: 120, kind: 'musicbus', label: wt }
+    if (kind === 'petrus') return { start, end, rate: 81.25, kind: 'petrus', label: wt }
+    if (kind === 'warehouse') return { start, end, rate: 81.25, kind: 'warehouse', label: wt }
+    return { start, end, rate: 90, kind: 'event', label: wt }
   }
   const ruleApplies = (staffId: number) => (staffBase[staffId]?.payroll_rule || 'hourly') !== 'fixed_weekly'
 
@@ -3928,14 +4026,14 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       for (const date of dates) {
         const dayRows = rows.filter((r) => r.work_date === date)
         const priorRows = date < weekStart ? prior.filter((p) => p.staff_id === sid && p.work_date === date) : []
-        const segs = [...dayRows.map((r) => ruleSegmentFor(sid, r.work_type, r.start_time, r.end_time)), ...priorRows.map((p) => ruleSegmentFor(sid, p.work_type, p.start_time, p.end_time))]
+        const segs = [...dayRows.map((r) => ruleSegmentFor(sid, r.work_type, r.start_time, r.end_time, [r.outlet_venue, r.event_name, r.work_description].join(' '))), ...priorRows.map((p) => ruleSegmentFor(sid, p.work_type, p.start_time, p.end_time, p.outlet_venue))]
         const rule = computeRuleDay(date, segs)
         const paidTotal = dayRows.reduce((a, r) => a + Number(r.amount || 0), 0) + priorRows.reduce((a, p) => a + Number(p.amount || 0), 0)
         const diff = Math.round((paidTotal - rule.amount) * 100) / 100
         if (priorRows.length && Math.abs(diff) >= 0.5) {
           // Where does the difference sit? If the earlier payroll's own entries already differ
           // from the rule by the same amount, this week's missed-shift entry is right as an add-on.
-          const priorOnly = computeRuleDay(date, priorRows.map((p) => ruleSegmentFor(sid, p.work_type, p.start_time, p.end_time)))
+          const priorOnly = computeRuleDay(date, priorRows.map((p) => ruleSegmentFor(sid, p.work_type, p.start_time, p.end_time, p.outlet_venue)))
           const priorPaid = priorRows.reduce((a, p) => a + Number(p.amount || 0), 0)
           const priorDiff = Math.round((priorPaid - priorOnly.amount) * 100) / 100
           if (Math.abs(diff - priorDiff) < 0.5) rule.notes.push(`the whole difference sits in the EARLIER payroll's entry (paid ${fmtRand(priorPaid)}, rule ${fmtRand(priorOnly.amount)}); this week's missed-shift entry is correct as an add-on`)
@@ -4024,7 +4122,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       try { snap = decided.system_snapshot_json ? JSON.parse(decided.system_snapshot_json) : null } catch (err) {}
       const st = (decided as any).approved_start_time || snap?.recommendedStart, en = (decided as any).approved_end_time || snap?.recommendedEnd
       if (st && en && timeToMinutes(st) !== null && timeToMinutes(en) !== null && ruleApplies(sid)) {
-        agreedA += computeRuleDay(r.work_date, [ruleSegmentFor(sid, r.work_type, st, en)]).amount
+        agreedA += computeRuleDay(r.work_date, [ruleSegmentFor(sid, r.work_type, st, en, [r.outlet_venue, r.event_name, r.work_description].join(' '))]).amount
       } else if (paidH > 0) {
         agreedA += Math.round(paidA * (ah / paidH) * 100) / 100; agreedApprox = true
       }
@@ -4092,7 +4190,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     ${(() => {
       const sorted = ruleDiffsAll.slice().sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
       const head = `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div style="font-weight:800;color:#93c5fd">⚖ Pay-rule check — ${gRuleDays ? gRuleDays + ' day' + (gRuleDays === 1 ? '' : 's') + ' differ from the rule: paid ' + fmtRand(gRuleOver) + ' more and ' + fmtRand(gRuleUnder) + ' less than the rule (net ' + (gRuleAmount >= 0 ? '+' : '−') + fmtRand(Math.abs(gRuleAmount)) + ')' : 'every paid day matches the rule'}</div>${gRuleDays ? `<a href="#" onclick="var b=document.getElementById('bw-rule-list');b.style.display=b.style.display==='none'?'block':'none';return false" style="color:#e2b93b;font-weight:700;font-size:12px">show / hide list</a>` : ''}</div>
-        <div style="font-size:12px;opacity:.8;margin-top:3px">Rule used: all of a person's entries on the same day are joined, then: more than 4 h inside 07:00–16:00 = R750, up to 4 h = R375; every hour before 07:00 / after 16:00 = R90 (Music Bus R130). Sunday: R750 flat for any time inside 07–16, outside hours R135 (R90 × 1,5), Music Bus unchanged. House / Garden and Tsotlego stay on their own hourly rates. <strong>Nothing is changed by this check</strong> — it only shows where the amount paid differs, so you can decide.</div>`
+        <div style="font-size:12px;opacity:.8;margin-top:3px">Rule used (B&W rate rules 2026-09-15): General staff — Mon–Fri Warehouse R81,25/h; Mon–Fri Event/Venue R750 fixed 07–16 + R90/h outside; Saturday R95/h; Sunday R120/h. Music Bus — Mon–Sat R750 fixed 07–16 + R120/h outside; Sunday R120/h. Petrus — Mon–Fri R650 fixed 07–16 + R81,25/h outside; Sat/Sun R95/h. Gardeners keep their gardener rate; on the Team block they get general-staff rates. A fixed day is counted once per person per day; overlapping entries once. <strong>Nothing is changed by this check</strong> — it only shows where the amount paid differs, so you can decide.</div>`
       if (!sorted.length) return `<section id="bw-rule-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(20,83,45,.18);border:1px solid rgba(96,165,250,.35)">${head}</section>`
       const lines = sorted.map((c) => `<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid rgba(255,255,255,.08);font-size:12.5px"><span style="flex:0 0 auto">${c.diff > 0 ? pill('OVER', '#7f1d1d', '#fff') : pill('UNDER', '#1e3a8a', '#fff')}</span><div style="flex:1"><strong>${escapeHtmlText(c.name)}</strong> · ${escapeHtmlText(c.date)} (${dayName(c.date)}) · ${escapeHtmlText(c.rule.span)} · paid <strong>${fmtRand(c.paid)}</strong> vs rule <strong>${fmtRand(c.rule.amount)}</strong> → <strong>${c.diff > 0 ? '+' : '−'}${fmtRand(Math.abs(c.diff))}</strong><a href="#" onclick="var b=document.getElementById('bw-rule-top-${c.staffId}-${c.date}');if(b){b.style.display=b.style.display==='none'?'block':'none'}return false" style="margin-left:8px;color:#e2b93b;font-weight:700">Open ▾</a><div id="bw-rule-top-${c.staffId}-${c.date}" style="display:none;margin-top:2px">${ruleDetailTop(c)}</div></div></div>`).join('')
       return `<section id="bw-rule-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(30,58,138,.12);border:1px solid rgba(96,165,250,.5)">${head}<div id="bw-rule-list" style="margin-top:6px">${lines}</div></section>`
@@ -4461,6 +4559,14 @@ async function proxyRequest(c: any) {
       if (d && staffId && realIso) await restoreRealDateForMissedShift(c.env, staffId, realIso, d.start_time, d.end_time, draftId)
     } catch (err) {
       await captureWagesDebug(c.env, { request_path: incomingUrl.pathname, request_method: 'POST', original_payload_json: '{}', rewritten_payload_json: '{}', rewrite_applied: 1, response_status: upstreamResponse.status, response_location: upstreamLocation, response_error_text: 'real-date restore (final) failed: ' + describeProxyError(err) })
+    }
+  }
+  // B&W rate rules (owner 2026-09-15): the engine has just created the paid row for this
+  // draft with its old formula. Re-price THAT ROW ONLY under the owner rules and stamp
+  // calculation_version = 4. Historical rows, drafts, dates, hours, venues untouched.
+  if (upstreamAccepted && finalSubmitMatch && c.env?.DB) {
+    try { await applyOwnerRatesToFinalSubmission(c.env, Number(finalSubmitMatch[1]), c.req.raw.headers.get('cookie') || '') } catch (err) {
+      await captureWagesDebug(c.env, { request_path: incomingUrl.pathname, request_method: 'POST', original_payload_json: '{}', rewritten_payload_json: '{}', rewrite_applied: 1, response_status: upstreamResponse.status, response_location: upstreamLocation, response_error_text: 'owner-rate recalculation failed: ' + describeProxyError(err) })
     }
   }
   if (debugCapture) {
