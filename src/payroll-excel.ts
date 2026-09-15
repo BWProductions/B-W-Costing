@@ -164,33 +164,43 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
   const rng = (col: string) => `${T1}!$${col}$${D1_FIRST}:$${col}$${Math.max(D1_LAST, D1_FIRST)}`
 
   // ============================ TAB 6: Missed Shifts ==========================
+  // Owner format: Worker · Missed shift (date) · Approved hours · Notes.
+  // Notes = the dashboard's missed-shift wording + the overlap / clear line.
   const S6 = 'Missed Shifts'
   const m6: Cell[][] = [
     [{ v: 'B&W PRODUCTIONS — MISSED SHIFTS (previous payroll, paid in this payroll)', s: 'title' }],
-    [{ v: `Payroll week ${weekStart} to ${weekEnd}. Line by line per worker. "Approved hours" is the office's green review decision (or the claimed hours where no review was needed). Hours and amounts are linked to Wage Detail Linked — change them there. Block 6 on the Auditor Trail pulls each worker's total from this tab.`, s: 'note' }],
+    [{ v: `Payroll week ${weekStart} to ${weekEnd}. Approved hours = the green review decision (claimed hours where no review was needed). Linked to Wage Detail Linked; block 6 on the Auditor Trail pulls each worker's total from here.`, s: 'note' }],
     [],
-    ['Employee', 'Real date', 'Day', 'Times', 'Venue / Outlet', 'Description', 'Claimed hours', 'Approved hours', 'Amount', 'Detailed breakdown (rate rule for the actual day)', 'System note (what the system flagged)', 'Review note (office decision)', 'Shift ID'].map((h) => ({ v: h, s: 'header' as const })),
+    ['Worker', 'Missed shift', 'Approved hours', 'Amount', 'Notes'].map((h) => ({ v: h, s: 'header' as const })),
   ]
   const missedTotalsRow: Record<number, number> = {}
+  const noteFor = (p: Priced) => {
+    const sameDay = prior.filter((x) => x.staff_id === p.row.staff_id && x.work_date === p.row.work_date)
+    const overlap = sameDay.filter((x) => { const a1 = deps.timeToMinutes(p.row.start_time), b0 = deps.timeToMinutes(p.row.end_time), c1 = deps.timeToMinutes(x.start_time), d0 = deps.timeToMinutes(x.end_time); if (a1 === null || b0 === null || c1 === null || d0 === null) return false; const b1 = b0 <= a1 ? b0 + 1440 : b0, d1 = d0 <= c1 ? d0 + 1440 : d0; return a1 < d1 && c1 < b1 })
+    const head = `Worked ${longDate(p.row.work_date)} (previous payroll), not captured that week; final-submitted and paid in payroll ${weekStart} to ${weekEnd}.`
+    const check = overlap.length
+      ? `OVERLAP already paid ${overlap.map((x) => `${x.start_time}–${x.end_time} (${x.outlet_venue}, payroll ${x.payroll_week_start || 'n/a'})`).join('; ')}`
+      : sameDay.length ? `CLEAR worked ${sameDay.map((x) => x.start_time + '–' + x.end_time).join(', ')} that day (paid); these hours are outside those times`
+      : 'CLEAR nothing else paid for this day'
+    return head + '\n' + check
+  }
   for (const [sid, name] of workers) {
     const mine = priced.filter((p) => p.row.staff_id === sid && p.missed)
     if (!mine.length) continue
-    const first = m6.length + 2
-    m6.push([{ v: name, s: 'bold' }])
+    const first = m6.length + 1
     mine.forEach((p) => {
       const rn = rowIndexByShift[p.row.id]
-      m6.push(['', longDate(p.row.work_date), dayName(p.row.work_date), `${p.row.start_time}–${p.row.end_time}`, p.row.outlet_venue || '', p.row.work_description || '',
-        { v: p.claimedH, s: 'num' }, { f: `${T1}!O${rn}`, s: 'numBold' }, { f: `${T1}!R${rn}`, s: 'money' }, { v: p.breakdown, s: 'wrap' }, { v: p.systemNote, s: 'wrap' }, { v: p.reviewNote, s: 'wrap' }, p.row.id])
+      m6.push([name, `${longDate(p.row.work_date)}  ${p.row.start_time}–${p.row.end_time}`, { f: `${T1}!O${rn}`, s: 'numBold' }, { f: `${T1}!R${rn}`, s: 'money' }, { v: noteFor(p), s: 'wrap' }])
     })
     const last = m6.length
     const totalRow = m6.length + 1
-    m6.push([{ v: `${name} — missed total`, s: 'bold' }, null, null, null, null, null, { f: `SUM(G${first}:G${last})`, s: 'numBold' }, { f: `SUM(H${first}:H${last})`, s: 'sub' }, { f: `SUM(I${first}:I${last})`, s: 'subMoney' }])
+    m6.push([{ v: `${name} — missed total`, s: 'bold' }, null, { f: `SUM(C${first}:C${last})`, s: 'sub' }, { f: `SUM(D${first}:D${last})`, s: 'subMoney' }])
     missedTotalsRow[sid] = totalRow
     m6.push([])
   }
   const m6TotalRows = Object.values(missedTotalsRow)
-  m6.push([{ v: 'GRAND TOTAL MISSED SHIFTS', s: 'bold' }, null, null, null, null, null, { f: m6TotalRows.length ? m6TotalRows.map((r) => `G${r}`).join('+') : '0', s: 'numBold' }, { f: m6TotalRows.length ? m6TotalRows.map((r) => `H${r}`).join('+') : '0', s: 'sub' }, { f: m6TotalRows.length ? m6TotalRows.map((r) => `I${r}`).join('+') : '0', s: 'subMoney' }])
-  const sheet6: Sheet = { name: S6, rows: m6, freeze: 4, widths: [30, 16, 11, 13, 24, 26, 9, 9, 12, 48, 70, 70, 8] }
+  m6.push([{ v: 'GRAND TOTAL MISSED SHIFTS', s: 'bold' }, null, { f: m6TotalRows.length ? m6TotalRows.map((r) => `C${r}`).join('+') : '0', s: 'sub' }, { f: m6TotalRows.length ? m6TotalRows.map((r) => `D${r}`).join('+') : '0', s: 'subMoney' }])
+  const sheet6: Sheet = { name: S6, rows: m6, freeze: 4, widths: [28, 30, 12, 12, 110] }
   const T6 = sheetRef(S6)
 
   // ============================ TAB 2: Auditor Trail Linked ===================
@@ -225,7 +235,7 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
       row.push({ f: `SUMIFS(${rng('R')},${rng('B')},$A${rn},${rng('C')},${colLetter(c)}$2,${rng('E')},"")`, s: 'money' })
     })
     const mr = missedTotalsRow[sid]
-    row.push({ f: mr ? `${T6}!H${mr}` : '0', s: 'sub' }, { f: mr ? `${T6}!I${mr}` : '0', s: 'subMoney' })
+    row.push({ f: mr ? `${T6}!C${mr}` : '0', s: 'sub' }, { f: mr ? `${T6}!D${mr}` : '0', s: 'subMoney' })
     const fixedWeekly = staffAll.find((s) => s.id === sid && s.payroll_rule === 'fixed_weekly')
     row.push({ f: `SUM(B${rn},D${rn},F${rn},H${rn},J${rn},L${rn},N${rn},P${rn})`, s: 'numBold' })
     row.push(fixedWeekly ? { v: Number(fixedWeekly.standard_weekly_amount || 0), s: 'moneyBold' } : { f: `SUM(C${rn},E${rn},G${rn},I${rn},K${rn},M${rn},O${rn},Q${rn})`, s: 'moneyBold' })
