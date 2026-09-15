@@ -6,7 +6,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-14-10'
+const WAGES_UI_VERSION = 'v2026-09-15-1'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3830,7 +3830,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   // manager-correction form (/admin/wages/shifts/:id/edit) — nothing new in the backend.
   const editHref = (shiftId: number) => `/admin/wages/shifts/${shiftId}/edit?from=${encodeURIComponent(weekStart)}&to=${encodeURIComponent(weekEnd)}&sort=employee`
   const editBtn = (shiftId: number, label = '✎ Edit shift') => `<a href="${editHref(shiftId)}" style="display:inline-block;margin-top:6px;padding:4px 9px;border-radius:7px;border:1px solid rgba(226,185,59,.6);color:#e2b93b;font-weight:700;font-size:12px;text-decoration:none;white-space:nowrap" title="Opens the manager correction form for this paid shift (asks for a reason; keeps the audit trail)">${label}</a>`
-  const workerAppBtn = (staffId: number, _draftId: number) => `<a href="/wages/login?staff=${staffId}" target="_blank" rel="noopener" style="display:inline-block;margin-top:6px;padding:4px 9px;border-radius:7px;border:1px solid rgba(255,255,255,.3);color:#fff;font-weight:700;font-size:12px;text-decoration:none;white-space:nowrap" title="Not final-submitted yet — edit it in the worker's own app">Open in worker app ↗</a>`
+  const workerAppBtn = (_staffId: number, draftId: number, label = '✎ Edit shift') => `<a href="/wages-admin/edit-draft/${draftId}" target="_blank" rel="noopener" style="display:inline-block;margin-top:6px;padding:4px 9px;border-radius:7px;border:1px solid rgba(226,185,59,.6);color:#e2b93b;font-weight:700;font-size:12px;text-decoration:none;white-space:nowrap" title="Not final-submitted yet — opens this draft's edit page (as the office) in a new tab">${label}</a>`
 
   function missedCell(r: AdminPaidRow) {
     if (r.work_date >= weekStart) return '<span style="opacity:.45">—</span>'
@@ -3926,7 +3926,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         ${td(Number(r.hours_worked || 0).toFixed(2), 'text-align:right;white-space:nowrap')}
         ${td(fmtRand(r.amount), 'text-align:right;white-space:nowrap;font-weight:700')}
         ${td(missedCell(r), 'min-width:240px')}
-        ${td(reviewCell(revs, true, editBtn(r.id)) + (r.manager_update_reason ? `<div style="font-size:12px;color:#86efac">Corrected: ${escapeHtmlText(r.manager_update_reason)}</div>` : ''), 'min-width:260px')}
+        ${td((revs.length ? reviewCell(revs, true, editBtn(r.id)) : editBtn(r.id)) + (r.manager_update_reason ? `<div style="font-size:12px;color:#86efac">Corrected: ${escapeHtmlText(r.manager_update_reason)}</div>` : ''), 'min-width:260px')}
         ${td(editBtn(r.id, '✎'), 'text-align:center;white-space:nowrap')}
       </tr>`
     }).join('')
@@ -3945,9 +3945,9 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         ${td(escapeHtmlText(d.work_type || ''))}
         ${td('<span style="opacity:.5">not paid</span>', 'text-align:right;white-space:nowrap')}
         ${td('<span style="opacity:.5">R0,00</span>', 'text-align:right;white-space:nowrap')}
-        ${td(isMissed ? pill('MISSED SHIFT – actual date ' + escapeHtmlText(proxyLongDate(d.work_date)) + ' – ' + escapeHtmlText(d.work_description || ''), '#fdecec', '#7f1d1d') + '<div style="font-size:12px;opacity:.8">Saved temporarily by the worker; will be paid in this payroll once Final Submission is pressed.</div>' : '<div style="font-size:12px;opacity:.8">Saved temporarily by the worker; not yet final-submitted, so not yet in the payroll.</div>')}
-        ${td(reviewCell(revs, true, workerAppBtn(sid, d.id)), 'min-width:260px')}
-        ${td(workerAppBtn(sid, d.id), 'text-align:center;white-space:nowrap')}
+        ${td((isMissed ? pill('MISSED SHIFT – actual date ' + escapeHtmlText(proxyLongDate(d.work_date)) + ' – ' + escapeHtmlText(d.work_description || ''), '#fdecec', '#7f1d1d') + '<div style="font-size:12px;opacity:.8">Saved temporarily by the worker; will be paid in this payroll once Final Submission is pressed.</div>' : '<div style="font-size:12px;opacity:.8">Saved temporarily by the worker; not yet final-submitted, so not yet in the payroll.</div>') + `<div>${workerAppBtn(sid, d.id)}</div>`)}
+        ${td(revs.length ? reviewCell(revs, true, workerAppBtn(sid, d.id)) : workerAppBtn(sid, d.id), 'min-width:260px')}
+        ${td(workerAppBtn(sid, d.id, '✎'), 'text-align:center;white-space:nowrap')}
       </tr>`
     }).join('')
 
@@ -4524,6 +4524,31 @@ async function adminUserFromCookie(cookieHeader: string): Promise<{ id: number, 
     return { id: Number(payload.id) || 0, name: String(payload.name || payload.email || 'Office'), email: String(payload.email || ''), role: String(payload.role || '') }
   } catch (err) { return null }
 }
+
+// Office edit of a NOT-final-submitted draft (owner-approved 2026-09-14).
+// Only a logged-in admin may call this. It issues a short (2 h) worker session for
+// that draft's owner — the same kind the worker gets after PIN login — and sends the
+// office straight to the worker's own edit page for that draft. The edit itself is
+// done by the engine's existing worker form; nothing new touches the draft here.
+app.get('/wages-admin/edit-draft/:id', async (c) => {
+  const admin = await adminUserFromCookie(c.req.raw.headers.get('cookie') || '')
+  if (!admin) return c.redirect('/login?next=' + encodeURIComponent('/admin/wages'), 302)
+  const db = c.env?.DB
+  const draftId = Number(c.req.param('id'))
+  if (!db || !draftId) return c.redirect('/admin/wages?error=' + encodeURIComponent('Draft not found.'), 302)
+  const d = await db.prepare(`SELECT id, staff_id, status FROM wage_shift_drafts WHERE id = ?`).bind(draftId).first<{ id: number, staff_id: number, status: string }>()
+  if (!d) return c.redirect('/admin/wages?error=' + encodeURIComponent('Draft #' + draftId + ' no longer exists.'), 302)
+  if (d.status !== 'draft') return c.redirect('/admin/wages?error=' + encodeURIComponent('Draft #' + draftId + ' has already been final-submitted — use ✎ Edit on its paid row instead.'), 302)
+  const raw = new Uint8Array(32); crypto.getRandomValues(raw)
+  const token = btoa(String.fromCharCode(...raw)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
+  const hex = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('')
+  await db.prepare(`INSERT INTO wage_sessions (staff_id, token_hash, expires_at) VALUES (?, ?, datetime('now', '+2 hours'))`).bind(d.staff_id, hex).run()
+  await captureWagesDebug(c.env, { request_path: '/wages-admin/edit-draft/' + draftId, request_method: 'GET', original_payload_json: JSON.stringify({ admin: admin.name, staff_id: d.staff_id }), rewritten_payload_json: '{}', rewrite_applied: 1, response_status: 302, response_location: '/wages/drafts/' + draftId + '/edit', response_error_text: '' })
+  const headers = new Headers({ location: '/wages/drafts/' + draftId + '/edit?bw_staff_id=' + d.staff_id + '&office=1', 'cache-control': 'no-store' })
+  headers.append('set-cookie', 'bw_wage_session=' + token + '; Path=/wages; HttpOnly; SameSite=Lax; Max-Age=7200; Secure')
+  return new Response(null, { status: 302, headers })
+})
 
 app.post('/wages-admin/review-decision', async (c) => {
   const db = c.env?.DB
