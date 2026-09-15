@@ -7,7 +7,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-15-10'
+const WAGES_UI_VERSION = 'v2026-09-15-11'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -2241,7 +2241,35 @@ label[for="bw-missed-work-date"] {
     })
   }
 
+  // Owner (2026-09-15): a missed shift that has been final-submitted is LOCKED and paid.
+  // Showing it above the Draft section under a "Submit selected" box made workers think it
+  // was still unsubmitted, so they captured it again. Move every locked missed card into
+  // "Finally submitted shifts" (top of that list, with its MISSED pill) and remove the
+  // now-empty section. Display only; nothing is posted.
+  function relocateLockedMissedShifts() {
+    const section = document.querySelector('[data-bw-missed-paid]')
+    if (!section || section.dataset.bwRelocated) return
+    const headings = Array.from(document.querySelectorAll('section.card > h2'))
+    const finalH = headings.find((h) => /finally submitted shifts/i.test(elementText(h)))
+    const finalSection = finalH ? finalH.closest('section.card') : null
+    if (!finalSection) return
+    const cards = Array.from(section.querySelectorAll('article.shift'))
+    if (!cards.length) return
+    const emptyNote = Array.from(finalSection.querySelectorAll('p.muted')).find((p) => /no finally submitted shifts/i.test(elementText(p)))
+    if (emptyNote) emptyNote.remove()
+    const intro = document.createElement('p')
+    intro.className = 'muted small bw-missed-intro'
+    intro.textContent = 'Missed shifts from last week are shown first with their real date. They are final-submitted, locked and paid in this payroll — do not capture them again.'
+    let anchor = finalH.nextSibling
+    finalSection.insertBefore(intro, anchor)
+    anchor = intro.nextSibling
+    cards.forEach((card) => { card.classList.add('bw-missed-locked'); finalSection.insertBefore(card, anchor); anchor = card.nextSibling })
+    section.dataset.bwRelocated = '1'
+    section.remove()
+  }
+
   function addBulkFinalSubmission() {
+    try { relocateLockedMissedShifts() } catch (err) { console.error('relocate missed shifts failed', err) }
     const shifts = Array.from(document.querySelectorAll('.shift'))
     if (!shifts.length) return
 
@@ -2360,7 +2388,7 @@ label[for="bw-missed-work-date"] {
       }
     })
 
-    const insertionPoint = shifts[0]
+    const insertionPoint = selectable[0].shift
     insertionPoint.parentElement?.insertBefore(panel, insertionPoint)
   }
 
@@ -4348,7 +4376,7 @@ async function buildMissedPaidSection(env: Bindings | undefined, staffId: number
   const cards = shifts.map((r) => `
         <article class="shift"><div class="row"><div><div class="shift-title">${escapeHtmlText(r.outlet_venue)}</div><div class="muted small">${escapeHtmlText(r.work_date)} · ${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)}</div><div class="muted small">Missed shift · ${Number(r.hours_worked || 0).toFixed(2)} h</div></div><strong>${Number(r.hours_worked || 0).toFixed(2)} h</strong></div><div class="pill">Submitted — locked</div><div class="pill bw-missed-detail">MISSED SHIFT – actual date ${escapeHtmlText(proxyLongDate(r.work_date))} – ${escapeHtmlText(r.work_description)}</div></article>`).join('')
   const html = `
-    <section class="card bw-missed-paid"><h2>Missed shifts from last week — paid in this payroll</h2><p class="muted">These shifts show their real work date. They are included in this payroll week (${weekStart} to ${weekEnd}).</p>${cards}</section>`
+    <section class="card bw-missed-paid" data-bw-missed-paid="1"><h2>Missed shifts from last week — paid in this payroll</h2><p class="muted">These shifts show their real work date. They are included in this payroll week (${weekStart} to ${weekEnd}).</p>${cards}</section>`
   return { html, totalHours, totalCount, missedHours }
 }
 
