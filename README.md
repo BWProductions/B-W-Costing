@@ -239,3 +239,10 @@ Three named office users can re-open signed delivery notes for correction:
 Everyone else — including other founders — gets read-only success view.
 All post-sign edits write a diffed audit_log row (who, when, field-level
 from→to). See `EDIT_AFTER_SIGN_EMAILS` in `src/routes/field.ts`.
+
+## Restore point 15 Sep 2026 — rate rules · rate-choice reviews · Payroll Excel
+- Handover (full spec of colours, labels, rules, Excel layout): `docs/handover-2026-09-15-rate-rules-payroll-excel.md` / `.pdf`
+- Git tag: `restore-2026-09-15-rate-rules-payroll-excel` · live version `v2026-09-15-10`
+- New routes: `GET /wages-admin/payroll.xlsx?from=YYYY-MM-DD` (6-tab auditor workbook), `POST /wages-admin/rate-choice`
+- New source files: `src/payroll-excel.ts`, `src/xlsx-lite.ts`
+- Data before-state for the 12–18 Sep re-price: `docs/reprice-backup-2026-09-15-week-2026-09-12-before.json`
