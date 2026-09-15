@@ -34,6 +34,14 @@ function addDays(iso: string, n: number) { const d = isoToDate(iso)!; d.setUTCDa
 function r2(n: number) { return Math.round(n * 100) / 100 }
 function fmtR(n: number) { return 'R' + n.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, ' ') }
 function parseSnap(s: string | null) { try { return s ? JSON.parse(s) : null } catch (e) { return null } }
+// Title + note rows merged across the sheet width so the note stays a 2-line band, not a tall column.
+function headBand(cols: number): { merges: string[], heights: Record<number, number> } { return { merges: [`A1:${colLetter(cols)}1`, `A2:${colLetter(cols)}2`], heights: { 1: 22, 2: 30, 4: 30 } } }
+const BOILER = /Do not block staff entry\.?\s*Do not auto-call it duplicate\.?\s*Office must review.*$/i
+function cleanFlag(sn: any, v: { warning_reason: string, issue_summary: string }) {
+  const hr = String(sn?.humanReason || '').replace(BOILER, '').trim()
+  if (hr) return hr
+  return String(v.warning_reason || '').replace(/^Manual overlap \/ possible already-claimed review:\s*/i, '').replace(BOILER, '').trim() || v.issue_summary
+}
 
 export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: Uint8Array, filename: string, checks: Record<string, number> }> {
   const { db, weekStart, weekEnd } = deps
@@ -115,7 +123,7 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
         : sameDay.length ? `CLEAR: worked ${sameDay.map((p) => p.start_time + '–' + p.end_time).join(', ')} that day (paid in payroll ${sameDay[0].payroll_week_start || 'n/a'}); these hours are outside those times.`
         : 'CLEAR: nothing else paid for this day.'
     }
-    const sysParts = allReviews.map((v) => { const sn = parseSnap(v.system_snapshot_json); const rec = v.system_proposed_payable_hours !== null && v.system_proposed_payable_hours !== undefined ? ` System recommended ${Number(v.system_proposed_payable_hours).toFixed(2)} h${sn?.recommendedStart ? ' (' + sn.recommendedStart + '–' + sn.recommendedEnd + ')' : ''}.` : ''; return `#${v.id} ${sn?.warningTitle || v.issue_summary}: ${(sn?.humanReason || v.warning_reason || '').replace(/ Do not block staff entry.*$/i, '')}${rec}` })
+    const sysParts = allReviews.map((v) => { const sn = parseSnap(v.system_snapshot_json); const rec = v.system_proposed_payable_hours !== null && v.system_proposed_payable_hours !== undefined ? ` System recommended ${Number(v.system_proposed_payable_hours).toFixed(2)} h${sn?.recommendedStart ? ' (' + sn.recommendedStart + '–' + sn.recommendedEnd + ')' : ''}.` : ''; return `#${v.id} ${sn?.warningTitle || v.issue_summary}: ${cleanFlag(sn, v)}${rec}` })
     if (sysParts.length) systemNote = (systemNote ? systemNote + ' | ' : '') + sysParts.join(' | ')
     const reviewNote = allReviews.length
       ? allReviews.map((v) => v.status === 'RESOLVED'
@@ -145,19 +153,19 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     const rn = D1_FIRST + i
     rowIndexByShift[p.row.id] = rn
     d1.push([
-      p.row.id, p.row.display_name, p.row.work_date, dayName(p.row.work_date), p.missed ? 'YES' : '', p.row.outlet_venue || '', p.row.area || '', p.row.work_description || '', p.row.work_type || '',
+      { v: p.row.id, s: 'text' }, p.row.display_name, p.row.work_date, dayName(p.row.work_date), p.missed ? 'YES' : '', p.row.outlet_venue || '', p.row.area || '', p.row.work_description || '', p.row.work_type || '',
       p.row.start_time, p.row.end_time, { v: p.claimedH, s: 'num' }, { v: p.approvedH, s: 'num' }, { v: null, s: 'edit' },
       { f: `IF(N${rn}<>"",N${rn},M${rn})`, s: 'numBold' },
       { v: p.amount, s: 'money' }, { v: null, s: 'editMoney' },
       { f: `IF(Q${rn}<>"",Q${rn},IF(N${rn}<>"",IF(M${rn}>0,ROUND(P${rn}*N${rn}/M${rn},2),0),P${rn}))`, s: 'moneyBold' },
-      { v: p.rate, s: 'num' }, { v: p.breakdown, s: 'wrap' }, { v: null, s: 'edit' },
-      p.review ? '#' + p.review.id : (p.rateChoice ? '#' + p.rateChoice.id : ''), { v: p.systemNote, s: 'wrap' }, { v: p.reviewNote, s: 'wrap' },
+      { v: p.rate, s: 'num' }, { v: p.breakdown, s: 'text' }, { v: null, s: 'edit' },
+      p.review ? '#' + p.review.id : (p.rateChoice ? '#' + p.rateChoice.id : ''), { v: p.systemNote, s: 'text' }, { v: p.reviewNote, s: 'text' },
     ])
   })
   const D1_LAST = D1_FIRST + priced.length - 1
   d1.push([])
   d1.push([{ v: 'GRAND TOTAL', s: 'bold' }, null, null, null, null, null, null, null, null, null, null, { f: `SUM(L${D1_FIRST}:L${D1_LAST})`, s: 'numBold' }, { f: `SUM(M${D1_FIRST}:M${D1_LAST})`, s: 'numBold' }, null, { f: `SUM(O${D1_FIRST}:O${D1_LAST})`, s: 'numBold' }, { f: `SUM(P${D1_FIRST}:P${D1_LAST})`, s: 'moneyBold' }, null, { f: `SUM(R${D1_FIRST}:R${D1_LAST})`, s: 'moneyBold' }])
-  const sheet1: Sheet = { name: S1, rows: d1, freeze: 4, widths: [8, 24, 11, 10, 8, 24, 14, 26, 14, 7, 7, 9, 10, 10, 10, 12, 12, 12, 8, 46, 20, 9, 60, 60] }
+  const sheet1: Sheet = { name: S1, rows: d1, freeze: 4, widths: [8, 24, 11, 10, 8, 24, 14, 26, 14, 7, 7, 9, 10, 10, 10, 12, 12, 12, 8, 60, 20, 9, 80, 80], ...headBand(d1Header.length) }
 
   // Range helpers into tab 1 (effective hours O, effective amount R, employee B, date C, missed E).
   const T1 = sheetRef(S1)
@@ -200,7 +208,9 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
   }
   const m6TotalRows = Object.values(missedTotalsRow)
   m6.push([{ v: 'GRAND TOTAL MISSED SHIFTS', s: 'bold' }, null, { f: m6TotalRows.length ? m6TotalRows.map((r) => `C${r}`).join('+') : '0', s: 'sub' }, { f: m6TotalRows.length ? m6TotalRows.map((r) => `D${r}`).join('+') : '0', s: 'subMoney' }])
-  const sheet6: Sheet = { name: S6, rows: m6, freeze: 4, widths: [28, 30, 12, 12, 110] }
+  const band6 = headBand(5)
+  m6.forEach((row, i) => { if (i >= 4 && row.length >= 5 && row[4] && typeof row[4] === 'object' && (row[4] as any).s === 'wrap') band6.heights[i + 1] = 28 })
+  const sheet6: Sheet = { name: S6, rows: m6, freeze: 4, widths: [28, 30, 12, 12, 120], ...band6 }
   const T6 = sheetRef(S6)
 
   // ============================ TAB 2: Auditor Trail Linked ===================
@@ -273,7 +283,7 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
   })
   const S3_LAST = S3_FIRST + trailWorkers.length - 1
   s3.push([{ v: 'GRAND TOTAL', s: 'bold' }, { f: `SUM(B${S3_FIRST}:B${S3_LAST})`, s: 'numBold' }, { f: `SUM(C${S3_FIRST}:C${S3_LAST})`, s: 'numBold' }, { f: `SUM(D${S3_FIRST}:D${S3_LAST})`, s: 'numBold' }, ...['E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M'].map((c) => ({ f: `SUM(${c}${S3_FIRST}:${c}${S3_LAST})`, s: 'moneyBold' as const }))])
-  const sheet3: Sheet = { name: S3, rows: s3, freeze: 4, widths: [26, 10, 12, 12, 13, 13, 12, 12, 13, 13, 13, 13, 14] }
+  const sheet3: Sheet = { name: S3, rows: s3, freeze: 4, widths: [26, 10, 12, 12, 13, 13, 12, 12, 13, 13, 13, 13, 14], ...headBand(13) }
 
   // ============================ TAB 4: Flagged / Reviewed =====================
   const S4 = 'Flagged - Reviewed'
@@ -288,35 +298,36 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
   relevant.forEach((v) => {
     const sn = parseSnap(v.system_snapshot_json)
     const p = priced.find((x) => (v.subject_source === 'shift' && x.row.id === v.subject_shift_id) || (v.subject_source === 'draft' && x.row.source_draft_id === v.subject_shift_id))
-    s4.push([{ v: v.status, s: v.status === 'OPEN' ? 'flag' : 'text' }, v.id, v.staff_name, v.work_date, p ? `${p.row.start_time}–${p.row.end_time} ${p.row.outlet_venue || ''}` : '',
-      sn?.warningTitle || v.issue_summary, { v: (sn?.humanReason || v.warning_reason || '').replace(/ Do not block staff entry.*$/i, ''), s: 'wrap' },
-      v.system_proposed_payable_hours ?? '', p ? p.claimedH : (v.original_hours ?? ''), v.approved_payable_hours ?? '', (v.decision_type || '').replace(/_/g, ' '), v.reviewed_by_name || '', v.reviewed_at || '', { v: v.decision_reason || '', s: 'wrap' }])
+    s4.push([{ v: v.status, s: v.status === 'OPEN' ? 'flagLine' : 'text' }, { v: v.id, s: 'text' }, v.staff_name, v.work_date, p ? `${p.row.start_time}–${p.row.end_time} ${p.row.outlet_venue || ''}` : '',
+      sn?.warningTitle || v.issue_summary, { v: cleanFlag(sn, v), s: 'text' },
+      v.system_proposed_payable_hours ?? '', p ? p.claimedH : (v.original_hours ?? ''), v.approved_payable_hours ?? '', (v.decision_type || '').replace(/_/g, ' '), v.reviewed_by_name || '', v.reviewed_at || '', { v: v.decision_reason || '', s: 'text' }])
   })
-  const sheet4: Sheet = { name: S4, rows: s4, freeze: 4, widths: [10, 8, 24, 11, 28, 30, 60, 10, 9, 9, 18, 16, 17, 60] }
+  const sheet4: Sheet = { name: S4, rows: s4, freeze: 4, widths: [10, 8, 24, 11, 30, 26, 70, 11, 9, 9, 18, 16, 17, 70], ...headBand(14) }
 
   // ============================ TAB 5: Loans & Deductions =====================
+  // Three blocks share one column grid: A ref · B Employee · C date/type · D date · E reason/week · F–J money · K–M status/notes.
   const S5 = 'Loans & Deductions'
   const s5: Cell[][] = [
     [{ v: 'B&W PRODUCTIONS — LOANS & DEDUCTIONS', s: 'title' }],
     [{ v: `Position as at ${weekEnd}. Amounts actually deducted this week are the yellow cells on Auditor Trail Linked.`, s: 'note' }],
     [],
     [{ v: 'FIXED WEEKLY DEDUCTIONS (active this week)', s: 'bold' }],
-    ['Employee', 'Type', 'Reason', 'Amount per week', 'Effective from', 'Effective to'].map((h) => ({ v: h, s: 'header' as const })),
+    ['', 'Employee', 'Type', 'Effective from', 'Reason', 'Amount per week', 'Effective to'].map((h) => ({ v: h, s: 'header' as const })),
   ]
-  fixed.forEach((f) => s5.push([f.display_name, f.deduction_type, f.reason, { v: Number(f.amount), s: 'money' }, f.effective_from, f.effective_to || 'ongoing']))
-  if (!fixed.length) s5.push(['none'])
-  s5.push([], [{ v: 'ADDITIONAL LOANS', s: 'bold' }], ['Loan #', 'Employee', 'Date given', 'Deductions from', 'Reason', 'Original amount', 'Instalment', 'Frequency', 'Repaid to date', 'Outstanding balance', 'Due this week', 'Status', 'Check'].map((h) => ({ v: h, s: 'header' as const })))
+  fixed.forEach((f) => s5.push(['', f.display_name, f.deduction_type, f.effective_from, f.reason, { v: Number(f.amount), s: 'money' }, f.effective_to || 'ongoing']))
+  if (!fixed.length) s5.push(['', 'none'])
+  s5.push([], [{ v: 'ADDITIONAL LOANS', s: 'bold' }], ['Loan #', 'Employee', 'Date given', 'Deductions from', 'Reason', 'Original amount', 'Instalment', 'Repaid to date', 'Outstanding balance', 'Due this week', 'Frequency', 'Status', 'Check'].map((h) => ({ v: h, s: 'header' as const })))
   loans.forEach((l) => {
     const due = l.status === 'active' && (l.deduction_start_date || l.loan_date) <= weekEnd ? Math.min(Number(l.deduction_amount), Number(l.outstanding_balance)) : 0
     const repaidLedger = reps.filter((r) => r.loan_id === l.id).reduce((a, r) => a + Number(r.amount_deducted || 0), 0)
     const check = l.status === 'paid' && repaidLedger < Number(l.original_amount) - 0.005 ? `Marked PAID but ledger shows only ${fmtR(repaidLedger)} repaid of ${fmtR(Number(l.original_amount))} — please check` : (Math.abs(repaidLedger - Number(l.total_repaid)) > 0.005 ? `Ledger ${fmtR(repaidLedger)} ≠ total repaid ${fmtR(Number(l.total_repaid))}` : '')
-    s5.push([l.id, l.display_name, l.loan_date, l.deduction_start_date || l.loan_date, { v: (l.reason || '').replace(/\s+/g, ' ').slice(0, 160), s: 'wrap' }, { v: Number(l.original_amount), s: 'money' }, { v: Number(l.deduction_amount), s: 'money' }, l.deduction_frequency, { v: Number(l.total_repaid), s: 'money' }, { v: Number(l.outstanding_balance), s: 'moneyBold' }, { v: due, s: 'money' }, l.status, { v: check, s: check ? 'flag' : 'text' }])
+    s5.push(['#' + l.id, l.display_name, l.loan_date, l.deduction_start_date || l.loan_date, (l.reason || '').replace(/\s+/g, ' ').slice(0, 70), { v: Number(l.original_amount), s: 'money' }, { v: Number(l.deduction_amount), s: 'money' }, { v: Number(l.total_repaid), s: 'money' }, { v: Number(l.outstanding_balance), s: 'moneyBold' }, { v: due, s: 'money' }, l.deduction_frequency, l.status, { v: check, s: check ? 'flagLine' : 'text' }])
   })
-  if (!loans.length) s5.push(['none'])
-  s5.push([], [{ v: 'LOAN REPAYMENT HISTORY (all payrolls)', s: 'bold' }], ['Loan #', 'Employee', 'Payroll week', 'Scheduled', 'Deducted', 'Balance before', 'Balance after', 'Result', 'Recorded at'].map((h) => ({ v: h, s: 'header' as const })))
-  reps.forEach((r) => { const l = loans.find((x) => x.id === r.loan_id); s5.push([r.loan_id, l?.display_name || '', `${r.payroll_week_start} to ${r.payroll_week_end}`, { v: Number(r.scheduled_amount), s: 'money' }, { v: Number(r.amount_deducted), s: 'money' }, { v: Number(r.balance_before), s: 'money' }, { v: Number(r.balance_after), s: 'money' }, r.result_status, r.created_at]) })
-  if (!reps.length) s5.push(['none'])
-  const sheet5: Sheet = { name: S5, rows: s5, widths: [10, 24, 14, 14, 50, 13, 11, 11, 13, 14, 12, 10, 50] }
+  if (!loans.length) s5.push(['', 'none'])
+  s5.push([], [{ v: 'LOAN REPAYMENT HISTORY (all payrolls)', s: 'bold' }], ['Loan #', 'Employee', 'Payroll week', 'Recorded at', 'Result', 'Scheduled', 'Deducted', 'Balance before', 'Balance after'].map((h) => ({ v: h, s: 'header' as const })))
+  reps.forEach((r) => { const l = loans.find((x) => x.id === r.loan_id); s5.push(['#' + r.loan_id, l?.display_name || '', `${r.payroll_week_start} → ${r.payroll_week_end}`, (r.created_at || '').slice(0, 16), r.result_status, { v: Number(r.scheduled_amount), s: 'money' }, { v: Number(r.amount_deducted), s: 'money' }, { v: Number(r.balance_before), s: 'money' }, { v: Number(r.balance_after), s: 'money' }]) })
+  if (!reps.length) s5.push(['', 'none'])
+  const sheet5: Sheet = { name: S5, rows: s5, widths: [7, 26, 24, 18, 58, 14, 12, 14, 16, 12, 10, 9, 70], ...headBand(13) }
 
   const bytes = buildXlsx([sheet1, sheet2, sheet3, sheet4, sheet5, sheet6])
   const missedApprovedH = priced.filter((p) => p.missed).reduce((a, p) => a + p.approvedH, 0)
