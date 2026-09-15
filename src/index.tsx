@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { buildPayrollWorkbook } from './payroll-excel'
 
 type Bindings = {
   ANTHROPIC_API_KEY?: string
@@ -6,7 +7,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-15-7'
+const WAGES_UI_VERSION = 'v2026-09-15-8'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4298,6 +4299,7 @@ class AdminCombinedPlacementInjector {
     card.parentNode.insertBefore(mine, card);
     card.style.display='none'; card.setAttribute('data-bw-engine-sheet-hidden','1');
     mine.dataset.bwPlaced='1';
+    try{ var ex=document.querySelector('a[href*="/admin/wages/export.xlsx"]'); if(ex&&!document.getElementById('bw-payroll-xlsx')){ var q=(ex.getAttribute('href').split('?')[1]||''); var b=document.createElement('a'); b.id='bw-payroll-xlsx'; b.className=ex.className; b.href='/wages-admin/payroll.xlsx?'+q; b.textContent='Download Payroll Excel (new)'; b.title='Sat\u2013Fri + Missed Shifts block, approved hours, no bonus columns'; b.style.marginLeft='6px'; ex.parentNode.insertBefore(b, ex.nextSibling); ex.textContent='Export Excel (old rules \u2013 reference only)'; ex.className=ex.className.replace('btn-gold','btn-outline'); } }catch(e){}
     var link=document.createElement('a'); link.href='#'; link.textContent='Show the engine\u2019s original wage sheet (in-week shifts only)'; link.style.cssText='display:inline-block;margin:8px 0;font-size:12px;opacity:.7;color:inherit';
     link.onclick=function(e){ e.preventDefault(); card.style.display=''; link.remove(); };
     mine.appendChild(link);
@@ -4748,6 +4750,29 @@ async function proxyRequest(c: any) {
   if (needsWagesUi) rewriter.on('body', new WagesUiInjector())
   return rewriter.transform(baseResponse)
 }
+
+// ---------------------------------------------------------------------------
+// B&W PAYROLL EXCEL (owner spec 2026-09-15). Built from the database by the
+// proxy: Sat…Fri + block 6 Missed Shifts (approved hours), no bonus columns,
+// six tabs, formulas linked so a change on Wage Detail flows through. The
+// engine's own /admin/wages/export.xlsx is untouched. Admin cookie required.
+app.get('/wages-admin/payroll.xlsx', async (c) => {
+  const db = c.env?.DB
+  const admin = await adminUserFromCookie(c.req.raw.headers.get('cookie') || '')
+  if (!db) return c.text('no database', 500)
+  if (!admin) return new Response(null, { status: 302, headers: { location: '/login?next=' + encodeURIComponent('/admin/wages') } })
+  const fromRaw = (c.req.query('from') || '').replace(/\//g, '-')
+  const fromDate = parseProxyIsoDate(fromRaw)
+  const weekStart = fromDate ? formatProxyIsoDate(proxyStartOfPayrollWeek(fromDate)) : currentProxyPayrollWeekStart()
+  const weekEnd = proxyEndOfPayrollWeek(weekStart)
+  try {
+    const out = await buildPayrollWorkbook({ db, weekStart, weekEnd, ownerPayKind, ownerPayForShift, timeToMinutes })
+    if (c.req.query('check') === '1') return c.json({ weekStart, weekEnd, ...out.checks })
+    return new Response(out.bytes, { status: 200, headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'content-disposition': `attachment; filename="${out.filename}"`, 'cache-control': 'no-store' } })
+  } catch (err) {
+    return c.text('Could not build the payroll Excel: ' + describeProxyError(err), 500)
+  }
+})
 
 app.get('/health', (c) => c.json({ status: 'ok', mode: 'safe-proxy', origin: ORIGIN }))
 // Admin page self-report: the /admin/wages hide script posts the real DOM
