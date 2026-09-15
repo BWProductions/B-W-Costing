@@ -6,7 +6,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-15-6'
+const WAGES_UI_VERSION = 'v2026-09-15-7'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3631,13 +3631,40 @@ async function applyOwnerRatesToFinalSubmission(env: Bindings | undefined, draft
   const dateIso = fresh?.work_date || row.work_date
   const kind = ownerPayKind(row.staff_id, row.work_type, [row.outlet_venue, row.event_name, row.work_description].join(' '), row.payroll_rule)
   const priced = ownerPayForShift(dateIso, row.start_time, row.end_time, kind)
-  if (!priced) return // gardener block / fixed weekly: engine amount stands
+  if (!priced) {
+    // Owner 2026-09-15: "warehouse" only in the wording → not clearly warehouse-only.
+    // Do not decide the rate; open a Review for Bernie (Warehouse or Event/Venue).
+    if (kind === 'warehouse_or_event') await openWarehouseOrEventReview(env, { id: row.id, staff_id: row.staff_id, work_date: dateIso, start_time: row.start_time, end_time: row.end_time, hours_worked: row.hours_worked, work_type: row.work_type, outlet_venue: row.outlet_venue, event_name: row.event_name, work_description: row.work_description, amount: before0(row) })
+    return // gardener block / fixed weekly / undecided: engine amount stands
+  }
   const before = Number(row.gross_wage ?? row.total_amount ?? 0)
   await db.prepare(`UPDATE wage_shifts SET total_amount = ?, gross_wage = ?, hourly_rate_snapshot = ?, calculation_version = ?,
         payroll_note = CASE WHEN COALESCE(payroll_note,'') = '' THEN ? ELSE payroll_note || ' | ' || ? END
       WHERE id = ? AND staff_id = ?`)
     .bind(priced.amount, priced.amount, priced.hourlyRate, OWNER_RATE_RULES_VERSION, 'Rate rules 2026-09-15: ' + priced.breakdown, 'Rate rules 2026-09-15: ' + priced.breakdown, row.id, staffId).run()
   await captureWagesDebug(env, { request_path: '/wages/drafts/' + draftId + '/final-submit (owner rates)', request_method: 'POST', original_payload_json: JSON.stringify({ shift_id: row.id, engine_amount: before, kind }), rewritten_payload_json: JSON.stringify({ amount: priced.amount, rate: priced.hourlyRate, breakdown: priced.breakdown }), rewrite_applied: 1, response_status: 200, response_location: '', response_error_text: '' })
+}
+
+function before0(row: { gross_wage: number, total_amount: number }) { return Number(row.gross_wage ?? row.total_amount ?? 0) }
+
+// Owner 2026-09-15: a paid row whose wording says "warehouse" but whose work type is not
+// Warehouse goes to Review. Bernie chooses Warehouse or Event/Venue; only then is the
+// weekday rate applied (see /wages-admin/rate-choice). Uses the engine's own review table
+// and vocabulary (warning_kind possible_duplicate_manual_check = manual check), so it shows
+// in the same Review column as every other review. Idempotent per paid shift.
+async function openWarehouseOrEventReview(env: Bindings | undefined, r: { id: number, staff_id: number, work_date: string, start_time: string, end_time: string, hours_worked: number, work_type: string, outlet_venue: string, event_name: string, work_description: string, amount: number }) {
+  const db = env?.DB
+  if (!db) return
+  const staff = await db.prepare(`SELECT display_name FROM wage_staff WHERE id = ?`).bind(r.staff_id).first<{ display_name: string }>()
+  const name = staff?.display_name || ('staff ' + r.staff_id)
+  const key = 'rate_choice_warehouse_or_event|shift:' + r.id
+  const reason = 'RATE CHOICE NEEDED: the wording mentions "warehouse" but the work type is ' + (r.work_type || 'Normal') + ', so it is not clearly warehouse-only. Bernie must choose Warehouse (R81,25/h weekday) or Event/Venue (R750 fixed 07–16 + R90/h outside) before the rate is decided. Until then the shift stays at the engine amount.'
+  const snapshot = JSON.stringify({ shiftId: r.id, source: 'shift', staffId: r.staff_id, employee: name, workDate: r.work_date, venue: r.outlet_venue, eventName: r.event_name, workType: r.work_type, workDescription: r.work_description, startTime: r.start_time, endTime: r.end_time, hours: r.hours_worked, amountNow: r.amount })
+  const system = JSON.stringify({ comparisonLabel: 'rate choice', warningTitle: 'Rate choice: Warehouse or Event/Venue', humanReason: reason, rateChoice: 1, staffBlocking: 0, autoDuplicate: 0, conflictDetected: 0 })
+  await db.prepare(`INSERT INTO wage_payroll_reviews (issue_key, status, warning_kind, severity, staff_id, staff_name, work_date, payroll_week_start, subject_source, subject_shift_id, compared_source, compared_shift_id, warning_reason, issue_summary, original_hours, facts_hash, subject_snapshot_json, system_snapshot_json)
+      SELECT ?, 'OPEN', 'possible_duplicate_manual_check', 'red', ?, ?, ?, (SELECT payroll_week_start FROM wage_shifts WHERE id = ?), 'shift', ?, 'shift', NULL, ?, ?, ?, ?, ?, ?
+      WHERE NOT EXISTS (SELECT 1 FROM wage_payroll_reviews WHERE issue_key = ?)`)
+    .bind(key, r.staff_id, name, r.work_date, r.id, r.id, reason, 'Rate choice needed — ' + name + ' — ' + r.work_date + ' — Warehouse or Event/Venue?', r.hours_worked, key, snapshot, system, key).run()
 }
 
 async function staffIdFromWageSession(env: Bindings | undefined, cookieHeader: string) {
@@ -3751,7 +3778,10 @@ function subtractCovered(s: number, e: number, covered: Array<[number, number]>)
 //   Never the old R375 half day; never the old ×1.2 / ×1.5 weekend factors.
 // ---------------------------------------------------------------------------
 const OWNER_RATE_RULES_VERSION = 4
-type OwnerPayKind = 'event' | 'warehouse' | 'musicbus' | 'petrus' | 'gardener' | 'fixed_weekly'
+// 'warehouse_or_event' (owner 2026-09-15): the work TYPE is not Warehouse but the wording
+// mentions "warehouse" — not clearly warehouse-only, so Bernie must choose Warehouse or
+// Event/Venue in Review before the weekday rate is decided (engine amount stands meanwhile).
+type OwnerPayKind = 'event' | 'warehouse' | 'warehouse_or_event' | 'musicbus' | 'petrus' | 'gardener' | 'fixed_weekly'
 function ownerPayKind(staffId: number, workType: string, wording: string, payrollRule: string): OwnerPayKind {
   if ((payrollRule || '') === 'fixed_weekly') return 'fixed_weekly'
   const wt = (workType || '').trim()
@@ -3760,9 +3790,11 @@ function ownerPayKind(staffId: number, workType: string, wording: string, payrol
   // Gardeners: only their House / House/Garden block keeps the gardener rate; the Team
   // block (Warehouse Team / Team Assistance) is general staff for that day.
   if ((staffId === 1 || staffId === 2) && /house|garden/i.test(wt) && !/team/i.test(wt)) return 'gardener'
-  if (/warehouse/i.test(wt) || /warehouse/i.test(wording || '')) return 'warehouse'
+  if (/warehouse/i.test(wt)) return 'warehouse' // work type chosen as Warehouse (Warehouse Team) → clearly warehouse
+  if (/warehouse/i.test(wording || '')) return 'warehouse_or_event' // wording only → Bernie decides
   return 'event'
 }
+function ownerIsWeekday(dateIso: string) { const d = parseProxyIsoDate(dateIso); return !!d && d.getUTCDay() !== 0 && d.getUTCDay() !== 6 }
 // Price ONE shift under the owner rules. Returns null when the engine amount must be kept.
 // Owner (2026-09-15): use the ACTUAL day the hours were worked — a shift that passes
 // midnight is priced in two parts (before midnight = start day's rate, after midnight =
@@ -3772,6 +3804,13 @@ function ownerPayForShift(dateIso: string, startTime: string, endTime: string, k
   const d0 = parseProxyIsoDate(dateIso); const s0 = timeToMinutes(startTime); const e0 = timeToMinutes(endTime)
   if (!d0 || s0 === null || e0 === null) return null
   const end0 = e0 <= s0 ? e0 + 1440 : e0
+  if (kind === 'warehouse_or_event') {
+    // Saturday/Sunday general rates are the same for warehouse and event → no choice needed.
+    // Any weekday minutes (incl. after midnight) → undecided: return null so Review is opened.
+    const nextD = new Date(d0.getTime()); nextD.setUTCDate(nextD.getUTCDate() + 1)
+    if (ownerIsWeekday(dateIso) || (end0 > 1440 && ownerIsWeekday(nextD.toISOString().slice(0, 10)))) return null
+    return ownerPayForShift(dateIso, startTime, endTime, 'event')
+  }
   if (end0 > 1440) {
     const next = new Date(d0.getTime()); next.setUTCDate(next.getUTCDate() + 1)
     const nextIso = next.toISOString().slice(0, 10)
@@ -3858,7 +3897,7 @@ function ruleBreakdownText(r: RuleDayResult) {
 
 type AdminPaidRow = { id: number, staff_id: number, display_name: string, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, work_type: string, outlet_venue: string, area: string, event_name: string, work_description: string, payroll_week_start: string | null, missed_previous_week: number, overnight_confirmed: number, source_draft_id: number | null, manager_update_reason: string | null }
 type AdminDraftRow = { id: number, staff_id: number, display_name: string, work_date: string, start_time: string, end_time: string, outlet_venue: string, work_type: string, work_description: string, status: string, missed_previous_week: number }
-type AdminReviewRow = { id: number, status: string, severity: string, staff_id: number, work_date: string, subject_source: string, subject_shift_id: number, compared_shift_id: number | null, original_hours: number | null, previously_paid_hours: number | null, system_proposed_payable_hours: number | null, approved_payable_hours: number | null, decision_type: string | null, decision_reason: string | null, reviewed_by_name: string | null, issue_summary: string, warning_reason: string, system_snapshot_json: string | null }
+type AdminReviewRow = { id: number, issue_key?: string, status: string, severity: string, staff_id: number, work_date: string, subject_source: string, subject_shift_id: number, compared_shift_id: number | null, original_hours: number | null, previously_paid_hours: number | null, system_proposed_payable_hours: number | null, approved_payable_hours: number | null, decision_type: string | null, decision_reason: string | null, reviewed_by_name: string | null, issue_summary: string, warning_reason: string, system_snapshot_json: string | null }
 
 // Combined per-person wage sheet (2026-09-14, owner's spec): for the payroll
 // week in the page filter, ONE section per worker containing every paid shift
@@ -3917,13 +3956,21 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   const ratesRes = await db.prepare(`SELECT staff_id, work_type, hourly_rate FROM wage_work_rates WHERE active = 1 AND staff_id IN (${ph})`).bind(...staffIds).all()
   const workRates: Record<string, number> = {}
   for (const r of (ratesRes.results || []) as Array<{ staff_id: number, work_type: string, hourly_rate: number }>) workRates[r.staff_id + '|' + r.work_type] = Number(r.hourly_rate || 0)
-  const ruleSegmentFor = (staffId: number, workType: string, start: string, end: string, wording = ''): RuleSegment => {
+  // Bernie's recorded Warehouse / Event/Venue choices (review key rate_choice_warehouse_or_event|shift:ID).
+  const rateChoiceByShift: Record<number, OwnerPayKind> = {}
+  for (const v of reviewsAll) {
+    const m = /^rate_choice_warehouse_or_event\|shift:(\d+)$/.exec(v.issue_key || '')
+    if (m && v.status === 'RESOLVED') rateChoiceByShift[Number(m[1])] = /warehouse/i.test(v.decision_reason || '') ? 'warehouse' : 'event'
+  }
+  const ruleSegmentFor = (staffId: number, workType: string, start: string, end: string, wording = '', shiftId = 0): RuleSegment => {
     const wt = workType || ''
-    const kind = ownerPayKind(staffId, wt, wording, staffBase[staffId]?.payroll_rule || 'hourly')
+    let kind = ownerPayKind(staffId, wt, wording, staffBase[staffId]?.payroll_rule || 'hourly')
+    if (kind === 'warehouse_or_event' && shiftId && rateChoiceByShift[shiftId]) kind = rateChoiceByShift[shiftId]
     if (kind === 'gardener') return { start, end, rate: workRates[staffId + '|' + wt] ?? 62.5, kind: 'ownrate', label: wt }
     if (kind === 'musicbus') return { start, end, rate: 120, kind: 'musicbus', label: wt }
     if (kind === 'petrus') return { start, end, rate: 81.25, kind: 'petrus', label: wt }
     if (kind === 'warehouse') return { start, end, rate: 81.25, kind: 'warehouse', label: wt }
+    if (kind === 'warehouse_or_event') return { start, end, rate: 90, kind: 'event', label: (wt || 'Normal') + ' – rate choice pending (Warehouse or Event/Venue)' }
     return { start, end, rate: 90, kind: 'event', label: wt }
   }
   const ruleApplies = (staffId: number) => (staffBase[staffId]?.payroll_rule || 'hourly') !== 'fixed_weekly'
@@ -3935,6 +3982,18 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
 
   function decisionForm(v: AdminReviewRow, snap: any) {
     if (v.status !== 'OPEN') return ''
+    if (snap?.rateChoice) {
+      return `<form method="post" action="/wages-admin/rate-choice" class="bw-review-decide" style="margin-top:6px;padding:8px;border-radius:8px;background:rgba(255,255,255,.05);font-size:12px">
+      <input type="hidden" name="review_id" value="${v.id}">
+      <input type="hidden" name="return_to" value="__RETURN__">
+      <div style="margin-bottom:6px"><strong>Bernie to choose the rate for this shift:</strong></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button type="submit" name="choice" value="warehouse" style="padding:5px 10px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer">Warehouse (R81,25/h)</button>
+        <button type="submit" name="choice" value="event" style="padding:5px 10px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer">Event/Venue (R750 fixed 07–16 + R90/h outside)</button>
+      </div>
+      <div style="opacity:.6;margin-top:4px">Your choice is recorded with your name on review #${v.id} and the shift's amount is set to the chosen rule (Sat/Sun hours are the same either way). Nothing else changes.</div>
+    </form>`
+    }
     const rec = v.system_proposed_payable_hours
     const recReason = snap?.recommendedReason || ''
     const orig = v.original_hours
@@ -3966,7 +4025,9 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         ? `<div style="margin-top:3px"><strong>Recommended payable: ${Number(v.system_proposed_payable_hours).toFixed(2)} h</strong>${snap?.recommendedStart ? ' (' + escapeHtmlText(snap.recommendedStart) + '–' + escapeHtmlText(snap.recommendedEnd) + ')' : ''}${v.previously_paid_hours ? ' · already paid ' + Number(v.previously_paid_hours).toFixed(2) + ' h that day' : ''}</div>`
         : ''
       const reason = snap?.recommendedReason ? `<div style="margin-top:2px;opacity:.85">Reason to record: “${escapeHtmlText(snap.recommendedReason)}”</div>` : ''
-      const decided = v.approved_payable_hours !== null && v.approved_payable_hours !== undefined
+      const decided = snap?.rateChoice && v.status !== 'OPEN'
+        ? `<div style="margin-top:3px;color:#86efac"><strong>Decided: ${escapeHtmlText(v.decision_reason || v.status)}</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''}</div>`
+        : v.approved_payable_hours !== null && v.approved_payable_hours !== undefined
         ? `<div style="margin-top:3px;color:#86efac"><strong>Decided: ${Number(v.approved_payable_hours).toFixed(2)} h</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''}${v.decision_reason ? ' — ' + escapeHtmlText(v.decision_reason) : ''}</div>`
         : (v.status !== 'OPEN' && v.decision_reason ? `<div style="margin-top:3px;color:#86efac"><strong>${escapeHtmlText(v.status)}</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''} — ${escapeHtmlText(v.decision_reason)}</div>` : '')
       const summary = openRed ? '' : `<div style="opacity:.8">${escapeHtmlText((v.issue_summary || '').replace(/^Manual overlap review — [^—]+— /, 'Overlap check — '))}</div>`
@@ -4026,7 +4087,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       for (const date of dates) {
         const dayRows = rows.filter((r) => r.work_date === date)
         const priorRows = date < weekStart ? prior.filter((p) => p.staff_id === sid && p.work_date === date) : []
-        const segs = [...dayRows.map((r) => ruleSegmentFor(sid, r.work_type, r.start_time, r.end_time, [r.outlet_venue, r.event_name, r.work_description].join(' '))), ...priorRows.map((p) => ruleSegmentFor(sid, p.work_type, p.start_time, p.end_time, p.outlet_venue))]
+        const segs = [...dayRows.map((r) => ruleSegmentFor(sid, r.work_type, r.start_time, r.end_time, [r.outlet_venue, r.event_name, r.work_description].join(' '), r.id)), ...priorRows.map((p) => ruleSegmentFor(sid, p.work_type, p.start_time, p.end_time, p.outlet_venue))]
         const rule = computeRuleDay(date, segs)
         const paidTotal = dayRows.reduce((a, r) => a + Number(r.amount || 0), 0) + priorRows.reduce((a, p) => a + Number(p.amount || 0), 0)
         const diff = Math.round((paidTotal - rule.amount) * 100) / 100
@@ -4122,7 +4183,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       try { snap = decided.system_snapshot_json ? JSON.parse(decided.system_snapshot_json) : null } catch (err) {}
       const st = (decided as any).approved_start_time || snap?.recommendedStart, en = (decided as any).approved_end_time || snap?.recommendedEnd
       if (st && en && timeToMinutes(st) !== null && timeToMinutes(en) !== null && ruleApplies(sid)) {
-        agreedA += computeRuleDay(r.work_date, [ruleSegmentFor(sid, r.work_type, st, en, [r.outlet_venue, r.event_name, r.work_description].join(' '))]).amount
+        agreedA += computeRuleDay(r.work_date, [ruleSegmentFor(sid, r.work_type, st, en, [r.outlet_venue, r.event_name, r.work_description].join(' '), r.id)]).amount
       } else if (paidH > 0) {
         agreedA += Math.round(paidA * (ah / paidH) * 100) / 100; agreedApprox = true
       }
@@ -4740,6 +4801,47 @@ app.get('/wages-admin/edit-draft/:id', async (c) => {
   const headers = new Headers({ location: '/wages/drafts/' + draftId + '/edit?bw_staff_id=' + d.staff_id + '&office=1', 'cache-control': 'no-store' })
   headers.append('set-cookie', 'bw_wage_session=' + token + '; Path=/wages; HttpOnly; SameSite=Lax; Max-Age=7200; Secure')
   return new Response(null, { status: 302, headers })
+})
+
+// Owner 2026-09-15: Bernie chooses Warehouse or Event/Venue for a paid shift whose wording
+// said "warehouse" but whose work type was not Warehouse. Records the choice on the review
+// and re-prices ONLY that shift under the chosen rule (rate rules v4). Nothing else changes.
+app.post('/wages-admin/rate-choice', async (c) => {
+  const db = c.env?.DB
+  const admin = await adminUserFromCookie(c.req.raw.headers.get('cookie') || '')
+  const back = (v: string) => new Response(null, { status: 302, headers: { location: v, 'cache-control': 'no-store' } })
+  if (!db) return c.text('no database', 500)
+  if (!admin) return back('/login?next=' + encodeURIComponent('/admin/wages'))
+  let form: FormData
+  try { form = await c.req.raw.formData() } catch (err) { return back('/admin/wages?error=' + encodeURIComponent('Could not read the rate choice form.')) }
+  const reviewId = Number(normalizeProxyFieldValue(form.get('review_id')))
+  const choice = normalizeProxyFieldValue(form.get('choice'))
+  const returnTo = normalizeProxyFieldValue(form.get('return_to')) || '/admin/wages'
+  const safeReturn = /^\/admin\/wages(\?|$)/.test(returnTo) ? returnTo : '/admin/wages'
+  const sep = safeReturn.includes('?') ? '&' : '?'
+  if (!reviewId || !['warehouse', 'event'].includes(choice)) return back(safeReturn + sep + 'error=' + encodeURIComponent('Invalid rate choice.'))
+  try {
+    const rv = await db.prepare(`SELECT id, status, issue_key, subject_shift_id, staff_id FROM wage_payroll_reviews WHERE id = ?`).bind(reviewId).first<{ id: number, status: string, issue_key: string, subject_shift_id: number, staff_id: number }>()
+    if (!rv || !/^rate_choice_warehouse_or_event\|shift:/.test(rv.issue_key || '')) return back(safeReturn + sep + 'error=' + encodeURIComponent('Review #' + reviewId + ' is not a rate-choice review.'))
+    if (rv.status !== 'OPEN') return back(safeReturn + sep + 'msg=' + encodeURIComponent('Review #' + reviewId + ' was already ' + rv.status + '.'))
+    const row = await db.prepare(`SELECT id, staff_id, work_date, start_time, end_time, total_amount, gross_wage FROM wage_shifts WHERE id = ? AND staff_id = ?`).bind(rv.subject_shift_id, rv.staff_id).first<{ id: number, staff_id: number, work_date: string, start_time: string, end_time: string, total_amount: number, gross_wage: number }>()
+    if (!row) return back(safeReturn + sep + 'error=' + encodeURIComponent('Paid shift #' + rv.subject_shift_id + ' for review #' + reviewId + ' no longer exists.'))
+    const kind: OwnerPayKind = choice === 'warehouse' ? 'warehouse' : 'event'
+    const priced = ownerPayForShift(row.work_date, row.start_time, row.end_time, kind)
+    if (!priced) return back(safeReturn + sep + 'error=' + encodeURIComponent('Could not price shift #' + row.id + ' — times unreadable.'))
+    const before = before0(row)
+    const label = choice === 'warehouse' ? 'Warehouse' : 'Event/Venue'
+    const note = 'Rate rules 2026-09-15: ' + label + ' chosen by ' + admin.name + ' (review #' + reviewId + ', was ' + fmtRand(before) + '): ' + priced.breakdown
+    await db.prepare(`UPDATE wage_shifts SET total_amount = ?, gross_wage = ?, hourly_rate_snapshot = ?, calculation_version = ?,
+          payroll_note = CASE WHEN COALESCE(payroll_note,'') = '' THEN ? ELSE payroll_note || ' | ' || ? END, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND staff_id = ?`).bind(priced.amount, priced.amount, priced.hourlyRate, OWNER_RATE_RULES_VERSION, note, note, row.id, row.staff_id).run()
+    await db.prepare(`UPDATE wage_payroll_reviews SET status = 'RESOLVED', decision_type = 'approve_original', decision_reason = ?, reviewed_by_user_id = ?, reviewed_by_name = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'OPEN'`)
+      .bind(label + ' rate chosen — shift #' + row.id + ' ' + fmtRand(before) + ' → ' + fmtRand(priced.amount) + ' (' + priced.breakdown + ')', admin.id || null, admin.name, reviewId).run()
+    await captureWagesDebug(c.env, { request_path: '/wages-admin/rate-choice', request_method: 'POST', original_payload_json: JSON.stringify({ review_id: reviewId, shift_id: row.id, choice, before, by: admin.name }), rewritten_payload_json: JSON.stringify({ amount: priced.amount, rate: priced.hourlyRate, breakdown: priced.breakdown }), rewrite_applied: 1, response_status: 302, response_location: safeReturn, response_error_text: '' })
+    return back(safeReturn + sep + 'msg=' + encodeURIComponent('Review #' + reviewId + ': ' + label + ' chosen by ' + admin.name + '. Shift #' + row.id + ' ' + fmtRand(before) + ' → ' + fmtRand(priced.amount) + ' (' + priced.breakdown + ').') + '#bw-review-' + reviewId)
+  } catch (err) {
+    return back(safeReturn + sep + 'error=' + encodeURIComponent('Could not record the rate choice: ' + describeProxyError(err)))
+  }
 })
 
 app.post('/wages-admin/review-decision', async (c) => {
