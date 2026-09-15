@@ -6,7 +6,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-15-2'
+const WAGES_UI_VERSION = 'v2026-09-15-3'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -2028,8 +2028,29 @@ label[for="bw-missed-work-date"] {
       setRequired(startField, 'StartTime', '')
       setRequired(endField, 'EndTime', '')
 
-      workDateField.removeAttribute('max')
-      workDateField.removeAttribute('min')
+      // Owner rule (2026-09-15): calendar open from LAST payroll's Saturday to THIS payroll's Friday.
+      const windowStart = new Date(startOfPayrollWeek(utcToday()).getTime()); windowStart.setUTCDate(windowStart.getUTCDate() - 7)
+      const windowEnd = new Date(startOfPayrollWeek(utcToday()).getTime()); windowEnd.setUTCDate(windowEnd.getUTCDate() + 6)
+      workDateField.setAttribute('min', formatForInput(windowStart, false))
+      workDateField.setAttribute('max', formatForInput(windowEnd, false))
+      if (once(workDateField, 'WindowGuard')) {
+        const check = () => {
+          const v = normalize(workDateField.value || '')
+          const d = parseFlexibleDate(v)
+          let msg = ''
+          if (d && d.getTime() < windowStart.getTime()) msg = 'Older than one week — this date can no longer be claimed. Only ' + formatForInput(windowStart, false) + ' to ' + formatForInput(windowEnd, false) + ' can be captured. Please speak to the office.'
+          else if (d && d.getTime() > windowEnd.getTime()) msg = 'That date is in the next payroll. Only ' + formatForInput(windowStart, false) + ' to ' + formatForInput(windowEnd, false) + ' can be captured now.'
+          workDateField.setCustomValidity(msg)
+          let note = workDateField.parentElement && workDateField.parentElement.querySelector('.bw-window-note')
+          if (msg) {
+            if (!note) { note = document.createElement('div'); note.className = 'bw-window-note'; note.style.cssText = 'margin-top:6px;padding:8px 10px;border-radius:8px;background:#fdecec;color:#7f1d1d;font-weight:700;font-size:13px'; workDateField.insertAdjacentElement('afterend', note) }
+            note.textContent = msg
+          } else if (note) note.remove()
+        }
+        workDateField.addEventListener('input', check)
+        workDateField.addEventListener('change', check)
+        check()
+      }
 
       const claimWeekHidden = ensureHiddenField(form, 'payroll_week_start')
       const previousPayrollHidden = ensureHiddenField(form, 'missed_previous_week')
@@ -2239,6 +2260,23 @@ label[for="bw-missed-work-date"] {
       if (!finalButton) return
       // Only drafts can be final-submitted: skip cards already "Submitted — locked".
       if (Array.from(shift.querySelectorAll('.pill')).some((p) => /submitted\\s*[—-]\\s*locked/i.test(elementText(p)))) return
+      // Owner rule (2026-09-15): drafts older than last payroll's Saturday can never be
+      // final-submitted. Mark them and leave them out of Select all.
+      const dateNode = Array.from(shift.querySelectorAll('.muted')).find((n) => /^\\d{4}-\\d{2}-\\d{2}\\s*·/.test(elementText(n)))
+      const cardDate = dateNode ? parseFlexibleDate(elementText(dateNode).slice(0, 10)) : null
+      const winStart = new Date(startOfPayrollWeek(utcToday()).getTime()); winStart.setUTCDate(winStart.getUTCDate() - 7)
+      const winEnd = new Date(startOfPayrollWeek(utcToday()).getTime()); winEnd.setUTCDate(winEnd.getUTCDate() + 6)
+      if (cardDate && (cardDate.getTime() < winStart.getTime() || cardDate.getTime() > winEnd.getTime())) {
+        if (!shift.querySelector('.bw-too-old')) {
+          const tag = document.createElement('div')
+          tag.className = 'pill bw-too-old'
+          tag.style.cssText = 'background:#7f1d1d;color:#fff;font-weight:800'
+          tag.textContent = cardDate.getTime() < winStart.getTime() ? 'OLDER THAN ONE WEEK — cannot be final-submitted. Delete it or speak to the office.' : 'NEXT PAYROLL — capture it from Saturday.'
+          shift.insertBefore(tag, shift.firstChild)
+          Array.from(shift.querySelectorAll('a, button')).forEach((el) => { if (/final submit|final submission|edit/i.test(elementText(el)) && el instanceof HTMLElement) el.style.display = 'none' })
+        }
+        return
+      }
       let checkbox = shift.querySelector('.bw-shift-select input[type="checkbox"]')
       if (!checkbox) {
         const wrapper = document.createElement('label')
@@ -2783,6 +2821,23 @@ function rewriteMissedShiftObjectPayload(payload: unknown, upstreamUrl: URL) {
 // work_date (seen on the edit page, where the original hidden field sat inside
 // a block the enhancer removes) rebuild it from the calendar fields so upstream
 // never answers "Choose a valid work date." for a shift the worker did date.
+// Owner rule (2026-09-15): the worker calendar is open from LAST payroll's Saturday
+// up to THIS payroll's Friday. Earlier dates can no longer be claimed; later dates
+// belong to the next payroll.
+function proxyAllowedWorkDateWindow() {
+  const thisSat = currentProxyPayrollWeekStart()
+  const d = parseProxyIsoDate(thisSat)!
+  const lastSat = new Date(d.getTime()); lastSat.setUTCDate(lastSat.getUTCDate() - 7)
+  return { from: formatProxyIsoDate(lastSat), to: proxyEndOfPayrollWeek(thisSat) }
+}
+function proxyWorkDateWindowError(iso: string): string | null {
+  if (!parseProxyIsoDate(iso)) return null
+  const w = proxyAllowedWorkDateWindow()
+  if (iso < w.from) return `That date (${proxyLongDate(iso)}) is older than one week and can no longer be claimed. Only ${proxyLongDate(w.from)} to ${proxyLongDate(w.to)} can be captured. Please speak to the office.`
+  if (iso > w.to) return `That date (${proxyLongDate(iso)}) is in the next payroll. Please capture it from this Saturday onwards. Only ${proxyLongDate(w.from)} to ${proxyLongDate(w.to)} can be captured now.`
+  return null
+}
+
 function ensureWorkDateOnSubmission(formData: FormData) {
   const current = normalizeProxyFieldValue(formData.get('work_date'))
   if (parseProxyIsoDate(current)) return false
@@ -4278,6 +4333,41 @@ async function proxyRequest(c: any) {
     } catch (err) {}
   }
   const finalSubmitMatch = method === 'POST' ? incomingUrl.pathname.match(/^\/wages\/drafts\/(\d+)\/final-submit\/?$/) : null
+
+  // Calendar window guard (owner rule 2026-09-15): last payroll's Saturday → this payroll's Friday.
+  if (method === 'POST' && c.env?.DB) {
+    const saveMatch = incomingUrl.pathname.match(/^\/wages\/drafts(?:\/(\d+))?\/?$/)
+    if (saveMatch && /application\/x-www-form-urlencoded|multipart\/form-data/i.test(c.req.raw.headers.get('content-type') || '')) {
+      try {
+        const fd = await c.req.raw.clone().formData()
+        const iso = normalizeProxyFieldValue(fd.get('bw_actual_work_date')) || normalizeProxyFieldValue(fd.get('bw_visible_work_date')) || normalizeProxyFieldValue(fd.get('work_date'))
+        const err = proxyWorkDateWindowError(iso)
+        if (err) {
+          await captureWagesDebug(c.env, { request_path: incomingUrl.pathname, request_method: 'POST', original_payload_json: JSON.stringify({ work_date: iso }), rewritten_payload_json: '{}', rewrite_applied: 1, response_status: 302, response_location: 'window-refused', response_error_text: err })
+          const back = saveMatch[1] ? '/wages/drafts/' + saveMatch[1] + '/edit' : '/wages/shift/new'
+          return new Response(null, { status: 302, headers: { location: back + '?error=' + encodeURIComponent(err), 'cache-control': 'no-store' } })
+        }
+      } catch (err) {}
+    }
+    if (finalSubmitMatch) {
+      try {
+        const staffId = await staffIdFromWageSession(c.env, c.req.raw.headers.get('cookie') || '')
+        const d = staffId ? await c.env.DB.prepare(`SELECT work_date, status FROM wage_shift_drafts WHERE id = ? AND staff_id = ?`).bind(Number(finalSubmitMatch[1]), staffId).first<{ work_date: string, status: string }>() : null
+        // A draft parked on the Saturday by a concurrent request is fine; use our real-date table when present.
+        let iso = d?.work_date || ''
+        if (d && d.status === 'draft') {
+          await ensureRealDateTable(c.env)
+          const rd = await c.env.DB.prepare(`SELECT real_date FROM wage_draft_real_dates WHERE draft_id = ?`).bind(Number(finalSubmitMatch[1])).first<{ real_date: string }>()
+          if (rd?.real_date) iso = rd.real_date
+        }
+        const err = d ? proxyWorkDateWindowError(iso) : null
+        if (err) {
+          await captureWagesDebug(c.env, { request_path: incomingUrl.pathname, request_method: 'POST', original_payload_json: JSON.stringify({ work_date: iso }), rewritten_payload_json: '{}', rewrite_applied: 1, response_status: 302, response_location: 'window-refused', response_error_text: err })
+          return new Response(null, { status: 302, headers: { location: '/wages/me?error=' + encodeURIComponent('Not final-submitted: ' + err), 'cache-control': 'no-store' } })
+        }
+      } catch (err) {}
+    }
+  }
 
   // A draft stored with its REAL (previous-week) date would be rejected by
   // upstream's lock check on final-check / final-submit / edit. Park it on the
