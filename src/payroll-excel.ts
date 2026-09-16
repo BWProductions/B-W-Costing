@@ -177,7 +177,7 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
   const S6 = 'Missed Shifts'
   const m6: Cell[][] = [
     [{ v: 'B&W PRODUCTIONS — MISSED SHIFTS (previous payroll, paid in this payroll)', s: 'title' }],
-    [{ v: `Payroll week ${weekStart} to ${weekEnd}. Approved hours = the green review decision (claimed hours where no review was needed). Linked to Wage Detail Linked; block 6 on the Auditor Trail pulls each worker's total from here.`, s: 'note' }],
+    [{ v: `Payroll week ${weekStart} to ${weekEnd}. Approved hours = the green review decision (claimed hours where no review was needed). YELLOW hours cells can be overtyped — the Amount next to them recalculates automatically and flows to block 6 on the Auditor Trail and to the Summary.`, s: 'note' }],
     [],
     ['Worker', 'Missed shift', 'Approved hours', 'Amount', 'Notes'].map((h) => ({ v: h, s: 'header' as const })),
   ]
@@ -198,7 +198,8 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     const first = m6.length + 1
     mine.forEach((p) => {
       const rn = rowIndexByShift[p.row.id]
-      m6.push([name, `${longDate(p.row.work_date)}  ${p.row.start_time}–${p.row.end_time}`, { f: `${T1}!O${rn}`, s: 'numBold' }, { f: `${T1}!R${rn}`, s: 'money' }, { v: noteFor(p), s: 'wrap' }])
+      const r6 = m6.length + 1
+      m6.push([name, `${longDate(p.row.work_date)}  ${p.row.start_time}–${p.row.end_time}`, { f: `${T1}!O${rn}`, s: 'editNum' }, { f: `IF(${T1}!O${rn}=0,IF(C${r6}>0,ROUND(C${r6}*${p.rate || 90},2),0),ROUND(${T1}!R${rn}*C${r6}/${T1}!O${rn},2))`, s: 'money' }, { v: noteFor(p), s: 'wrap' }])
     })
     const last = m6.length
     const totalRow = m6.length + 1
@@ -241,11 +242,17 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     const row: Cell[] = [{ v: name, s: 'bold' }]
     days.forEach((d, di) => {
       const c = 2 + di * 2
-      row.push({ f: `SUMIFS(${rng('O')},${rng('B')},$A${rn},${rng('C')},${colLetter(c)}$2,${rng('E')},"")`, s: 'num' })
-      row.push({ f: `SUMIFS(${rng('R')},${rng('B')},$A${rn},${rng('C')},${colLetter(c)}$2,${rng('E')},"")`, s: 'money' })
+      const hrsF = `SUMIFS(${rng('O')},${rng('B')},$A${rn},${rng('C')},${colLetter(c)}$2,${rng('E')},"")`
+      const amtF = `SUMIFS(${rng('R')},${rng('B')},$A${rn},${rng('C')},${colLetter(c)}$2,${rng('E')},"")`
+      // HR cell is editable (yellow): it starts as the linked hours. Amount follows whatever HR now says:
+      // linked amount × (HR typed ÷ HR linked). Typing 0 gives R0; leaving it alone gives the linked amount.
+      row.push({ f: hrsF, s: 'editNum' })
+      row.push({ f: `IF(${hrsF}=0,IF(${colLetter(c)}${rn}>0,ROUND(${colLetter(c)}${rn}*90,2),0),ROUND(${amtF}*${colLetter(c)}${rn}/${hrsF},2))`, s: 'money' })
     })
     const mr = missedTotalsRow[sid]
-    row.push({ f: mr ? `${T6}!C${mr}` : '0', s: 'sub' }, { f: mr ? `${T6}!D${mr}` : '0', s: 'subMoney' })
+    // Block 6: HR editable (yellow) = missed approved hours from the Missed Shifts tab; Amount follows the typed HR.
+    row.push({ f: mr ? `${T6}!C${mr}` : '0', s: 'editNum' })
+    row.push({ f: mr ? `IF(${T6}!C${mr}=0,IF(P${rn}>0,ROUND(P${rn}*90,2),0),ROUND(${T6}!D${mr}*P${rn}/${T6}!C${mr},2))` : `IF(P${rn}>0,ROUND(P${rn}*90,2),0)`, s: 'subMoney' })
     const fixedWeekly = staffAll.find((s) => s.id === sid && s.payroll_rule === 'fixed_weekly')
     row.push({ f: `SUM(B${rn},D${rn},F${rn},H${rn},J${rn},L${rn},N${rn},P${rn})`, s: 'numBold' })
     row.push(fixedWeekly ? { v: Number(fixedWeekly.standard_weekly_amount || 0), s: 'moneyBold' } : { f: `SUM(C${rn},E${rn},G${rn},I${rn},K${rn},M${rn},O${rn},Q${rn})`, s: 'moneyBold' })
