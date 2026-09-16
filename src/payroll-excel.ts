@@ -33,6 +33,10 @@ function longDate(iso: string) { const d = isoToDate(iso); return d ? `${DAY_SHO
 function addDays(iso: string, n: number) { const d = isoToDate(iso)!; d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10) }
 function r2(n: number) { return Math.round(n * 100) / 100 }
 function fmtR(n: number) { return 'R' + n.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, ' ') }
+
+// Light shade per worker so each person's block is easy to follow (6 pastel bands, cycled).
+const BANDS = 6
+function bandStyles(i: number) { const b = i % BANDS; return { t: `band${b}` as any, n: `band${b}Num` as any, m: `band${b}Money` as any } }
 function parseSnap(s: string | null) { try { return s ? JSON.parse(s) : null } catch (e) { return null } }
 // Title + note rows merged across the sheet width so the note stays a 2-line band, not a tall column.
 function headBand(cols: number): { merges: string[], heights: Record<number, number> } { return { merges: [`A1:${colLetter(cols)}1`, `A2:${colLetter(cols)}2`], heights: { 1: 22, 2: 30, 4: 30 } } }
@@ -192,14 +196,17 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
       : 'CLEAR nothing else paid for this day'
     return head + '\n' + check
   }
+  let bandIdx6 = -1
   for (const [sid, name] of workers) {
     const mine = priced.filter((p) => p.row.staff_id === sid && p.missed)
     if (!mine.length) continue
+    bandIdx6++
     const first = m6.length + 1
     mine.forEach((p) => {
       const rn = rowIndexByShift[p.row.id]
       const r6 = m6.length + 1
-      m6.push([name, `${longDate(p.row.work_date)}  ${p.row.start_time}–${p.row.end_time}`, { f: `${T1}!O${rn}`, s: 'editNum' }, { f: `IF(${T1}!O${rn}=0,IF(C${r6}>0,ROUND(C${r6}*${p.rate || 90},2),0),ROUND(${T1}!R${rn}*C${r6}/${T1}!O${rn},2))`, s: 'money' }, { v: noteFor(p), s: 'wrap' }])
+      const B6 = bandStyles(bandIdx6)
+      m6.push([{ v: name, s: B6.t }, { v: `${longDate(p.row.work_date)}  ${p.row.start_time}–${p.row.end_time}`, s: B6.t }, { f: `${T1}!O${rn}`, s: 'editNum' }, { f: `IF(${T1}!O${rn}=0,IF(C${r6}>0,ROUND(C${r6}*${p.rate || 90},2),0),ROUND(${T1}!R${rn}*C${r6}/${T1}!O${rn},2))`, s: B6.m }, { v: noteFor(p), s: 'wrap' }])
     })
     const last = m6.length
     const totalRow = m6.length + 1
@@ -301,13 +308,19 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     [],
     ['Status', 'Review #', 'Employee', 'Date', 'Shift', 'Flag', 'System note', 'System recommended hours', 'Claimed hours', 'Approved hours', 'Decision', 'Decided by', 'Decided at', 'Reason recorded'].map((h) => ({ v: h, s: 'header' as const })),
   ]
-  relevant.sort((a, b) => (a.status === 'OPEN' ? 0 : 1) - (b.status === 'OPEN' ? 0 : 1) || a.staff_name.localeCompare(b.staff_name) || a.work_date.localeCompare(b.work_date) || a.id - b.id)
+  // Group by worker (OPEN items still first within each worker) so each shaded block is one person.
+  relevant.sort((a, b) => a.staff_name.localeCompare(b.staff_name) || (a.status === 'OPEN' ? 0 : 1) - (b.status === 'OPEN' ? 0 : 1) || a.work_date.localeCompare(b.work_date) || a.id - b.id)
+  const bandByName: Record<string, number> = {}
   relevant.forEach((v) => {
     const sn = parseSnap(v.system_snapshot_json)
     const p = priced.find((x) => (v.subject_source === 'shift' && x.row.id === v.subject_shift_id) || (v.subject_source === 'draft' && x.row.source_draft_id === v.subject_shift_id))
-    s4.push([{ v: v.status, s: v.status === 'OPEN' ? 'flagLine' : 'text' }, { v: v.id, s: 'text' }, v.staff_name, v.work_date, p ? `${p.row.start_time}–${p.row.end_time} ${p.row.outlet_venue || ''}` : '',
-      sn?.warningTitle || v.issue_summary, { v: cleanFlag(sn, v), s: 'text' },
-      v.system_proposed_payable_hours ?? '', p ? p.claimedH : (v.original_hours ?? ''), v.approved_payable_hours ?? '', (v.decision_type || '').replace(/_/g, ' '), v.reviewed_by_name || '', v.reviewed_at || '', { v: v.decision_reason || '', s: 'text' }])
+    if (!(v.staff_name in bandByName)) bandByName[v.staff_name] = Object.keys(bandByName).length
+    const B = bandStyles(bandByName[v.staff_name])
+    const T = (val: any) => ({ v: val === null || val === undefined ? '' : val, s: B.t })
+    const N = (val: any) => (val === null || val === undefined || val === '' ? { v: '', s: B.t } : { v: Number(val), s: B.n })
+    s4.push([{ v: v.status, s: v.status === 'OPEN' ? 'flagLine' : B.t }, T(v.id), T(v.staff_name), T(v.work_date), T(p ? `${p.row.start_time}–${p.row.end_time} ${p.row.outlet_venue || ''}` : ''),
+      T(sn?.warningTitle || v.issue_summary), T(cleanFlag(sn, v)),
+      N(v.system_proposed_payable_hours), N(p ? p.claimedH : v.original_hours), N(v.approved_payable_hours), T((v.decision_type || '').replace(/_/g, ' ')), T(v.reviewed_by_name || ''), T(v.reviewed_at || ''), T(v.decision_reason || '')])
   })
   const sheet4: Sheet = { name: S4, rows: s4, freeze: 4, widths: [10, 8, 24, 11, 30, 26, 70, 11, 9, 9, 18, 16, 17, 70], ...headBand(14) }
 
