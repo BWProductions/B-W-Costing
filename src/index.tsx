@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { buildPayrollWorkbook } from './payroll-excel'
 import { runCrewHoursCheck } from './crew-check'
+import { loadLiveEntries, buildOverlapDetail, overlapDetailHtml, type LiveEntry } from './overlap-detail'
 
 type Bindings = {
   ANTHROPIC_API_KEY?: string
@@ -8,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-16-3'
+const WAGES_UI_VERSION = 'v2026-09-16-4'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3927,7 +3928,7 @@ function ruleBreakdownText(r: RuleDayResult) {
 
 type AdminPaidRow = { id: number, staff_id: number, display_name: string, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, work_type: string, outlet_venue: string, area: string, event_name: string, work_description: string, payroll_week_start: string | null, missed_previous_week: number, overnight_confirmed: number, source_draft_id: number | null, manager_update_reason: string | null }
 type AdminDraftRow = { id: number, staff_id: number, display_name: string, work_date: string, start_time: string, end_time: string, outlet_venue: string, work_type: string, work_description: string, status: string, missed_previous_week: number }
-type AdminReviewRow = { id: number, issue_key?: string, status: string, severity: string, staff_id: number, work_date: string, subject_source: string, subject_shift_id: number, compared_shift_id: number | null, original_hours: number | null, previously_paid_hours: number | null, system_proposed_payable_hours: number | null, approved_payable_hours: number | null, decision_type: string | null, decision_reason: string | null, reviewed_by_name: string | null, issue_summary: string, warning_reason: string, system_snapshot_json: string | null }
+type AdminReviewRow = { id: number, issue_key?: string, status: string, severity: string, staff_id: number, work_date: string, payroll_week_start?: string | null, subject_source: string, subject_shift_id: number, compared_source?: string | null, compared_shift_id: number | null, compared_payroll_week_start?: string | null, warning_kind?: string | null, subject_snapshot_json?: string | null, compared_snapshot_json?: string | null, original_hours: number | null, previously_paid_hours: number | null, system_proposed_payable_hours: number | null, approved_payable_hours: number | null, decision_type: string | null, decision_reason: string | null, reviewed_by_name: string | null, issue_summary: string, warning_reason: string, system_snapshot_json: string | null }
 
 // Combined per-person wage sheet (2026-09-14, owner's spec): for the payroll
 // week in the page filter, ONE section per worker containing every paid shift
@@ -3963,10 +3964,14 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
 
   const staffIds = Array.from(new Set([...paid.map((r) => r.staff_id), ...drafts.map((r) => r.staff_id)]))
   const ph = staffIds.map(() => '?').join(',')
-  const revRes = await db.prepare(`SELECT id, issue_key, status, severity, staff_id, work_date, subject_source, subject_shift_id, compared_shift_id, original_hours, previously_paid_hours,
-        system_proposed_payable_hours, approved_payable_hours, approved_start_time, approved_end_time, decision_type, decision_reason, reviewed_by_name, issue_summary, warning_reason, system_snapshot_json
+  const revRes = await db.prepare(`SELECT id, issue_key, status, severity, staff_id, work_date, payroll_week_start, subject_source, subject_shift_id, compared_source, compared_shift_id, compared_payroll_week_start, original_hours, previously_paid_hours,
+        system_proposed_payable_hours, approved_payable_hours, approved_start_time, approved_end_time, decision_type, decision_reason, reviewed_by_name, issue_summary, warning_reason, warning_kind, system_snapshot_json, subject_snapshot_json, compared_snapshot_json
       FROM wage_payroll_reviews WHERE staff_id IN (${ph}) AND status <> 'VOID' AND (work_date BETWEEN date(?, '-7 days') AND ?)`).bind(...staffIds, weekStart, weekEnd).all()
   const reviewsAll = (revRes.results || []) as AdminReviewRow[]
+  // Owner 2026-09-16: overlap reviews must show BOTH sides (what was charged before, where,
+  // which payroll, paid or draft). Live read of the compared entries; display only.
+  let liveEntries: Record<string, LiveEntry> = {}
+  try { liveEntries = await loadLiveEntries(db, reviewsAll as any) } catch (err) { liveEntries = {} }
   const paidIds = new Set(paid.map((r) => r.id)), paidDraftIds = new Set(paid.map((r) => r.source_draft_id).filter(Boolean) as number[]), draftIds = new Set(drafts.map((d) => d.id))
   const reviews = reviewsAll.filter((v) => (v.subject_source === 'shift' && paidIds.has(v.subject_shift_id)) || (v.subject_source === 'draft' && (paidDraftIds.has(v.subject_shift_id) || draftIds.has(v.subject_shift_id))))
 
@@ -4060,8 +4065,12 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         : v.approved_payable_hours !== null && v.approved_payable_hours !== undefined
         ? `<div style="margin-top:3px;color:#86efac"><strong>Decided: ${Number(v.approved_payable_hours).toFixed(2)} h</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''}${v.decision_reason ? ' — ' + escapeHtmlText(v.decision_reason) : ''}</div>`
         : (v.status !== 'OPEN' && v.decision_reason ? `<div style="margin-top:3px;color:#86efac"><strong>${escapeHtmlText(v.status)}</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''} — ${escapeHtmlText(v.decision_reason)}</div>` : '')
-      const summary = openRed ? '' : `<div style="opacity:.8">${escapeHtmlText((v.issue_summary || '').replace(/^Manual overlap review — [^—]+— /, 'Overlap check — '))}</div>`
-      const detail = openRed ? `<div style="opacity:.9;margin-top:2px">${escapeHtmlText(snap?.humanReason || v.warning_reason || '')}</div>` : (open ? `<div style="opacity:.75;margin-top:2px">${escapeHtmlText((v.warning_reason || '').replace(/ Do not block staff entry.*$/i, ''))}</div>` : '')
+      let ovl: ReturnType<typeof buildOverlapDetail> = null
+      try { ovl = buildOverlapDetail(v as any, liveEntries, { subjectPayrollWeekStart: v.payroll_week_start || weekStart }) } catch (err) { ovl = null }
+      const summary = openRed ? '' : (ovl ? `<div style="opacity:.8">${escapeHtmlText('Overlap check — ' + (snap?.warningTitle && !/manual overlap review/i.test(snap.warningTitle) ? snap.warningTitle : ovl.title))}</div>` : `<div style="opacity:.8">${escapeHtmlText((v.issue_summary || '').replace(/^Manual overlap review — [^—]+— /, 'Overlap check — '))}</div>`)
+      const detail = ovl
+        ? overlapDetailHtml(ovl, escapeHtmlText) + (openRed && snap?.humanReason ? `<div style="opacity:.9;margin-top:2px">${escapeHtmlText(snap.humanReason)}</div>` : '')
+        : openRed ? `<div style="opacity:.9;margin-top:2px">${escapeHtmlText(snap?.humanReason || v.warning_reason || '')}</div>` : (open ? `<div style="opacity:.75;margin-top:2px">${escapeHtmlText((v.warning_reason || '').replace(/ Do not block staff entry.*$/i, ''))}</div>` : '')
       // Crew check (owner 2026-09-16): who else was at the venue, with their hours — so Bernie
       // can see at a glance who claimed what and go back to the system for the names.
       const crew = snap?.crewCheck && Array.isArray(snap.members) && snap.members.length
