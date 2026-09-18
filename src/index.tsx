@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { buildPayrollWorkbook } from './payroll-excel'
+import { runCrewHoursCheck } from './crew-check'
 
 type Bindings = {
   ANTHROPIC_API_KEY?: string
@@ -7,7 +8,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-16-2'
+const WAGES_UI_VERSION = 'v2026-09-16-3'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4061,7 +4062,12 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         : (v.status !== 'OPEN' && v.decision_reason ? `<div style="margin-top:3px;color:#86efac"><strong>${escapeHtmlText(v.status)}</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''} — ${escapeHtmlText(v.decision_reason)}</div>` : '')
       const summary = openRed ? '' : `<div style="opacity:.8">${escapeHtmlText((v.issue_summary || '').replace(/^Manual overlap review — [^—]+— /, 'Overlap check — '))}</div>`
       const detail = openRed ? `<div style="opacity:.9;margin-top:2px">${escapeHtmlText(snap?.humanReason || v.warning_reason || '')}</div>` : (open ? `<div style="opacity:.75;margin-top:2px">${escapeHtmlText((v.warning_reason || '').replace(/ Do not block staff entry.*$/i, ''))}</div>` : '')
-      return `<div id="bw-review-${v.id}" style="font-size:12px;line-height:1.35;margin-bottom:6px">${head}<span style="opacity:.6">#${v.id}</span>${summary}${detail}${rec}${reason}${decided}${withForm ? decisionForm(v, snap) : ''}${editHtml}</div>`
+      // Crew check (owner 2026-09-16): who else was at the venue, with their hours — so Bernie
+      // can see at a glance who claimed what and go back to the system for the names.
+      const crew = snap?.crewCheck && Array.isArray(snap.members) && snap.members.length
+        ? `<table style="margin-top:4px;border-collapse:collapse;font-size:11.5px"><thead><tr><th style="text-align:left;padding:1px 8px 1px 0;opacity:.7">At ${escapeHtmlText(snap.venueLabel || 'same venue')}</th><th style="text-align:right;padding:1px 8px;opacity:.7">Hours</th><th style="text-align:left;padding:1px 0;opacity:.7">Times</th></tr></thead><tbody>${snap.members.map((m: any) => `<tr style="${m.name === (snap?.subjectName || '') ? 'font-weight:700' : ''}${snap.crewHours !== null && snap.crewHours !== undefined && Math.abs(Number(m.hours) - Number(snap.crewHours)) > 0.5 ? ';color:#fca5a5' : ''}"><td style="padding:1px 8px 1px 0;white-space:nowrap">${escapeHtmlText(m.name)}</td><td style="text-align:right;padding:1px 8px">${Number(m.hours).toFixed(2)}</td><td style="padding:1px 0;white-space:nowrap">${escapeHtmlText(m.windows || '')}</td></tr>`).join('')}</tbody></table>${snap.crewHours !== null && snap.crewHours !== undefined ? `<div style="opacity:.7;margin-top:2px">Crew hours (most people): ${Number(snap.crewHours).toFixed(2)} h — names in red differ from the crew.</div>` : ''}`
+        : ''
+      return `<div id="bw-review-${v.id}" style="font-size:12px;line-height:1.35;margin-bottom:6px">${head}<span style="opacity:.6">#${v.id}</span>${summary}${detail}${crew}${rec}${reason}${decided}${withForm ? decisionForm(v, snap) : ''}${editHtml}</div>`
     }).join('')
   }
 
@@ -4764,6 +4770,9 @@ async function proxyRequest(c: any) {
       const fromDate = parseProxyIsoDate(fromRaw)
       const weekStart = fromDate ? formatProxyIsoDate(proxyStartOfPayrollWeek(fromDate)) : currentProxyPayrollWeekStart()
       const employeeFilter = (incomingUrl.searchParams.get('staff_id') || incomingUrl.searchParams.get('employee') || incomingUrl.searchParams.get('staff') || '').trim()
+      // Owner 2026-09-16: same-venue crew check (opens/refreshes orange Reviews only; never
+      // touches hours or pay). Kept separate so a failure here cannot affect the page.
+      try { await runCrewHoursCheck(c.env.DB, weekStart, proxyEndOfPayrollWeek(weekStart)) } catch (err) {}
       const tableHtmlRaw = await buildAdminCombinedSheet(c.env, weekStart, employeeFilter)
       const cleanReturn = new URL(incomingUrl.toString()); cleanReturn.searchParams.delete('msg'); cleanReturn.searchParams.delete('error')
       const flashMsg = incomingUrl.searchParams.get('msg') || ''
@@ -4794,6 +4803,7 @@ app.get('/wages-admin/payroll.xlsx', async (c) => {
   const weekStart = fromDate ? formatProxyIsoDate(proxyStartOfPayrollWeek(fromDate)) : currentProxyPayrollWeekStart()
   const weekEnd = proxyEndOfPayrollWeek(weekStart)
   try {
+    try { await runCrewHoursCheck(db, weekStart, weekEnd) } catch (err) {}
     const out = await buildPayrollWorkbook({ db, weekStart, weekEnd, ownerPayKind, ownerPayForShift, timeToMinutes })
     if (c.req.query('check') === '1') return c.json({ weekStart, weekEnd, ...out.checks })
     return new Response(out.bytes, { status: 200, headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'content-disposition': `attachment; filename="${out.filename}"`, 'cache-control': 'no-store' } })
