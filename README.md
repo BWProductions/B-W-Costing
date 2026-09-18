@@ -246,3 +246,9 @@ from→to). See `EDIT_AFTER_SIGN_EMAILS` in `src/routes/field.ts`.
 - New routes: `GET /wages-admin/payroll.xlsx?from=YYYY-MM-DD` (6-tab auditor workbook), `POST /wages-admin/rate-choice`
 - New source files: `src/payroll-excel.ts`, `src/xlsx-lite.ts`
 - Data before-state for the 12–18 Sep re-price: `docs/reprice-backup-2026-09-15-week-2026-09-12-before.json`
+
+## Restore point 2026-09-18 (rolled back — live v2026-09-16-2)
+- Live: **v2026-09-16-2** (rate rules v4, Payroll Excel 6 tabs with editable HR and per-worker shading).
+- 18 Sep review logic (crew check, duplicate catcher, proof rule, overlap wording) was rolled back the same day; kept on branch `review-logic-2026-09-18`, **not deployed**. Must only ever run on the current unpaid payroll week.
+- Complete handover: `docs/handover-2026-09-18-complete.md` / `.pdf`.
+- Tag: `restore-2026-09-18-rolled-back`. Removed review rows backup: `docs/rollback-2026-09-18/`.
