@@ -57,11 +57,11 @@ export function computeDupFlags(rows: Row[], inScope: Set<number>): DupFlag[] {
       const outsideH = q((dupLen - ov) / 60)
       const overlapH = q(ov / 60)
       const sameWeek = (keep.payroll_week_start || '') === (dup.payroll_week_start || '')
-      const where = sameWeek ? 'submitted twice in this payroll' : `already paid in payroll ${keep.payroll_week_start || '(earlier)'} and claimed again in payroll ${dup.payroll_week_start || '(this one)'}`
-      const reason = `DUPLICATE – ${longDate(dup.work_date)} – ${dup.display_name}: the same shift was ${where}. ` +
-        `KEPT (paid first): ${rowText(keep)}. DUPLICATE (this entry): ${rowText(dup)}. ` +
+      const where = sameWeek ? 'submitted twice in this payroll' : `already billed in payroll ${keep.payroll_week_start || '(earlier)'} and claimed again in payroll ${dup.payroll_week_start || '(this one)'}`
+      const reason = `${sameWeek ? 'DUPLICATE' : 'ALREADY BILLED LAST WEEK'} – ${longDate(dup.work_date)} – ${dup.display_name}: the same shift was ${where}. ` +
+        `ALREADY PAID (${sameWeek ? 'first entry' : 'last week'}): ${rowText(keep)}. THIS ENTRY: ${rowText(dup)}. ` +
         `Overlap ${overlapH.toFixed(2)} h (${full ? 'the whole of this entry is already covered by the paid one' : outsideH.toFixed(2) + ' h of this entry falls outside the paid one'}). ` +
-        `System recommended ${outsideH.toFixed(2)} h for this entry (0 h if it is a straight duplicate). Bernie to decide — nothing has been changed.`
+        `Only the difference is payable: system recommended ${outsideH.toFixed(2)} h for this entry (0 h if it is a straight duplicate). Bernie to decide — nothing has been changed.`
       flags.push({ subject: dup, earlier: keep, overlapH, recommended: outsideH, full, reason, summary: `DUPLICATE — ${dup.display_name} — ${dup.work_date} — ${hm(dup.start_time)}–${hm(dup.end_time)} ${dup.outlet_venue} — already paid as #${keep.id} (${where})`, factsHash: fnv(JSON.stringify([dup.id, keep.id, dup.start_time, dup.end_time, keep.start_time, keep.end_time, dup.hours_worked, keep.hours_worked, outsideH])) })
     }
   }
@@ -85,18 +85,20 @@ export async function runDuplicateCheck(db: Db, weekStart: string, weekEnd: stri
   const rows = ((res.results || []) as any[]).map((r) => ({ ...r, id: Number(r.id), staff_id: Number(r.staff_id), hours_worked: Number(r.hours_worked || 0), amount: Number(r.amount || 0) })) as Row[]
   let flags = computeDupFlags(rows, inScope)
   let inserted = 0, updated = 0, voided = 0
-  // Already decided by Bernie (any RESOLVED review with approved hours on the duplicate row
-  // or its draft, other than crew/rate-choice)? Then do not ask again.
+  // Owner 2026-09-16: an earlier decision on this shift does NOT hide the flag — Bernie must
+  // always be told "already billed last week" and see the difference. The earlier decision is
+  // quoted in the flag so she can confirm or change it; her decision on THIS review takes over.
+  const priorDecision: Record<number, string> = {}
   if (flags.length) {
     const subjIds = flags.map((f) => f.subject.id), draftIds = flags.map((f) => Number(f.subject.source_draft_id || 0)).filter(Boolean)
-    const decided = new Set<number>()
-    const rv = await db.prepare(`SELECT subject_source, subject_shift_id FROM wage_payroll_reviews WHERE status = 'RESOLVED' AND approved_payable_hours IS NOT NULL AND issue_key NOT LIKE 'crew_hours%' AND issue_key NOT LIKE 'rate_choice%' AND issue_key NOT LIKE '${DUP_KEY_PREFIX}%'
-        AND ((subject_source = 'shift' AND subject_shift_id IN (${subjIds.map(() => '?').join(',')}))${draftIds.length ? ` OR (subject_source = 'draft' AND subject_shift_id IN (${draftIds.map(() => '?').join(',')}))` : ''})`).bind(...subjIds, ...draftIds).all()
+    const rv = await db.prepare(`SELECT id, subject_source, subject_shift_id, approved_payable_hours, reviewed_by_name, decision_reason FROM wage_payroll_reviews WHERE status = 'RESOLVED' AND approved_payable_hours IS NOT NULL AND issue_key NOT LIKE 'crew_hours%' AND issue_key NOT LIKE 'rate_choice%' AND issue_key NOT LIKE '${DUP_KEY_PREFIX}%'
+        AND ((subject_source = 'shift' AND subject_shift_id IN (${subjIds.map(() => '?').join(',')}))${draftIds.length ? ` OR (subject_source = 'draft' AND subject_shift_id IN (${draftIds.map(() => '?').join(',')}))` : ''}) ORDER BY id`).bind(...subjIds, ...draftIds).all()
     for (const v of (rv.results || []) as any[]) {
-      if (v.subject_source === 'shift') decided.add(Number(v.subject_shift_id))
-      else for (const f of flags) if (Number(f.subject.source_draft_id || 0) === Number(v.subject_shift_id)) decided.add(f.subject.id)
+      const txt = `Earlier decision on this shift: review #${v.id} by ${v.reviewed_by_name || 'office'} — ${Number(v.approved_payable_hours).toFixed(2)} h${v.decision_reason ? ' ("' + String(v.decision_reason).slice(0, 120) + '")' : ''}. Record your decision here to confirm or change it; this review takes over.`
+      if (v.subject_source === 'shift') priorDecision[Number(v.subject_shift_id)] = txt
+      else for (const f of flags) if (Number(f.subject.source_draft_id || 0) === Number(v.subject_shift_id)) priorDecision[f.subject.id] = txt
     }
-    flags = flags.filter((f) => !decided.has(f.subject.id))
+    for (const f of flags) if (priorDecision[f.subject.id]) { f.reason += ' ' + priorDecision[f.subject.id]; f.factsHash = fnv(f.factsHash + '|' + priorDecision[f.subject.id]) }
   }
   if (opts.dryRun) return { flags, inserted, updated, voided }
 
@@ -111,7 +113,9 @@ export async function runDuplicateCheck(db: Db, weekStart: string, weekEnd: stri
   for (const f of flags) {
     const key = DUP_KEY_PREFIX + f.subject.id
     live.add(key)
-    const system = JSON.stringify({ comparisonLabel: 'duplicate check', warningTitle: f.full ? 'DUPLICATE – already paid' : 'DUPLICATE – partly already paid', humanReason: f.reason, recommendedReason: f.full ? `Duplicate — same shift already paid as #${f.earlier.id} (${hm(f.earlier.start_time)}–${hm(f.earlier.end_time)} ${f.earlier.outlet_venue}, ${f.earlier.payroll_week_start && f.earlier.payroll_week_start !== f.subject.payroll_week_start ? 'payroll ' + f.earlier.payroll_week_start : 'this payroll'})` : `Partly duplicate — ${f.overlapH.toFixed(2)} h already paid as #${f.earlier.id}; only the ${f.recommended.toFixed(2)} h outside it is new`, dupCheck: 1, keptShiftId: f.earlier.id, overlapHours: f.overlapH, staffBlocking: 0, autoDuplicate: 0, conflictDetected: 1 })
+    const prevWeek = !!f.earlier.payroll_week_start && f.earlier.payroll_week_start !== f.subject.payroll_week_start
+    const title = prevWeek ? (f.full ? `ALREADY BILLED LAST WEEK – whole shift paid in payroll ${f.earlier.payroll_week_start}` : `ALREADY BILLED LAST WEEK – ${f.overlapH.toFixed(2)} h paid in payroll ${f.earlier.payroll_week_start}; only ${f.recommended.toFixed(2)} h is new`) : (f.full ? 'DUPLICATE – submitted twice this payroll' : `DUPLICATE – partly submitted twice this payroll; only ${f.recommended.toFixed(2)} h is new`)
+    const system = JSON.stringify({ comparisonLabel: 'duplicate check', warningTitle: title, humanReason: f.reason, recommendedReason: f.full ? `${prevWeek ? 'Already billed last week' : 'Duplicate'} — same shift already paid as #${f.earlier.id} (${hm(f.earlier.start_time)}–${hm(f.earlier.end_time)} ${f.earlier.outlet_venue}, ${f.earlier.payroll_week_start && f.earlier.payroll_week_start !== f.subject.payroll_week_start ? 'payroll ' + f.earlier.payroll_week_start : 'this payroll'})` : `${prevWeek ? 'Already billed last week' : 'Partly duplicate'} — ${f.overlapH.toFixed(2)} h (${hm(f.earlier.start_time)}–${hm(f.earlier.end_time)}) already paid as #${f.earlier.id}${prevWeek ? ' in payroll ' + f.earlier.payroll_week_start : ''}; only the ${f.recommended.toFixed(2)} h outside it is new`, dupCheck: 1, keptShiftId: f.earlier.id, overlapHours: f.overlapH, staffBlocking: 0, autoDuplicate: 0, conflictDetected: 1 })
     const subjSnap = JSON.stringify({ shiftId: f.subject.id, source: 'shift', staffId: f.subject.staff_id, employee: f.subject.display_name, workDate: f.subject.work_date, venue: f.subject.outlet_venue, area: f.subject.area, workDescription: f.subject.work_description, startTime: f.subject.start_time, endTime: f.subject.end_time, hours: f.subject.hours_worked, amount: f.subject.amount, payrollWeekStart: f.subject.payroll_week_start })
     const cmpSnap = JSON.stringify({ shiftId: f.earlier.id, source: 'shift', staffId: f.earlier.staff_id, employee: f.earlier.display_name, workDate: f.earlier.work_date, venue: f.earlier.outlet_venue, area: f.earlier.area, workDescription: f.earlier.work_description, startTime: f.earlier.start_time, endTime: f.earlier.end_time, hours: f.earlier.hours_worked, amount: f.earlier.amount, payrollWeekStart: f.earlier.payroll_week_start })
     const ex = existing[key]

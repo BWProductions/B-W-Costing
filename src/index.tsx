@@ -10,7 +10,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-16-6'
+const WAGES_UI_VERSION = 'v2026-09-16-7'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4016,7 +4016,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   }
   const ruleApplies = (staffId: number) => (staffBase[staffId]?.payroll_rule || 'hourly') !== 'fixed_weekly'
 
-  const reviewsForPaid = (r: AdminPaidRow) => reviews.filter((v) => (v.subject_source === 'shift' && v.subject_shift_id === r.id) || (v.subject_source === 'draft' && r.source_draft_id && v.subject_shift_id === r.source_draft_id))
+  const reviewsForPaid = (r: AdminPaidRow) => reviews.filter((v) => (v.subject_source === 'shift' && v.subject_shift_id === r.id) || (v.subject_source === 'draft' && r.source_draft_id && v.subject_shift_id === r.source_draft_id)).sort((a, b) => (needsDecision(a) && a.severity === 'red' ? 0 : needsDecision(a) ? 1 : 2) - (needsDecision(b) && b.severity === 'red' ? 0 : needsDecision(b) ? 1 : 2) || b.id - a.id)
   const reviewsForDraft = (d: AdminDraftRow) => reviews.filter((v) => v.subject_source === 'draft' && v.subject_shift_id === d.id)
   const dayName = (iso: string) => { const d = parseProxyIsoDate(iso); return d ? ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d.getUTCDay()] : '' }
   const pill = (text: string, bg: string, fg: string) => `<span style="display:inline-block;padding:3px 8px;border-radius:999px;background:${bg};color:${fg};font-weight:700;font-size:11.5px;line-height:1.3;margin:2px 4px 2px 0">${text}</span>`
