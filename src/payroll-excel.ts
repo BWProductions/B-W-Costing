@@ -12,7 +12,6 @@
 // Missed hours = the APPROVED hours (resolved review decision) or claimed if no review.
 // Amounts follow the owner's rate rules for the actual day (ownerPayForShift).
 import { buildXlsx, colLetter, ref, sheetRef, type Cell, type Sheet } from './xlsx-lite'
-import { loadLiveEntries, buildOverlapDetail, proofVerdict, type LiveEntry } from './overlap-detail'
 
 export type PayrollDeps = {
   db: D1Database
@@ -63,25 +62,9 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
 
   const revRes = staffIds.length ? await db.prepare(`SELECT id, issue_key, status, severity, staff_id, staff_name, work_date, subject_source, subject_shift_id, compared_source, compared_shift_id, compared_payroll_week_start,
         warning_reason, issue_summary, original_hours, previously_paid_hours, system_proposed_payable_hours, approved_payable_hours, approved_start_time, approved_end_time,
-        decision_type, decision_reason, reviewed_by_name, reviewed_at, system_snapshot_json, compared_snapshot_json, subject_snapshot_json, warning_kind, payroll_week_start
+        decision_type, decision_reason, reviewed_by_name, reviewed_at, system_snapshot_json, compared_snapshot_json
       FROM wage_payroll_reviews WHERE staff_id IN (${ph}) AND status <> 'VOID' AND work_date BETWEEN date(?, '-7 days') AND ? ORDER BY id`).bind(...staffIds, weekStart, weekEnd).all() : { results: [] }
   const reviewsAll = (revRes.results || []) as ReviewRow[]
-  // Overlap reviews: full both-sides wording (owner 2026-09-16). Display only.
-  let liveEntries: Record<string, LiveEntry> = {}
-  try { liveEntries = await loadLiveEntries(db, reviewsAll as any) } catch (e) { liveEntries = {} }
-  const flagText = (sn: any, v: ReviewRow): string => {
-    try { const d = buildOverlapDetail(v as any, liveEntries, { subjectPayrollWeekStart: (v as any).payroll_week_start || weekStart }); if (d) return d.lines.join(' | ') } catch (e) {}
-    return cleanFlag(sn, v)
-  }
-  // Proof rule: OPEN overlap reviews without a paid, overlapping counterpart are shown as
-  // "NO PROOF" (not counted as open). Same rule as the dashboard.
-  const proofOf = (v: ReviewRow) => { try { return proofVerdict(buildOverlapDetail(v as any, liveEntries, { subjectPayrollWeekStart: (v as any).payroll_week_start || weekStart })) } catch (e) { return { needsDecision: true, label: '', colour: '' } } }
-  const isOpenForDecision = (v: ReviewRow) => v.status === 'OPEN' && proofOf(v).needsDecision
-  const statusText = (v: ReviewRow) => v.status === 'OPEN' && !proofOf(v).needsDecision ? 'NO PROOF' : v.status
-  const flagTitle = (sn: any, v: ReviewRow): string => {
-    try { const d = buildOverlapDetail(v as any, liveEntries, { subjectPayrollWeekStart: (v as any).payroll_week_start || weekStart }); if (d && (!sn?.warningTitle || /manual overlap review/i.test(sn.warningTitle))) return d.title } catch (e) {}
-    return sn?.warningTitle || v.issue_summary
-  }
   const paidIds = new Set(paid.map((r) => r.id)); const paidDraftIds = new Set(paid.map((r) => r.source_draft_id).filter(Boolean) as number[])
   const reviewsForPaid = (r: PaidRow) => reviewsAll.filter((v) => (v.subject_source === 'shift' && v.subject_shift_id === r.id) || (v.subject_source === 'draft' && r.source_draft_id && v.subject_shift_id === r.source_draft_id))
   const decidedFor = (r: PaidRow) => reviewsForPaid(r).filter((v) => v.status === 'RESOLVED' && v.approved_payable_hours !== null && v.approved_payable_hours !== undefined && !/^rate_choice_/.test(v.issue_key || '')).sort((a, b) => b.id - a.id)[0]
@@ -144,12 +127,12 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
         : sameDay.length ? `CLEAR: worked ${sameDay.map((p) => p.start_time + '–' + p.end_time).join(', ')} that day (paid in payroll ${sameDay[0].payroll_week_start || 'n/a'}); these hours are outside those times.`
         : 'CLEAR: nothing else paid for this day.'
     }
-    const sysParts = allReviews.map((v) => { const sn = parseSnap(v.system_snapshot_json); const rec = v.system_proposed_payable_hours !== null && v.system_proposed_payable_hours !== undefined ? ` System recommended ${Number(v.system_proposed_payable_hours).toFixed(2)} h${sn?.recommendedStart ? ' (' + sn.recommendedStart + '–' + sn.recommendedEnd + ')' : ''}.` : ''; return `#${v.id} ${flagTitle(sn, v)}: ${flagText(sn, v)}${rec}` })
+    const sysParts = allReviews.map((v) => { const sn = parseSnap(v.system_snapshot_json); const rec = v.system_proposed_payable_hours !== null && v.system_proposed_payable_hours !== undefined ? ` System recommended ${Number(v.system_proposed_payable_hours).toFixed(2)} h${sn?.recommendedStart ? ' (' + sn.recommendedStart + '–' + sn.recommendedEnd + ')' : ''}.` : ''; return `#${v.id} ${sn?.warningTitle || v.issue_summary}: ${cleanFlag(sn, v)}${rec}` })
     if (sysParts.length) systemNote = (systemNote ? systemNote + ' | ' : '') + sysParts.join(' | ')
     const reviewNote = allReviews.length
       ? allReviews.map((v) => v.status === 'RESOLVED'
         ? `#${v.id} DECIDED${v.approved_payable_hours !== null && v.approved_payable_hours !== undefined ? ' ' + Number(v.approved_payable_hours).toFixed(2) + ' h' : ''} by ${v.reviewed_by_name || 'office'}${v.reviewed_at ? ' ' + v.reviewed_at.slice(0, 16) : ''}: ${v.decision_reason || ''}`
-        : isOpenForDecision(v) ? `#${v.id} STILL OPEN — no decision recorded yet (claimed hours used)` : `#${v.id} NO DUPLICATION PROVEN — ${proofOf(v).label}`).join(' | ')
+        : `#${v.id} STILL OPEN — no decision recorded yet (claimed hours used)`).join(' | ')
       : (missed ? 'No review needed' : '')
     const rateChoice = reviewsForPaid(r).find((v) => /^rate_choice_/.test(v.issue_key || ''))
     return { row: r, missed, claimedH, approvedH, amount: pr.amount, rate: pr.rate, breakdown: pr.breakdown, review, systemNote, reviewNote, rateChoice }
@@ -326,7 +309,7 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     ['Status', 'Review #', 'Employee', 'Date', 'Shift', 'Flag', 'System note', 'System recommended hours', 'Claimed hours', 'Approved hours', 'Decision', 'Decided by', 'Decided at', 'Reason recorded'].map((h) => ({ v: h, s: 'header' as const })),
   ]
   // Group by worker (OPEN items still first within each worker) so each shaded block is one person.
-  relevant.sort((a, b) => a.staff_name.localeCompare(b.staff_name) || (isOpenForDecision(a) ? 0 : 1) - (isOpenForDecision(b) ? 0 : 1) || a.work_date.localeCompare(b.work_date) || a.id - b.id)
+  relevant.sort((a, b) => a.staff_name.localeCompare(b.staff_name) || (a.status === 'OPEN' ? 0 : 1) - (b.status === 'OPEN' ? 0 : 1) || a.work_date.localeCompare(b.work_date) || a.id - b.id)
   const bandByName: Record<string, number> = {}
   relevant.forEach((v) => {
     const sn = parseSnap(v.system_snapshot_json)
@@ -335,8 +318,8 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     const B = bandStyles(bandByName[v.staff_name])
     const T = (val: any) => ({ v: val === null || val === undefined ? '' : val, s: B.t })
     const N = (val: any) => (val === null || val === undefined || val === '' ? { v: '', s: B.t } : { v: Number(val), s: B.n })
-    s4.push([{ v: statusText(v), s: isOpenForDecision(v) ? 'flagLine' : B.t }, T(v.id), T(v.staff_name), T(v.work_date), T(p ? `${p.row.start_time}–${p.row.end_time} ${p.row.outlet_venue || ''}` : ''),
-      T(flagTitle(sn, v)), T(flagText(sn, v) + (v.status === 'OPEN' && !proofOf(v).needsDecision ? ' | ' + proofOf(v).label : '')),
+    s4.push([{ v: v.status, s: v.status === 'OPEN' ? 'flagLine' : B.t }, T(v.id), T(v.staff_name), T(v.work_date), T(p ? `${p.row.start_time}–${p.row.end_time} ${p.row.outlet_venue || ''}` : ''),
+      T(sn?.warningTitle || v.issue_summary), T(cleanFlag(sn, v)),
       N(v.system_proposed_payable_hours), N(p ? p.claimedH : v.original_hours), N(v.approved_payable_hours), T((v.decision_type || '').replace(/_/g, ' ')), T(v.reviewed_by_name || ''), T(v.reviewed_at || ''), T(v.decision_reason || '')])
   })
   const sheet4: Sheet = { name: S4, rows: s4, freeze: 4, widths: [10, 8, 24, 11, 30, 26, 70, 11, 9, 9, 18, 16, 17, 70], ...headBand(14) }
@@ -376,8 +359,7 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     missed_approved_hours: r2(missedApprovedH),
     wages_total: r2(priced.reduce((a, p) => a + p.amount, 0)),
     system_paid_total: r2(priced.reduce((a, p) => a + Number(p.row.amount || 0), 0)),
-    open_reviews: relevant.filter(isOpenForDecision).length,
-    no_proof_reviews: relevant.filter((v) => v.status === 'OPEN' && !proofOf(v).needsDecision).length,
+    open_reviews: relevant.filter((v) => v.status === 'OPEN').length,
   }
   return { bytes, filename: `bw-payroll-${weekStart}-to-${weekEnd}.xlsx`, checks }
 }

@@ -1,8 +1,5 @@
 import { Hono } from 'hono'
 import { buildPayrollWorkbook } from './payroll-excel'
-import { runCrewHoursCheck } from './crew-check'
-import { loadLiveEntries, buildOverlapDetail, overlapDetailHtml, proofVerdict, type LiveEntry } from './overlap-detail'
-import { runDuplicateCheck } from './dup-check'
 
 type Bindings = {
   ANTHROPIC_API_KEY?: string
@@ -10,7 +7,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-16-8'
+const WAGES_UI_VERSION = 'v2026-09-16-2'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3929,7 +3926,7 @@ function ruleBreakdownText(r: RuleDayResult) {
 
 type AdminPaidRow = { id: number, staff_id: number, display_name: string, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, work_type: string, outlet_venue: string, area: string, event_name: string, work_description: string, payroll_week_start: string | null, missed_previous_week: number, overnight_confirmed: number, source_draft_id: number | null, manager_update_reason: string | null }
 type AdminDraftRow = { id: number, staff_id: number, display_name: string, work_date: string, start_time: string, end_time: string, outlet_venue: string, work_type: string, work_description: string, status: string, missed_previous_week: number }
-type AdminReviewRow = { id: number, issue_key?: string, status: string, severity: string, staff_id: number, work_date: string, payroll_week_start?: string | null, subject_source: string, subject_shift_id: number, compared_source?: string | null, compared_shift_id: number | null, compared_payroll_week_start?: string | null, warning_kind?: string | null, subject_snapshot_json?: string | null, compared_snapshot_json?: string | null, original_hours: number | null, previously_paid_hours: number | null, system_proposed_payable_hours: number | null, approved_payable_hours: number | null, decision_type: string | null, decision_reason: string | null, reviewed_by_name: string | null, issue_summary: string, warning_reason: string, system_snapshot_json: string | null }
+type AdminReviewRow = { id: number, issue_key?: string, status: string, severity: string, staff_id: number, work_date: string, subject_source: string, subject_shift_id: number, compared_shift_id: number | null, original_hours: number | null, previously_paid_hours: number | null, system_proposed_payable_hours: number | null, approved_payable_hours: number | null, decision_type: string | null, decision_reason: string | null, reviewed_by_name: string | null, issue_summary: string, warning_reason: string, system_snapshot_json: string | null }
 
 // Combined per-person wage sheet (2026-09-14, owner's spec): for the payroll
 // week in the page filter, ONE section per worker containing every paid shift
@@ -3965,19 +3962,10 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
 
   const staffIds = Array.from(new Set([...paid.map((r) => r.staff_id), ...drafts.map((r) => r.staff_id)]))
   const ph = staffIds.map(() => '?').join(',')
-  const revRes = await db.prepare(`SELECT id, issue_key, status, severity, staff_id, work_date, payroll_week_start, subject_source, subject_shift_id, compared_source, compared_shift_id, compared_payroll_week_start, original_hours, previously_paid_hours,
-        system_proposed_payable_hours, approved_payable_hours, approved_start_time, approved_end_time, decision_type, decision_reason, reviewed_by_name, issue_summary, warning_reason, warning_kind, system_snapshot_json, subject_snapshot_json, compared_snapshot_json
+  const revRes = await db.prepare(`SELECT id, issue_key, status, severity, staff_id, work_date, subject_source, subject_shift_id, compared_shift_id, original_hours, previously_paid_hours,
+        system_proposed_payable_hours, approved_payable_hours, approved_start_time, approved_end_time, decision_type, decision_reason, reviewed_by_name, issue_summary, warning_reason, system_snapshot_json
       FROM wage_payroll_reviews WHERE staff_id IN (${ph}) AND status <> 'VOID' AND (work_date BETWEEN date(?, '-7 days') AND ?)`).bind(...staffIds, weekStart, weekEnd).all()
   const reviewsAll = (revRes.results || []) as AdminReviewRow[]
-  // Owner 2026-09-16: overlap reviews must show BOTH sides (what was charged before, where,
-  // which payroll, paid or draft). Live read of the compared entries; display only.
-  let liveEntries: Record<string, LiveEntry> = {}
-  try { liveEntries = await loadLiveEntries(db, reviewsAll as any) } catch (err) { liveEntries = {} }
-  // Proof rule (owner 2026-09-16): an overlap review counts as OPEN only when a PAID entry
-  // really overlaps it. Self-compare / deleted / draft-only / non-overlapping → shown for the
-  // record, not counted, no decision needed. Display/count rule only; rows untouched.
-  const ovlDetailOf = (v: AdminReviewRow) => { try { return buildOverlapDetail(v as any, liveEntries, { subjectPayrollWeekStart: v.payroll_week_start || weekStart }) } catch (err) { return null } }
-  const needsDecision = (v: AdminReviewRow) => v.status === 'OPEN' && proofVerdict(ovlDetailOf(v)).needsDecision
   const paidIds = new Set(paid.map((r) => r.id)), paidDraftIds = new Set(paid.map((r) => r.source_draft_id).filter(Boolean) as number[]), draftIds = new Set(drafts.map((d) => d.id))
   const reviews = reviewsAll.filter((v) => (v.subject_source === 'shift' && paidIds.has(v.subject_shift_id)) || (v.subject_source === 'draft' && (paidDraftIds.has(v.subject_shift_id) || draftIds.has(v.subject_shift_id))))
 
@@ -4016,7 +4004,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   }
   const ruleApplies = (staffId: number) => (staffBase[staffId]?.payroll_rule || 'hourly') !== 'fixed_weekly'
 
-  const reviewsForPaid = (r: AdminPaidRow) => reviews.filter((v) => (v.subject_source === 'shift' && v.subject_shift_id === r.id) || (v.subject_source === 'draft' && r.source_draft_id && v.subject_shift_id === r.source_draft_id)).sort((a, b) => (needsDecision(a) && a.severity === 'red' ? 0 : needsDecision(a) ? 1 : 2) - (needsDecision(b) && b.severity === 'red' ? 0 : needsDecision(b) ? 1 : 2) || b.id - a.id)
+  const reviewsForPaid = (r: AdminPaidRow) => reviews.filter((v) => (v.subject_source === 'shift' && v.subject_shift_id === r.id) || (v.subject_source === 'draft' && r.source_draft_id && v.subject_shift_id === r.source_draft_id))
   const reviewsForDraft = (d: AdminDraftRow) => reviews.filter((v) => v.subject_source === 'draft' && v.subject_shift_id === d.id)
   const dayName = (iso: string) => { const d = parseProxyIsoDate(iso); return d ? ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d.getUTCDay()] : '' }
   const pill = (text: string, bg: string, fg: string) => `<span style="display:inline-block;padding:3px 8px;border-radius:999px;background:${bg};color:${fg};font-weight:700;font-size:11.5px;line-height:1.3;margin:2px 4px 2px 0">${text}</span>`
@@ -4061,7 +4049,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       try { snap = v.system_snapshot_json ? JSON.parse(v.system_snapshot_json) : null } catch (err) {}
       const openRed = v.status === 'OPEN' && v.severity === 'red'
       const open = v.status === 'OPEN'
-      let head = openRed ? pill('REVIEW – ACTION NEEDED', '#7f1d1d', '#fff') : open ? pill('REVIEW – open', '#b45309', '#fff') : pill('REVIEW – ' + escapeHtmlText(v.status), '#1f5f3a', '#fff')
+      const head = openRed ? pill('REVIEW – ACTION NEEDED', '#7f1d1d', '#fff') : open ? pill('REVIEW – open', '#b45309', '#fff') : pill('REVIEW – ' + escapeHtmlText(v.status), '#1f5f3a', '#fff')
       const rec = v.system_proposed_payable_hours !== null && v.system_proposed_payable_hours !== undefined
         ? `<div style="margin-top:3px"><strong>Recommended payable: ${Number(v.system_proposed_payable_hours).toFixed(2)} h</strong>${snap?.recommendedStart ? ' (' + escapeHtmlText(snap.recommendedStart) + '–' + escapeHtmlText(snap.recommendedEnd) + ')' : ''}${v.previously_paid_hours ? ' · already paid ' + Number(v.previously_paid_hours).toFixed(2) + ' h that day' : ''}</div>`
         : ''
@@ -4071,21 +4059,9 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         : v.approved_payable_hours !== null && v.approved_payable_hours !== undefined
         ? `<div style="margin-top:3px;color:#86efac"><strong>Decided: ${Number(v.approved_payable_hours).toFixed(2)} h</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''}${v.decision_reason ? ' — ' + escapeHtmlText(v.decision_reason) : ''}</div>`
         : (v.status !== 'OPEN' && v.decision_reason ? `<div style="margin-top:3px;color:#86efac"><strong>${escapeHtmlText(v.status)}</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''} — ${escapeHtmlText(v.decision_reason)}</div>` : '')
-      const ovl = ovlDetailOf(v)
-      const verdict = proofVerdict(ovl)
-      const noProof = open && !verdict.needsDecision
-      const summary = openRed ? '' : (ovl ? `<div style="opacity:.8">${escapeHtmlText('Overlap check — ' + (snap?.warningTitle && !/manual overlap review/i.test(snap.warningTitle) ? snap.warningTitle : ovl.title))}</div>` : `<div style="opacity:.8">${escapeHtmlText((v.issue_summary || '').replace(/^Manual overlap review — [^—]+— /, 'Overlap check — '))}</div>`)
-      if (noProof) head = pill('NO DUPLICATION PROVEN – no decision needed', '#374151', '#e5e7eb')
-      const noProofNote = noProof ? `<div style="margin-top:3px;color:${verdict.colour};font-weight:700">${escapeHtmlText(verdict.label)}</div>` : ''
-      const detail = ovl
-        ? overlapDetailHtml(ovl, escapeHtmlText) + noProofNote + (openRed && snap?.humanReason && !snap?.dupCheck ? `<div style="opacity:.9;margin-top:2px">${escapeHtmlText(snap.humanReason)}</div>` : '')
-        : openRed ? `<div style="opacity:.9;margin-top:2px">${escapeHtmlText(snap?.humanReason || v.warning_reason || '')}</div>` : (open ? `<div style="opacity:.75;margin-top:2px">${escapeHtmlText((v.warning_reason || '').replace(/ Do not block staff entry.*$/i, ''))}</div>` : '')
-      // Crew check (owner 2026-09-16): who else was at the venue, with their hours — so Bernie
-      // can see at a glance who claimed what and go back to the system for the names.
-      const crew = snap?.crewCheck && Array.isArray(snap.members) && snap.members.length
-        ? `<table style="margin-top:4px;border-collapse:collapse;font-size:11.5px"><thead><tr><th style="text-align:left;padding:1px 8px 1px 0;opacity:.7">At ${escapeHtmlText(snap.venueLabel || 'same venue')}</th><th style="text-align:right;padding:1px 8px;opacity:.7">Hours</th><th style="text-align:left;padding:1px 0;opacity:.7">Times</th></tr></thead><tbody>${snap.members.map((m: any) => `<tr style="${m.name === (snap?.subjectName || '') ? 'font-weight:700' : ''}${snap.crewHours !== null && snap.crewHours !== undefined && Math.abs(Number(m.hours) - Number(snap.crewHours)) > 0.5 ? ';color:#fca5a5' : ''}"><td style="padding:1px 8px 1px 0;white-space:nowrap">${escapeHtmlText(m.name)}</td><td style="text-align:right;padding:1px 8px">${Number(m.hours).toFixed(2)}</td><td style="padding:1px 0;white-space:nowrap">${escapeHtmlText(m.windows || '')}</td></tr>`).join('')}</tbody></table>${snap.crewHours !== null && snap.crewHours !== undefined ? `<div style="opacity:.7;margin-top:2px">Crew hours (most people): ${Number(snap.crewHours).toFixed(2)} h — names in red differ from the crew.</div>` : ''}`
-        : ''
-      return `<div id="bw-review-${v.id}" style="font-size:12px;line-height:1.35;margin-bottom:6px">${head}<span style="opacity:.6">#${v.id}</span>${summary}${detail}${crew}${rec}${reason}${decided}${withForm && !noProof ? decisionForm(v, snap) : ''}${noProof && withForm ? `<details style="margin-top:4px;font-size:11.5px;opacity:.75"><summary style="cursor:pointer">Record a note anyway (optional)</summary>${decisionForm(v, snap)}</details>` : ''}${editHtml}</div>`
+      const summary = openRed ? '' : `<div style="opacity:.8">${escapeHtmlText((v.issue_summary || '').replace(/^Manual overlap review — [^—]+— /, 'Overlap check — '))}</div>`
+      const detail = openRed ? `<div style="opacity:.9;margin-top:2px">${escapeHtmlText(snap?.humanReason || v.warning_reason || '')}</div>` : (open ? `<div style="opacity:.75;margin-top:2px">${escapeHtmlText((v.warning_reason || '').replace(/ Do not block staff entry.*$/i, ''))}</div>` : '')
+      return `<div id="bw-review-${v.id}" style="font-size:12px;line-height:1.35;margin-bottom:6px">${head}<span style="opacity:.6">#${v.id}</span>${summary}${detail}${rec}${reason}${decided}${withForm ? decisionForm(v, snap) : ''}${editHtml}</div>`
     }).join('')
   }
 
@@ -4129,7 +4105,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     const missed = rows.filter((r) => r.work_date < weekStart)
     const mH = missed.reduce((a, r) => a + Number(r.hours_worked || 0), 0)
     const mA = missed.reduce((a, r) => a + Number(r.amount || 0), 0)
-    const openRev = rows.reduce((a, r) => a + reviewsForPaid(r).filter(needsDecision).length, 0) + g.drafts.reduce((a, d) => a + reviewsForDraft(d).filter(needsDecision).length, 0)
+    const openRev = rows.reduce((a, r) => a + reviewsForPaid(r).filter((v) => v.status === 'OPEN').length, 0) + g.drafts.reduce((a, d) => a + reviewsForDraft(d).filter((v) => v.status === 'OPEN').length, 0)
     gHours += hours; gAmount += amount; gShifts += rows.length; gMissedH += mH; gMissedA += mA; gDrafts += g.drafts.length; gOpenReviews += openRev
 
     // Pay-rule check: one calculation per real day, all of this person's entries on that
@@ -4249,7 +4225,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         ? `<span style="color:#fbbf24;font-weight:700;margin-left:12px" title="The approved figure shows once every open review for this person has a recorded decision">Admin approved: ${openRev} review${openRev === 1 ? '' : 's'} still open</span>`
         : `<span style="color:#86efac;font-weight:700;margin-left:12px" title="Claimed hours less what your resolved reviews took off">Admin approved: ${agreedH.toFixed(2)} hours · ${agreedApprox ? '≈' : ''}${fmtRand(agreedA)}</span>`)
       : ''
-    const personOpenReviews = [...rows.flatMap((r) => reviewsForPaid(r)), ...g.drafts.flatMap((d) => reviewsForDraft(d))].filter(needsDecision)
+    const personOpenReviews = [...rows.flatMap((r) => reviewsForPaid(r)), ...g.drafts.flatMap((d) => reviewsForDraft(d))].filter((v) => v.status === 'OPEN')
     const personReviewsHtml = personOpenReviews.length
       ? `<div id="bw-person-reviews-${sid}" style="display:none;margin:8px 0 4px;padding:10px 12px;border-radius:10px;background:rgba(180,83,9,.12);border:1px solid rgba(180,83,9,.5)"><div style="font-weight:800;color:#f59e0b;margin-bottom:6px">Open reviews for ${escapeHtmlText(g.name)} — ${personOpenReviews.length}</div>${personOpenReviews.map((v) => {
           const subj = v.subject_source === 'shift' ? rows.find((r) => r.id === v.subject_shift_id) : rows.find((r) => r.source_draft_id === v.subject_shift_id)
@@ -4279,7 +4255,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     <h2 style="margin:0 0 4px">Wage sheet — combined (${escapeHtmlText(weekStart)} to ${escapeHtmlText(weekEnd)})${filterNote}</h2>
     <p style="margin:0 0 10px;opacity:.8">Every worker with anything in this payroll, all their shifts together: in-week shifts <strong>and</strong> missed shifts paid this week (shown at their real date), review flags with the recommended figure and the reason to record, and shifts still waiting for Final Submission. Totals here <strong>include</strong> missed shifts, so they are the true payroll figures. Use the worker-app link on each name to open that person's own page and edit or final-submit for them.</p>
     ${(() => {
-      const allOpen = reviews.filter((v) => needsDecision(v) && staffIds.includes(v.staff_id)).sort((a, b) => (a.severity === 'red' ? 0 : 1) - (b.severity === 'red' ? 0 : 1) || (byStaff[a.staff_id]?.name || '').localeCompare(byStaff[b.staff_id]?.name || '') || a.work_date.localeCompare(b.work_date))
+      const allOpen = reviews.filter((v) => v.status === 'OPEN' && staffIds.includes(v.staff_id)).sort((a, b) => (a.severity === 'red' ? 0 : 1) - (b.severity === 'red' ? 0 : 1) || (byStaff[a.staff_id]?.name || '').localeCompare(byStaff[b.staff_id]?.name || '') || a.work_date.localeCompare(b.work_date))
       if (!allOpen.length) return `<div style="margin:6px 0 12px;padding:8px 12px;border-radius:10px;background:rgba(20,83,45,.25);color:#86efac;font-weight:700">No open reviews for this payroll week.</div>`
       const lines = allOpen.map((v) => {
         const grp = byStaff[v.staff_id]
@@ -4788,11 +4764,6 @@ async function proxyRequest(c: any) {
       const fromDate = parseProxyIsoDate(fromRaw)
       const weekStart = fromDate ? formatProxyIsoDate(proxyStartOfPayrollWeek(fromDate)) : currentProxyPayrollWeekStart()
       const employeeFilter = (incomingUrl.searchParams.get('staff_id') || incomingUrl.searchParams.get('employee') || incomingUrl.searchParams.get('staff') || '').trim()
-      // Owner 2026-09-16: same-venue crew check (opens/refreshes orange Reviews only; never
-      // touches hours or pay). Kept separate so a failure here cannot affect the page.
-      try { await runCrewHoursCheck(c.env.DB, weekStart, proxyEndOfPayrollWeek(weekStart)) } catch (err) {}
-      // Owner 2026-09-16: duplicate catcher — same worker, same date, overlapping PAID rows → red review, 0 h recommended, Bernie decides.
-      try { await runDuplicateCheck(c.env.DB, weekStart, proxyEndOfPayrollWeek(weekStart)) } catch (err) {}
       const tableHtmlRaw = await buildAdminCombinedSheet(c.env, weekStart, employeeFilter)
       const cleanReturn = new URL(incomingUrl.toString()); cleanReturn.searchParams.delete('msg'); cleanReturn.searchParams.delete('error')
       const flashMsg = incomingUrl.searchParams.get('msg') || ''
@@ -4823,8 +4794,6 @@ app.get('/wages-admin/payroll.xlsx', async (c) => {
   const weekStart = fromDate ? formatProxyIsoDate(proxyStartOfPayrollWeek(fromDate)) : currentProxyPayrollWeekStart()
   const weekEnd = proxyEndOfPayrollWeek(weekStart)
   try {
-    try { await runCrewHoursCheck(db, weekStart, weekEnd) } catch (err) {}
-    try { await runDuplicateCheck(db, weekStart, weekEnd) } catch (err) {}
     const out = await buildPayrollWorkbook({ db, weekStart, weekEnd, ownerPayKind, ownerPayForShift, timeToMinutes })
     if (c.req.query('check') === '1') return c.json({ weekStart, weekEnd, ...out.checks })
     return new Response(out.bytes, { status: 200, headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'content-disposition': `attachment; filename="${out.filename}"`, 'cache-control': 'no-store' } })
