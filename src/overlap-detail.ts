@@ -192,3 +192,19 @@ export function overlapDetailHtml(d: OverlapDetail, esc: (s: string) => string):
     ${d.earlier && !paidEarlier ? `<div style="margin-top:2px;color:#fcd34d">The earlier entry was never paid — not a double payment unless it is later final-submitted.</div>` : ''}
   </div>`
 }
+
+// ---------------------------------------------------------------------------
+// Proof rule (owner 2026-09-16): an overlap review only NEEDS A DECISION when there is a
+// PAID entry on the other side whose times really overlap. Self-compare, deleted
+// counterpart, draft-only counterpart, non-overlapping times → "no duplication proven",
+// shown for the record but NOT counted as open. Display/count rule only.
+// ---------------------------------------------------------------------------
+export type ProofVerdict = { needsDecision: boolean; label: string; colour: string }
+export function proofVerdict(d: OverlapDetail | null): ProofVerdict {
+  if (!d) return { needsDecision: true, label: '', colour: '' }
+  if (d.kind === 'self') return { needsDecision: false, label: 'System self-check — same entry on both sides — no duplication. Pay as claimed; no decision needed.', colour: '#86efac' }
+  if (!d.earlier || /not found/.test(d.earlier.status)) return { needsDecision: false, label: 'No paid entry to compare against (the other entry was deleted) — no duplication proven. Pay as claimed; no decision needed.', colour: '#fcd34d' }
+  if (!/^paid/.test(d.earlier.status)) return { needsDecision: false, label: 'The other entry was never paid (draft only) — no duplication proven. Pay as claimed; no decision needed.', colour: '#fcd34d' }
+  if (/do not actually overlap/.test(d.overlapText)) return { needsDecision: false, label: 'Times do not overlap the paid entry — no duplication proven. Pay as claimed; no decision needed.', colour: '#fcd34d' }
+  return { needsDecision: true, label: '', colour: '#fca5a5' }
+}
