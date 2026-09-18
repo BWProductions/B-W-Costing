@@ -16,10 +16,11 @@
 export const DUP_KEY_PREFIX = 'dup_paid|shift:'
 type Db = { prepare: (sql: string) => any }
 
-type Row = { id: number; staff_id: number; display_name: string; work_date: string; start_time: string; end_time: string; hours_worked: number; amount: number; outlet_venue: string; area: string; work_description: string; payroll_week_start: string | null; created_at: string | null; source_draft_id?: number | null }
+type Row = { id: number; staff_id: number; display_name: string; work_date: string; start_time: string; end_time: string; hours_worked: number; amount: number; outlet_venue: string; area: string; work_description: string; payroll_week_start: string | null; created_at: string | null; source_draft_id?: number | null; work_type?: string; missed_previous_week?: number }
 
 const toMin = (t: string) => { const m = /^(\d{1,2}):(\d{2})/.exec(t || ''); return m ? Number(m[1]) * 60 + Number(m[2]) : null }
 const hm = (t: string) => (t || '').slice(0, 5)
+const hmMin = (m: number) => String(Math.floor((m % 1440) / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0')
 const fmtR = (n: number) => 'R' + Number(n || 0).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
 const longDate = (iso: string) => { const d = new Date(iso + 'T00:00:00Z'); return isNaN(d.getTime()) ? iso : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()] + ' ' + d.getUTCFullYear() }
 const q = (n: number) => Math.round(n * 4) / 4
@@ -58,11 +59,25 @@ export function computeDupFlags(rows: Row[], inScope: Set<number>): DupFlag[] {
       const overlapH = q(ov / 60)
       const sameWeek = (keep.payroll_week_start || '') === (dup.payroll_week_start || '')
       const where = sameWeek ? 'submitted twice in this payroll' : `already billed in payroll ${keep.payroll_week_start || '(earlier)'} and claimed again in payroll ${dup.payroll_week_start || '(this one)'}`
-      const reason = `${sameWeek ? 'DUPLICATE' : 'ALREADY BILLED LAST WEEK'} – ${longDate(dup.work_date)} – ${dup.display_name}: the same shift was ${where}. ` +
-        `ALREADY PAID (${sameWeek ? 'first entry' : 'last week'}): ${rowText(keep)}. THIS ENTRY: ${rowText(dup)}. ` +
-        `Overlap ${overlapH.toFixed(2)} h (${full ? 'the whole of this entry is already covered by the paid one' : outsideH.toFixed(2) + ' h of this entry falls outside the paid one'}). ` +
-        `Only the difference is payable: system recommended ${outsideH.toFixed(2)} h for this entry (0 h if it is a straight duplicate). Bernie to decide — nothing has been changed.`
-      flags.push({ subject: dup, earlier: keep, overlapH, recommended: outsideH, full, reason, summary: `DUPLICATE — ${dup.display_name} — ${dup.work_date} — ${hm(dup.start_time)}–${hm(dup.end_time)} ${dup.outlet_venue} — already paid as #${keep.id} (${where})`, factsHash: fnv(JSON.stringify([dup.id, keep.id, dup.start_time, dup.end_time, keep.start_time, keep.end_time, dup.hours_worked, keep.hours_worked, outsideH])) })
+      // Plain-English summary first (owner 2026-09-16): what was paid, what is now claimed,
+      // what changed (venue / area / description / type), and what is actually due.
+      const first = (dup.display_name || '').split(' ')[0] || 'This worker'
+      const same = (a: string, b: string) => (a || '').toLowerCase().replace(/[^a-z0-9]/g, '') === (b || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+      const diffs: string[] = []
+      if (!same(keep.outlet_venue, dup.outlet_venue)) diffs.push(`venue "${keep.outlet_venue || '—'}" → "${dup.outlet_venue || '—'}"`)
+      if (!same(keep.area, dup.area)) diffs.push(`area "${keep.area || '—'}" → "${dup.area || '—'}"`)
+      if (!same(keep.work_description, dup.work_description)) diffs.push(`description "${keep.work_description || '—'}" → "${dup.work_description || '—'}"`)
+      if (!same(keep.work_type || '', dup.work_type || '')) diffs.push(`type "${keep.work_type || '—'}" → "${dup.work_type || '—'}"`)
+      const missedNote = /missed/i.test(dup.work_description + ' ' + dup.outlet_venue) || dup.missed_previous_week ? ' It was re-entered as a "missed shift".' : ''
+      const paidWhen = sameWeek ? 'in THIS payroll' : `in payroll ${keep.payroll_week_start} (last week)`
+      const dueText = full
+        ? `Every hour of this entry is already paid. He is due NOTHING extra on this entry: 0 h.`
+        : `The ${overlapH.toFixed(2)} h from ${hm(keep.start_time)}–${hm(keep.end_time)} are already paid and must not be paid again. He is only due the difference: ${sd[1] > sk[1] && sd[0] >= sk[0] ? hmMin(sk[1]) + '–' + hmMin(sd[1]) + ' = ' : sd[0] < sk[0] && sd[1] <= sk[1] ? hmMin(sd[0]) + '–' + hmMin(sk[0]) + ' = ' : ''}${outsideH.toFixed(2)} h.`
+      const reason = `${sameWeek ? 'DUPLICATE – SUBMITTED TWICE' : 'ALREADY BILLED LAST WEEK'}. ${first} was paid ${hm(keep.start_time)}–${hm(keep.end_time)} (${Number(keep.hours_worked).toFixed(2)} h, ${fmtR(keep.amount)}) for ${longDate(dup.work_date)} at "${keep.outlet_venue || '—'}"${keep.area ? ' (' + keep.area + ')' : ''}${keep.work_description ? ', "' + keep.work_description + '"' : ''}${keep.work_type ? ', type ' + keep.work_type : ''} ${paidWhen}. ` +
+        `He has now claimed ${hm(dup.start_time)}–${hm(dup.end_time)} (${Number(dup.hours_worked).toFixed(2)} h, ${fmtR(dup.amount)}) for the SAME DATE at "${dup.outlet_venue || '—'}"${dup.area ? ' (' + dup.area + ')' : ''}${dup.work_description ? ', "' + dup.work_description + '"' : ''}${dup.work_type ? ', type ' + dup.work_type : ''}.${missedNote} ` +
+        (diffs.length ? `WHAT CHANGED between the two entries: ${diffs.join('; ')}. Check whether this is the same venue typed differently. ` : `Venue, area, description and type are the SAME on both entries. `) +
+        dueText + ` System recommended ${outsideH.toFixed(2)} h. Bernie to decide — nothing has been changed.`
+      flags.push({ subject: dup, earlier: keep, overlapH, recommended: outsideH, full, reason, summary: `DUPLICATE — ${dup.display_name} — ${dup.work_date} — ${hm(dup.start_time)}–${hm(dup.end_time)} ${dup.outlet_venue} — already paid as #${keep.id} (${where})`, factsHash: fnv(JSON.stringify([dup.id, keep.id, dup.start_time, dup.end_time, keep.start_time, keep.end_time, dup.hours_worked, keep.hours_worked, outsideH, 'v2', keep.outlet_venue, dup.outlet_venue, keep.area, dup.area, keep.work_description, dup.work_description])) })
     }
   }
   // One flag per duplicate row (the earliest kept row wins).
@@ -79,7 +94,7 @@ export async function runDuplicateCheck(db: Db, weekStart: string, weekEnd: stri
   const dates = Array.from(new Set(scope.map((r) => r.work_date)))
   const staff = Array.from(new Set(scope.map((r) => r.staff_id)))
   const res = await db.prepare(`SELECT w.id, w.staff_id, s.display_name, w.work_date, w.start_time, w.end_time, w.hours_worked, COALESCE(w.gross_wage, w.total_amount, 0) amount,
-        COALESCE(w.outlet_venue,'') outlet_venue, COALESCE(w.area,'') area, COALESCE(w.work_description,'') work_description, w.payroll_week_start, w.created_at, w.source_draft_id
+        COALESCE(w.outlet_venue,'') outlet_venue, COALESCE(w.area,'') area, COALESCE(w.work_description,'') work_description, w.payroll_week_start, w.created_at, w.source_draft_id, COALESCE(w.work_type,'') work_type, COALESCE(w.missed_previous_week,0) missed_previous_week
       FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id
       WHERE w.work_date IN (${dates.map(() => '?').join(',')}) AND w.staff_id IN (${staff.map(() => '?').join(',')})`).bind(...dates, ...staff).all()
   const rows = ((res.results || []) as any[]).map((r) => ({ ...r, id: Number(r.id), staff_id: Number(r.staff_id), hours_worked: Number(r.hours_worked || 0), amount: Number(r.amount || 0) })) as Row[]
