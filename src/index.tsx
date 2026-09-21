@@ -8,7 +8,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-21-1'
+const WAGES_UI_VERSION = 'v2026-09-21-2'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4037,10 +4037,18 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         <button type="submit" name="decision" value="approve_amount" style="padding:8px 14px;border-radius:8px;border:0;background:#e2b93b;color:#111;font-weight:800;font-size:13px;cursor:pointer">Approve as recommended — ${fmtRand(due)}</button>
         <button type="submit" name="decision" value="approve_zero" style="padding:6px 10px;border-radius:6px;border:1px solid rgba(255,255,255,.25);background:transparent;color:#fff;cursor:pointer" title="Nothing more is due on this entry">Nothing due — R0,00</button>
       </div>
-      <details style="margin-top:6px;opacity:.8"><summary style="cursor:pointer">Different amount</summary>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px"><label>Amount R <input type="number" step="0.01" min="0" name="custom_amount" value="${due.toFixed(2)}" style="width:100px;padding:4px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.2);background:#0f172a;color:#fff"></label>
-        <input type="text" name="custom_reason" placeholder="Reason (recorded with your name)" style="flex:1;min-width:180px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.2);background:#0f172a;color:#fff">
-        <button type="submit" name="decision" value="approve_custom_amount" style="padding:5px 10px;border-radius:6px;border:1px solid rgba(226,185,59,.6);background:transparent;color:#e2b93b;font-weight:700;cursor:pointer">Record this amount</button></div>
+      <details style="margin-top:6px" class="bw-pb-adjust" data-rate="${Number(snap.newRate || 0)}" data-corr="${Number(snap.rateCorrection || 0)}" data-extra="${Number(snap.extraHours || 0)}"><summary style="cursor:pointer;color:#fde68a;font-weight:700">I don't agree — change the hours (the system re-prices at the correct rate)</summary>
+        <div style="margin-top:6px;padding:8px;border-radius:8px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12)">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <label style="display:flex;align-items:center;gap:6px">Extra hours to pay <input type="number" step="0.25" min="0" name="custom_hours" value="${Number(snap.extraHours || 0).toFixed(2)}" class="bw-pb-hours" style="width:80px;padding:4px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.2);background:#0f172a;color:#fff"> <span style="opacity:.7">× ${fmtRand(Number(snap.newRate || 0))}/h (${escapeHtmlText(String(snap.kindLabel || 'rate from the work type selected'))})</span></label>
+            ${Number(snap.rateCorrection || 0) ? `<label style="display:flex;align-items:center;gap:6px"><input type="checkbox" name="include_rate_correction" value="1" class="bw-pb-corr" checked> Include the rate correction on the hours already paid (${fmtRand(Number(snap.rateCorrection))})</label>` : ''}
+          </div>
+          <div style="margin-top:6px;font-size:13px">System will pay: <strong class="bw-pb-total" style="color:#fde68a">${fmtRand(due)}</strong> <span class="bw-pb-breakdown" style="opacity:.7"></span></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px">
+            <input type="text" name="custom_reason" placeholder="Reason for the change (recorded with your name)" style="flex:1;min-width:220px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.2);background:#0f172a;color:#fff">
+            <button type="submit" name="decision" value="approve_custom_hours" style="padding:6px 12px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer">Approve these hours</button>
+          </div>
+        </div>
       </details>
       <div style="opacity:.6;margin-top:4px">Records your decision on review #${v.id} with your name and time. The approved amount is paid in THIS payroll and shown as a correction line on the Excel; last week's paid row is not changed.</div>
     </form>`
@@ -4353,6 +4361,18 @@ class AdminCombinedPlacementInjector {
   element(element: Element) {
     element.append(`<script>
 (function(){
+  // Owner 2026-09-21: "already paid" review — typing extra hours re-prices live at the entry's rate.
+  function rand(n){ n=Math.round(n*100)/100; var s=n.toFixed(2).replace('.',','); return 'R'+s.replace(/\\\\B(?=(\\\\d{3})+(?!\\\\d))/g,' '); }
+  function wirePb(){
+    document.querySelectorAll('details.bw-pb-adjust').forEach(function(d){
+      if(d.dataset.bwWired) return; d.dataset.bwWired='1';
+      var rate=parseFloat(d.dataset.rate||'0'), corr=parseFloat(d.dataset.corr||'0');
+      var hrs=d.querySelector('.bw-pb-hours'), cb=d.querySelector('.bw-pb-corr'), tot=d.querySelector('.bw-pb-total'), br=d.querySelector('.bw-pb-breakdown');
+      function calc(){ var h=parseFloat(hrs&&hrs.value||'0'); if(!(h>=0)) h=0; var ex=Math.round(h*rate*100)/100; var inc=cb?cb.checked:false; var t=ex+(inc?corr:0); if(tot) tot.textContent=rand(t); if(br) br.textContent=' = '+h.toFixed(2)+' h × '+rand(rate)+' = '+rand(ex)+(inc?' + rate correction '+rand(corr):''); }
+      if(hrs){ hrs.addEventListener('input',calc); hrs.addEventListener('change',calc); } if(cb) cb.addEventListener('change',calc); calc();
+    });
+  }
+  document.addEventListener('DOMContentLoaded', wirePb); setTimeout(wirePb, 300); setTimeout(wirePb, 1500);
   function place(){
     var mine=document.getElementById('bw-combined-sheet'); if(!mine||mine.dataset.bwPlaced) return;
     var heads=Array.prototype.slice.call(document.querySelectorAll('h1,h2,h3,.card-title'));
@@ -4950,9 +4970,9 @@ app.post('/wages-admin/review-decision', async (c) => {
   const returnTo = normalizeProxyFieldValue(form.get('return_to')) || '/admin/wages'
   const safeReturn = /^\/admin\/wages(\?|$)/.test(returnTo) ? returnTo : '/admin/wages'
   const sep = safeReturn.includes('?') ? '&' : '?'
-  if (!reviewId || !['approve', 'approve_original', 'dismiss', 'approve_amount', 'approve_zero', 'approve_custom_amount'].includes(decision)) return back(safeReturn + sep + 'error=' + encodeURIComponent('Invalid review decision.'))
+  if (!reviewId || !['approve', 'approve_original', 'dismiss', 'approve_amount', 'approve_zero', 'approve_custom_amount', 'approve_custom_hours'].includes(decision)) return back(safeReturn + sep + 'error=' + encodeURIComponent('Invalid review decision.'))
   // Owner 2026-09-21: "already paid" reviews are approved as a RAND AMOUNT (the system worked it out).
-  if (decision === 'approve_amount' || decision === 'approve_zero' || decision === 'approve_custom_amount') {
+  if (decision === 'approve_amount' || decision === 'approve_zero' || decision === 'approve_custom_amount' || decision === 'approve_custom_hours') {
     try {
       const row = await db.prepare(`SELECT id, status, original_hours, system_snapshot_json FROM wage_payroll_reviews WHERE id = ?`).bind(reviewId).first<{ id: number, status: string, original_hours: number | null, system_snapshot_json: string | null }>()
       if (!row) return back(safeReturn + sep + 'error=' + encodeURIComponent('Review #' + reviewId + ' not found.'))
@@ -4967,7 +4987,21 @@ app.post('/wages-admin/review-decision', async (c) => {
         if (!cr) return back(safeReturn + sep + 'error=' + encodeURIComponent('Please give a reason for the different amount on review #' + reviewId + '.'))
         why = cr
       }
-      const hours = amount === 0 ? 0 : Number(snap.extraHours || 0)
+      let hours = amount === 0 ? 0 : Number(snap.extraHours || 0)
+      if (decision === 'approve_custom_hours') {
+        // Owner 2026-09-21: Bernie types the EXTRA hours; the system re-prices at the entry's own rate
+        // (same rule the flag used) and adds the rate correction on the already-paid hours if ticked.
+        hours = Number(normalizeProxyFieldValue(form.get('custom_hours')))
+        const cr = normalizeProxyFieldValue(form.get('custom_reason')).slice(0, 500)
+        if (!Number.isFinite(hours) || hours < 0) return back(safeReturn + sep + 'error=' + encodeURIComponent('Extra hours must be a number (0 or more) for review #' + reviewId + '.'))
+        if (!cr) return back(safeReturn + sep + 'error=' + encodeURIComponent('Please give a reason for changing the hours on review #' + reviewId + '.'))
+        const includeCorr = normalizeProxyFieldValue(form.get('include_rate_correction')) === '1' && Number(snap.rateCorrection || 0) > 0
+        const rate = Number(snap.newRate || 0)
+        const extraAmt = Math.round(hours * rate * 100) / 100
+        amount = Math.round((extraAmt + (includeCorr ? Number(snap.rateCorrection) : 0)) * 100) / 100
+        snap.customHours = hours; snap.customExtraAmount = extraAmt; snap.customIncludeCorrection = includeCorr
+        why = cr + ' — ' + hours.toFixed(2) + ' h extra × ' + fmtRand(rate) + ' = ' + fmtRand(extraAmt) + (includeCorr ? ' + rate correction ' + fmtRand(Number(snap.rateCorrection)) : '')
+      }
       snap.approvedAmount = amount
       const decisionType = amount === 0 ? 'already_paid_r0' : (Math.abs(amount - Number(snap.recommendedAmount || 0)) < 0.005 ? 'approve_adjusted' : 'approve_adjusted')
       await db.prepare(`UPDATE wage_payroll_reviews SET status = 'RESOLVED', decision_type = ?, decision_reason = ?, approved_payable_hours = ?, system_snapshot_json = ?, reviewed_by_user_id = ?, reviewed_by_name = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'OPEN'`)
