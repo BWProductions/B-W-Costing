@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { buildPayrollWorkbook } from './payroll-excel'
+import { runPaidBeforeCheck } from './paid-before'
 
 type Bindings = {
   ANTHROPIC_API_KEY?: string
@@ -7,7 +8,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-16-2'
+const WAGES_UI_VERSION = 'v2026-09-21-1'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4023,6 +4024,27 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       <div style="opacity:.6;margin-top:4px">Your choice is recorded with your name on review #${v.id} and the shift's amount is set to the chosen rule (Sat/Sun hours are the same either way). Nothing else changes.</div>
     </form>`
     }
+    if (snap?.paidBefore) {
+      // Owner 2026-09-21: the system has done the working-out; one click approves the rand amount.
+      const due = Number(snap.recommendedAmount || 0)
+      return `<form method="post" action="/wages-admin/review-decision" class="bw-review-decide" style="margin-top:6px;padding:8px;border-radius:8px;background:rgba(255,255,255,.05);font-size:12px">
+      <input type="hidden" name="review_id" value="${v.id}">
+      <input type="hidden" name="return_to" value="__RETURN__">
+      <input type="hidden" name="approved_hours" value="${Number(snap.extraHours || 0).toFixed(2)}">
+      <input type="hidden" name="approved_amount" value="${due.toFixed(2)}">
+      <input type="hidden" name="reason" value="${escapeHtmlText(snap.recommendedReason || 'Already paid check — approved as recommended')}">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <button type="submit" name="decision" value="approve_amount" style="padding:8px 14px;border-radius:8px;border:0;background:#e2b93b;color:#111;font-weight:800;font-size:13px;cursor:pointer">Approve as recommended — ${fmtRand(due)}</button>
+        <button type="submit" name="decision" value="approve_zero" style="padding:6px 10px;border-radius:6px;border:1px solid rgba(255,255,255,.25);background:transparent;color:#fff;cursor:pointer" title="Nothing more is due on this entry">Nothing due — R0,00</button>
+      </div>
+      <details style="margin-top:6px;opacity:.8"><summary style="cursor:pointer">Different amount</summary>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px"><label>Amount R <input type="number" step="0.01" min="0" name="custom_amount" value="${due.toFixed(2)}" style="width:100px;padding:4px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.2);background:#0f172a;color:#fff"></label>
+        <input type="text" name="custom_reason" placeholder="Reason (recorded with your name)" style="flex:1;min-width:180px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.2);background:#0f172a;color:#fff">
+        <button type="submit" name="decision" value="approve_custom_amount" style="padding:5px 10px;border-radius:6px;border:1px solid rgba(226,185,59,.6);background:transparent;color:#e2b93b;font-weight:700;cursor:pointer">Record this amount</button></div>
+      </details>
+      <div style="opacity:.6;margin-top:4px">Records your decision on review #${v.id} with your name and time. The approved amount is paid in THIS payroll and shown as a correction line on the Excel; last week's paid row is not changed.</div>
+    </form>`
+    }
     const rec = v.system_proposed_payable_hours
     const recReason = snap?.recommendedReason || ''
     const orig = v.original_hours
@@ -4059,6 +4081,16 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         : v.approved_payable_hours !== null && v.approved_payable_hours !== undefined
         ? `<div style="margin-top:3px;color:#86efac"><strong>Decided: ${Number(v.approved_payable_hours).toFixed(2)} h</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''}${v.decision_reason ? ' — ' + escapeHtmlText(v.decision_reason) : ''}</div>`
         : (v.status !== 'OPEN' && v.decision_reason ? `<div style="margin-top:3px;color:#86efac"><strong>${escapeHtmlText(v.status)}</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''} — ${escapeHtmlText(v.decision_reason)}</div>` : '')
+      // Owner 2026-09-21: "already paid" review — full story, each line on its own row, amount in bold.
+      if (snap?.paidBefore) {
+        const lines: string[] = Array.isArray(snap.lines) ? snap.lines : [String(snap.humanReason || '')]
+        const body = `<div style="margin-top:4px;padding:8px 10px;border-radius:8px;background:rgba(127,29,29,.18);border:1px solid rgba(252,165,165,.45)">
+          <div style="font-weight:800;color:#fca5a5;margin-bottom:4px">${escapeHtmlText(snap.warningTitle || v.issue_summary || '')}</div>
+          ${lines.map((l) => `<div style="margin:2px 0;${/^Still due|^Every hour|^What was paid/.test(l) ? 'font-weight:800;color:#fde68a' : /^•/.test(l) ? 'padding-left:10px' : ''}">${escapeHtmlText(l)}</div>`).join('')}
+        </div>`
+        const decidedAmt = v.status !== 'OPEN' ? `<div style="margin-top:3px;color:#86efac"><strong>Decided: ${snap.approvedAmount !== undefined ? fmtRand(Number(snap.approvedAmount)) : (v.approved_payable_hours !== null && v.approved_payable_hours !== undefined ? Number(v.approved_payable_hours).toFixed(2) + ' h' : v.status)}</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''}${v.decision_reason ? ' — ' + escapeHtmlText(v.decision_reason) : ''}</div>` : ''
+        return `<div id="bw-review-${v.id}" style="font-size:12px;line-height:1.4;margin-bottom:6px">${head}<span style="opacity:.6">#${v.id}</span>${body}${decidedAmt}${withForm ? decisionForm(v, snap) : ''}${editHtml}</div>`
+      }
       const summary = openRed ? '' : `<div style="opacity:.8">${escapeHtmlText((v.issue_summary || '').replace(/^Manual overlap review — [^—]+— /, 'Overlap check — '))}</div>`
       const detail = openRed ? `<div style="opacity:.9;margin-top:2px">${escapeHtmlText(snap?.humanReason || v.warning_reason || '')}</div>` : (open ? `<div style="opacity:.75;margin-top:2px">${escapeHtmlText((v.warning_reason || '').replace(/ Do not block staff entry.*$/i, ''))}</div>` : '')
       return `<div id="bw-review-${v.id}" style="font-size:12px;line-height:1.35;margin-bottom:6px">${head}<span style="opacity:.6">#${v.id}</span>${summary}${detail}${rec}${reason}${decided}${withForm ? decisionForm(v, snap) : ''}${editHtml}</div>`
@@ -4204,6 +4236,9 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       const paidH = Number(r.hours_worked || 0), paidA = Number(r.amount || 0)
       if (!decided) { agreedH += paidH; agreedA += paidA; return }
       const ah = Number(decided.approved_payable_hours)
+      // "Already paid" review decided as a RAND amount: that amount is what this entry pays.
+      let dsnap: any = null; try { dsnap = decided.system_snapshot_json ? JSON.parse(decided.system_snapshot_json) : null } catch (err) {}
+      if (dsnap?.paidBefore && dsnap.approvedAmount !== undefined) { agreedH += ah; agreedA += Number(dsnap.approvedAmount); if (Math.abs(Number(dsnap.approvedAmount) - paidA) >= 0.01) agreedChanged++; return }
       agreedH += ah
       if (Math.abs(ah - paidH) < 0.01) { agreedA += paidA; return }
       agreedChanged++
@@ -4764,6 +4799,8 @@ async function proxyRequest(c: any) {
       const fromDate = parseProxyIsoDate(fromRaw)
       const weekStart = fromDate ? formatProxyIsoDate(proxyStartOfPayrollWeek(fromDate)) : currentProxyPayrollWeekStart()
       const employeeFilter = (incomingUrl.searchParams.get('staff_id') || incomingUrl.searchParams.get('employee') || incomingUrl.searchParams.get('staff') || '').trim()
+      // Owner 2026-09-21: "already paid" check — CURRENT (unpaid) payroll week ONLY, never a closed one.
+      if (weekStart === currentProxyPayrollWeekStart()) { try { await runPaidBeforeCheck({ db: c.env.DB, weekStart, weekEnd: proxyEndOfPayrollWeek(weekStart), ownerPayKind, ownerPayForShift }) } catch (err) {} }
       const tableHtmlRaw = await buildAdminCombinedSheet(c.env, weekStart, employeeFilter)
       const cleanReturn = new URL(incomingUrl.toString()); cleanReturn.searchParams.delete('msg'); cleanReturn.searchParams.delete('error')
       const flashMsg = incomingUrl.searchParams.get('msg') || ''
@@ -4794,6 +4831,7 @@ app.get('/wages-admin/payroll.xlsx', async (c) => {
   const weekStart = fromDate ? formatProxyIsoDate(proxyStartOfPayrollWeek(fromDate)) : currentProxyPayrollWeekStart()
   const weekEnd = proxyEndOfPayrollWeek(weekStart)
   try {
+    if (weekStart === currentProxyPayrollWeekStart()) { try { await runPaidBeforeCheck({ db, weekStart, weekEnd, ownerPayKind, ownerPayForShift }) } catch (err) {} }
     const out = await buildPayrollWorkbook({ db, weekStart, weekEnd, ownerPayKind, ownerPayForShift, timeToMinutes })
     if (c.req.query('check') === '1') return c.json({ weekStart, weekEnd, ...out.checks })
     return new Response(out.bytes, { status: 200, headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'content-disposition': `attachment; filename="${out.filename}"`, 'cache-control': 'no-store' } })
@@ -4912,7 +4950,34 @@ app.post('/wages-admin/review-decision', async (c) => {
   const returnTo = normalizeProxyFieldValue(form.get('return_to')) || '/admin/wages'
   const safeReturn = /^\/admin\/wages(\?|$)/.test(returnTo) ? returnTo : '/admin/wages'
   const sep = safeReturn.includes('?') ? '&' : '?'
-  if (!reviewId || !['approve', 'approve_original', 'dismiss'].includes(decision)) return back(safeReturn + sep + 'error=' + encodeURIComponent('Invalid review decision.'))
+  if (!reviewId || !['approve', 'approve_original', 'dismiss', 'approve_amount', 'approve_zero', 'approve_custom_amount'].includes(decision)) return back(safeReturn + sep + 'error=' + encodeURIComponent('Invalid review decision.'))
+  // Owner 2026-09-21: "already paid" reviews are approved as a RAND AMOUNT (the system worked it out).
+  if (decision === 'approve_amount' || decision === 'approve_zero' || decision === 'approve_custom_amount') {
+    try {
+      const row = await db.prepare(`SELECT id, status, original_hours, system_snapshot_json FROM wage_payroll_reviews WHERE id = ?`).bind(reviewId).first<{ id: number, status: string, original_hours: number | null, system_snapshot_json: string | null }>()
+      if (!row) return back(safeReturn + sep + 'error=' + encodeURIComponent('Review #' + reviewId + ' not found.'))
+      if (row.status !== 'OPEN') return back(safeReturn + sep + 'msg=' + encodeURIComponent('Review #' + reviewId + ' was already ' + row.status + '.'))
+      let snap: any = {}; try { snap = row.system_snapshot_json ? JSON.parse(row.system_snapshot_json) : {} } catch (err) {}
+      let amount = Number(snap.recommendedAmount || 0), why = String(snap.recommendedReason || 'Already paid check')
+      if (decision === 'approve_zero') { amount = 0; why = 'Nothing more due — already paid' }
+      if (decision === 'approve_custom_amount') {
+        amount = Number(normalizeProxyFieldValue(form.get('custom_amount')))
+        const cr = normalizeProxyFieldValue(form.get('custom_reason')).slice(0, 500)
+        if (!Number.isFinite(amount) || amount < 0) return back(safeReturn + sep + 'error=' + encodeURIComponent('Amount must be a number (0 or more) for review #' + reviewId + '.'))
+        if (!cr) return back(safeReturn + sep + 'error=' + encodeURIComponent('Please give a reason for the different amount on review #' + reviewId + '.'))
+        why = cr
+      }
+      const hours = amount === 0 ? 0 : Number(snap.extraHours || 0)
+      snap.approvedAmount = amount
+      const decisionType = amount === 0 ? 'already_paid_r0' : (Math.abs(amount - Number(snap.recommendedAmount || 0)) < 0.005 ? 'approve_adjusted' : 'approve_adjusted')
+      await db.prepare(`UPDATE wage_payroll_reviews SET status = 'RESOLVED', decision_type = ?, decision_reason = ?, approved_payable_hours = ?, system_snapshot_json = ?, reviewed_by_user_id = ?, reviewed_by_name = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'OPEN'`)
+        .bind(decisionType, why + ' — approved amount ' + fmtRand(amount), hours, JSON.stringify(snap), admin.id || null, admin.name, reviewId).run()
+      await captureWagesDebug(c.env, { request_path: '/wages-admin/review-decision', request_method: 'POST', original_payload_json: JSON.stringify({ review_id: reviewId, decision, approved_amount: amount, approved_hours: hours, by: admin.name }), rewritten_payload_json: '{}', rewrite_applied: 0, response_status: 302, response_location: safeReturn, response_error_text: '' })
+      return back(safeReturn + sep + 'msg=' + encodeURIComponent('Review #' + reviewId + ' resolved by ' + admin.name + ': ' + fmtRand(amount) + ' approved (' + hours.toFixed(2) + ' h extra). Paid in this payroll as a correction line; nothing else changed.') + '#bw-review-' + reviewId)
+    } catch (err) {
+      return back(safeReturn + sep + 'error=' + encodeURIComponent('Could not record the decision: ' + describeProxyError(err)))
+    }
+  }
   if (!reason) return back(safeReturn + sep + 'error=' + encodeURIComponent('Please give a reason for review #' + reviewId + '.'))
   try {
     const row = await db.prepare(`SELECT id, status, original_hours, previously_paid_hours, system_proposed_payable_hours FROM wage_payroll_reviews WHERE id = ?`).bind(reviewId).first<{ id: number, status: string, original_hours: number | null, previously_paid_hours: number | null, system_proposed_payable_hours: number | null }>()

@@ -115,7 +115,10 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     const claimedH = Number(r.hours_worked || 0)
     const approvedH = review ? Number(review.approved_payable_hours) : claimedH
     const snap = review ? parseSnap(review.system_snapshot_json) : null
-    const pr = priceHours(r, approvedH, review?.approved_start_time || snap?.recommendedStart, review?.approved_end_time || snap?.recommendedEnd)
+    let pr = priceHours(r, approvedH, review?.approved_start_time || snap?.recommendedStart, review?.approved_end_time || snap?.recommendedEnd)
+    // Owner 2026-09-21: "already paid" review decided as a RAND amount — that amount is what this entry pays
+    // (rate correction on last week's hours + extra hours). Shown as a correction line; last week's row untouched.
+    if (snap?.paidBefore && snap.approvedAmount !== undefined) pr = { amount: Number(snap.approvedAmount), rate: Number(snap.newRate || pr.rate), breakdown: `CORRECTION: already paid ${fmtR(Number(snap.alreadyPaid || 0))} earlier; ${Number(snap.rateCorrection || 0) ? 'rate correction ' + fmtR(Number(snap.rateCorrection)) + ' + ' : ''}extra ${Number(snap.extraHours || 0).toFixed(2)} h ${fmtR(Number(snap.extraAmount || 0))} = approved ${fmtR(Number(snap.approvedAmount))}` }
     // System note: overlap/cross-check facts.
     const sameDay = prior.filter((p) => p.staff_id === r.staff_id && p.work_date === r.work_date)
     const overlap = sameDay.filter((p) => { const a = deps.timeToMinutes(r.start_time), b0 = deps.timeToMinutes(r.end_time), c = deps.timeToMinutes(p.start_time), d0 = deps.timeToMinutes(p.end_time); if (a === null || b0 === null || c === null || d0 === null) return false; const b = b0 <= a ? b0 + 1440 : b0, d = d0 <= c ? d0 + 1440 : d0; return a < d && c < b })
