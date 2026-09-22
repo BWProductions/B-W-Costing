@@ -258,7 +258,8 @@ from→to). See `EDIT_AFTER_SIGN_EMAILS` in `src/routes/field.ts`.
 - Complete rules & handover: `docs/handover-2026-09-21-complete-rules.md` / `.pdf`.
 - Tag: `restore-2026-09-21-already-paid`. Reviews snapshot before first run: `docs/restore-2026-09-21-before-paid-before/`.
 
-## Restore point 22 Sep 2026 — `restore-2026-09-22-petrus-v5` (live v2026-09-22-5)
+## Restore point 22 Sep 2026 — `restore-2026-09-22-petrus-v5` (live v2026-09-22-6)
 - Petrus rate rules v6: **R640 set day rate** for 06:00–16:00 Mon–Sat; Saturday before 06:00 / after 16:00 **R80/h automatic**; **Mon–Fri before 06:00 / after 16:00 (R55/h) HELD** for office approval; **Sunday whole entry HELD** for owner approval (R640 + R80/h recommended; approve / other amount / decline). Reviews `petrus_extra|shift:ID`, route `/wages-admin/petrus-extra`. No deductions for Petrus.
 - Petrus R450 "Rent" recurring deduction (#2) ended: `active = 0, effective_to = 2026-09-18`. Backup: `docs/restore-2026-09-22-petrus/rent_deduction_before.json`. Undo: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2`.
+- General staff rule corrected (rate rules v7): Warehouse Mon–Fri R650 fixed 07–16 + R81,25/h outside; Event/Venue Mon–Fri R750 fixed 07–16 + R90/h outside; Sat R750 fixed 08–16 + R95/h outside; Sun R750 fixed 08–16 + R120/h outside. Music Bus unchanged.
 - Handover: `docs/handover-2026-09-22-complete-rules.md` / `.pdf`.

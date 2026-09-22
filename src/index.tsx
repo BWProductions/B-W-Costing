@@ -8,7 +8,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-22-5'
+const WAGES_UI_VERSION = 'v2026-09-22-6'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3692,7 +3692,7 @@ async function openWarehouseOrEventReview(env: Bindings | undefined, r: { id: nu
   const staff = await db.prepare(`SELECT display_name FROM wage_staff WHERE id = ?`).bind(r.staff_id).first<{ display_name: string }>()
   const name = staff?.display_name || ('staff ' + r.staff_id)
   const key = 'rate_choice_warehouse_or_event|shift:' + r.id
-  const reason = 'RATE CHOICE NEEDED: the wording mentions "warehouse" but the work type is ' + (r.work_type || 'Normal') + ', so it is not clearly warehouse-only. Bernie must choose Warehouse (R81,25/h weekday) or Event/Venue (R750 fixed 07–16 + R90/h outside) before the rate is decided. Until then the shift stays at the engine amount.'
+  const reason = 'RATE CHOICE NEEDED: the wording mentions "warehouse" but the work type is ' + (r.work_type || 'Normal') + ', so it is not clearly warehouse-only. Bernie must choose Warehouse (R650 fixed 07–16 + R81,25/h outside) or Event/Venue (R750 fixed 07–16 + R90/h outside) before the rate is decided. Until then the shift stays at the engine amount.'
   const snapshot = JSON.stringify({ shiftId: r.id, source: 'shift', staffId: r.staff_id, employee: name, workDate: r.work_date, venue: r.outlet_venue, eventName: r.event_name, workType: r.work_type, workDescription: r.work_description, startTime: r.start_time, endTime: r.end_time, hours: r.hours_worked, amountNow: r.amount })
   const system = JSON.stringify({ comparisonLabel: 'rate choice', warningTitle: 'Rate choice: Warehouse or Event/Venue', humanReason: reason, rateChoice: 1, staffBlocking: 0, autoDuplicate: 0, conflictDetected: 0 })
   await db.prepare(`INSERT INTO wage_payroll_reviews (issue_key, status, warning_kind, severity, staff_id, staff_name, work_date, payroll_week_start, subject_source, subject_shift_id, compared_source, compared_shift_id, warning_reason, issue_summary, original_hours, facts_hash, subject_snapshot_json, system_snapshot_json)
@@ -3835,16 +3835,20 @@ function subtractCovered(s: number, e: number, covered: Array<[number, number]>)
 // ---------------------------------------------------------------------------
 // B&W WAGES AND MUSIC BUS RATE RULES (owner, 2026-09-15). Replaces the previous
 // weekday/weekend calculations for NEW final submissions only.
-//   General staff  Mon–Fri Warehouse (wording contains "Warehouse")  R81,25/h
-//                  Mon–Fri Event/Venue  R750 fixed for 07–16 + R90/h before 07:00 / after 16:00
-//                  Saturday R95/h · Sunday R120/h (no fixed day)
+//   General staff (owner 2026-09-22 correction, rate rules v7):
+//                  Mon–Fri Warehouse (work type Warehouse Team)  R650 fixed for 07–16 + R81,25/h before 07:00 / after 16:00
+//                  Mon–Fri Event/Venue (other work types)       R750 fixed for 07–16 + R90/h before 07:00 / after 16:00
+//                  Saturday (both)  R750 fixed for 08–16 + R95/h before 08:00 / after 16:00
+//                  Sunday (both)    R750 fixed for 08–16 + R120/h before 08:00 / after 16:00
 //   Music Bus      Mon–Sat R750 fixed for 07–16 + R120/h outside · Sunday R120/h
 //   Petrus (staff 4)  v6: R640 set day rate for 06–16 Mon–Sat · Mon–Fri outside 06–16 R55/h (held for office approval) · Sat outside 06–16 R80/h automatic · Sunday whole entry held for owner approval
 //   Gardeners (staff 1, 2)  House / House/Garden: engine's own gardener rate kept (not recalculated)
 //                  Team block (Warehouse Team / Team Assistance): general-staff rules for that day
 //   Never the old R375 half day; never the old ×1.2 / ×1.5 weekend factors.
 // ---------------------------------------------------------------------------
-const OWNER_RATE_RULES_VERSION = 6
+const OWNER_RATE_RULES_VERSION = 7
+// General staff weekend fixed day window (owner 2026-09-22): 08:00–16:00.
+const RULE_WEEKEND_WINDOW_START = 8 * 60, WAREHOUSE_DAY = 650, WAREHOUSE_EXTRA_RATE = 81.25
 // Petrus (staff 4), owner 2026-09-22 (amended later the same day): SET DAY RATE R640,00 for 06:00–16:00 every day;
 // Mon–Fri time before 06:00 / after 16:00 R55/h (held for office approval); Sat & Sun before 06:00 / after 16:00 R80/h (automatic).
 const PETRUS_DAY = 640, PETRUS_WINDOW_START = 6 * 60, PETRUS_WINDOW_END = 16 * 60, PETRUS_EXTRA_RATE = 55, PETRUS_WEEKEND_EXTRA_RATE = 80
@@ -3930,10 +3934,19 @@ function ownerPayForShift(dateIso: string, startTime: string, endTime: string, k
     const heldParts = [pBeforeH > 0 ? `${h(pBeforeH)} h before 06:00` : '', pAfterH > 0 ? `${h(pAfterH)} h after 16:00` : ''].filter(Boolean).join(' + ')
     return { amount: r2(base), hourlyRate: PETRUS_EXTRA_RATE, breakdown: `Petrus weekday: ${dayText}${heldH > 0 ? ` + ${heldParts} HELD — office to approve and set the rate (R55/h offered)` : ''}`, ...(heldH > 0 ? { heldExtraHours: r2(heldH), heldBeforeHours: r2(pBeforeH), heldAfterHours: r2(pAfterH), baseAmount: r2(base) } : {}) }
   }
-  // general staff (event / warehouse)
-  if (dow === 0) return { amount: r2(totalH * 120), hourlyRate: 120, breakdown: `Sunday: ${h(totalH)} h × R120` }
-  if (dow === 6) return { amount: r2(totalH * 95), hourlyRate: 95, breakdown: `Saturday: ${h(totalH)} h × R95` }
-  if (kind === 'warehouse') return { amount: r2(totalH * 81.25), hourlyRate: 81.25, breakdown: `Warehouse weekday: ${h(totalH)} h × R81,25` }
+  // general staff (event / warehouse) — owner 2026-09-22 correction (rate rules v7)
+  if (dow === 0 || dow === 6) {
+    // Weekend: R750 fixed for any time inside 08:00–16:00 (warehouse and event alike) + R95/h (Sat) or R120/h (Sun) outside 08–16.
+    const wInside = overlapMinutes(sMin, eMin, RULE_WEEKEND_WINDOW_START, RULE_WINDOW_END)
+    const wOutsideH = ((eMin - sMin) - wInside) / 60
+    const rate = dow === 0 ? 120 : 95
+    const amt = (wInside > 0 ? 750 : 0) + wOutsideH * rate
+    return { amount: r2(amt), hourlyRate: rate, breakdown: `${dow === 0 ? 'Sunday' : 'Saturday'}: ${wInside > 0 ? 'R750 fixed 08–16' : 'no 08–16 time'}${wOutsideH > 0 ? ` + ${h(wOutsideH)} h outside 08–16 × R${rate}` : ''}` }
+  }
+  if (kind === 'warehouse') {
+    const amt = (insideMin > 0 ? WAREHOUSE_DAY : 0) + outsideH * WAREHOUSE_EXTRA_RATE
+    return { amount: r2(amt), hourlyRate: WAREHOUSE_EXTRA_RATE, breakdown: `Warehouse weekday: ${insideMin > 0 ? 'R650 fixed 07–16' : 'no 07–16 time'}${outsideH > 0 ? ` + ${h(outsideH)} h outside × R81,25` : ''}` }
+  }
   const amt = (insideMin > 0 ? 750 : 0) + outsideH * 90
   return { amount: r2(amt), hourlyRate: 90, breakdown: `Event/venue weekday: ${insideMin > 0 ? 'R750 fixed 07–16' : 'no 07–16 time'}${outsideH > 0 ? ` + ${h(outsideH)} h outside × R90` : ''}` }
 }
@@ -4118,7 +4131,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       <input type="hidden" name="return_to" value="__RETURN__">
       <div style="margin-bottom:6px"><strong>Bernie to choose the rate for this shift:</strong></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <button type="submit" name="choice" value="warehouse" style="padding:5px 10px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer">Warehouse (R81,25/h)</button>
+        <button type="submit" name="choice" value="warehouse" style="padding:5px 10px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer">Warehouse (R650 fixed 07–16 + R81,25/h outside)</button>
         <button type="submit" name="choice" value="event" style="padding:5px 10px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer">Event/Venue (R750 fixed 07–16 + R90/h outside)</button>
       </div>
       <div style="opacity:.6;margin-top:4px">Your choice is recorded with your name on review #${v.id} and the shift's amount is set to the chosen rule (Sat/Sun hours are the same either way). Nothing else changes.</div>
@@ -4434,7 +4447,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     ${(() => {
       const sorted = ruleDiffsAll.slice().sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
       const head = `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div style="font-weight:800;color:#93c5fd">⚖ Pay-rule check — ${gRuleDays ? gRuleDays + ' day' + (gRuleDays === 1 ? '' : 's') + ' differ from the rule: paid ' + fmtRand(gRuleOver) + ' more and ' + fmtRand(gRuleUnder) + ' less than the rule (net ' + (gRuleAmount >= 0 ? '+' : '−') + fmtRand(Math.abs(gRuleAmount)) + ')' : 'every paid day matches the rule'}</div>${gRuleDays ? `<a href="#" onclick="var b=document.getElementById('bw-rule-list');b.style.display=b.style.display==='none'?'block':'none';return false" style="color:#e2b93b;font-weight:700;font-size:12px">show / hide list</a>` : ''}</div>
-        <div style="font-size:12px;opacity:.8;margin-top:3px">Rule used (B&W rate rules 2026-09-15): General staff — Mon–Fri Warehouse R81,25/h; Mon–Fri Event/Venue R750 fixed 07–16 + R90/h outside; Saturday R95/h; Sunday R120/h. Music Bus — Mon–Sat R750 fixed 07–16 + R120/h outside; Sunday R120/h. Petrus (from 22 Sep 2026) — R640 set day rate for 06–16 Mon–Sat; Saturday before 06:00 / after 16:00 R80/h automatically; Mon–Fri before 06:00 / after 16:00 (R55/h) is HELD and flagged red — the office approves it or sets another rate; SUNDAY is never automatic — the whole entry is held (R640 + R80/h recommended) until the owner approves or declines. No deductions for Petrus. Gardeners keep their gardener rate; on the Team block they get general-staff rates. A fixed day is counted once per person per day; overlapping entries once. <strong>Nothing is changed by this check</strong> — it only shows where the amount paid differs, so you can decide.</div>`
+        <div style="font-size:12px;opacity:.8;margin-top:3px">Rule used (B&W rate rules, corrected 22 Sep 2026): General staff — Mon–Fri Warehouse R650 fixed 07–16 + R81,25/h outside; Mon–Fri Event/Venue R750 fixed 07–16 + R90/h outside; Saturday R750 fixed 08–16 + R95/h outside; Sunday R750 fixed 08–16 + R120/h outside. Music Bus — Mon–Sat R750 fixed 07–16 + R120/h outside; Sunday R120/h. Petrus (from 22 Sep 2026) — R640 set day rate for 06–16 Mon–Sat; Saturday before 06:00 / after 16:00 R80/h automatically; Mon–Fri before 06:00 / after 16:00 (R55/h) is HELD and flagged red — the office approves it or sets another rate; SUNDAY is never automatic — the whole entry is held (R640 + R80/h recommended) until the owner approves or declines. No deductions for Petrus. Gardeners keep their gardener rate; on the Team block they get general-staff rates. A fixed day is counted once per person per day; overlapping entries once. <strong>Nothing is changed by this check</strong> — it only shows where the amount paid differs, so you can decide.</div>`
       if (!sorted.length) return `<section id="bw-rule-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(20,83,45,.18);border:1px solid rgba(96,165,250,.35)">${head}</section>`
       const lines = sorted.map((c) => `<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid rgba(255,255,255,.08);font-size:12.5px"><span style="flex:0 0 auto">${c.diff > 0 ? pill('OVER', '#7f1d1d', '#fff') : pill('UNDER', '#1e3a8a', '#fff')}</span><div style="flex:1"><strong>${escapeHtmlText(c.name)}</strong> · ${escapeHtmlText(c.date)} (${dayName(c.date)}) · ${escapeHtmlText(c.rule.span)} · paid <strong>${fmtRand(c.paid)}</strong> vs rule <strong>${fmtRand(c.rule.amount)}</strong> → <strong>${c.diff > 0 ? '+' : '−'}${fmtRand(Math.abs(c.diff))}</strong><a href="#" onclick="var b=document.getElementById('bw-rule-top-${c.staffId}-${c.date}');if(b){b.style.display=b.style.display==='none'?'block':'none'}return false" style="margin-left:8px;color:#e2b93b;font-weight:700">Open ▾</a><div id="bw-rule-top-${c.staffId}-${c.date}" style="display:none;margin-top:2px">${ruleDetailTop(c)}</div></div></div>`).join('')
       return `<section id="bw-rule-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(30,58,138,.12);border:1px solid rgba(96,165,250,.5)">${head}<div id="bw-rule-list" style="margin-top:6px">${lines}</div></section>`

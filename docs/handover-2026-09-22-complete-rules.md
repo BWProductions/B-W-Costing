@@ -1,7 +1,7 @@
 ---
 title: "B&W Productions — Wages System: Complete Rules & Handover"
 subtitle: "Every agreed rule and regulation, everything built and changed 12–22 September 2026, how the office reviews work, and how to restore"
-date: "22 September 2026 · live version v2026-09-22-5 · restore tag restore-2026-09-22-petrus-v5"
+date: "22 September 2026 · live version v2026-09-22-6 · restore tag restore-2026-09-22-petrus-v5"
 ---
 
 # Part 1 — Where things are
@@ -18,16 +18,17 @@ date: "22 September 2026 · live version v2026-09-22-5 · restore tag restore-20
 | Database | Cloudflare D1 `bw-productions-db` |
 | Code | git `main`, tag `restore-2026-09-21-already-paid` |
 
-# Part 2 — Pay rules (B&W rate rules v5 — general rules owner 15 Sep 2026; Petrus rule owner 22 Sep 2026)
-Applied automatically at **Final Submission**, priced **per shift on the actual day worked**. The paid row is stamped `Rate rules 2026-09-15: …`.
+# Part 2 — Pay rules (B&W rate rules v7 — general staff corrected by the owner 22 Sep 2026; Petrus rule 22 Sep 2026)
 
-**General staff**
+The rate depends on the **work type the worker selects** and the **actual day worked**. A fixed day is paid **once per person per day**; overlapping entries are counted once.
 
-| Day | Warehouse (work type *Warehouse Team*) | Event / Venue (all other work) |
+| Day | Warehouse (work type "Warehouse Team") | Event / Venue (any other work type) |
 |---|---|---|
-| Monday–Friday | **R81,25 / h** | **R750 fixed** for time inside 07:00–16:00 **+ R90 / h** before 07:00 or after 16:00 |
-| Saturday | R95 / h | R95 / h |
-| Sunday | R120 / h | R120 / h |
+| Monday–Friday | **R650 fixed** for any time inside 07:00–16:00 **+ R81,25 / h** before 07:00 or after 16:00 | **R750 fixed** for any time inside 07:00–16:00 **+ R90 / h** before 07:00 or after 16:00 |
+| Saturday | **R750 fixed** for any time inside 08:00–16:00 **+ R95 / h** before 08:00 or after 16:00 | same |
+| Sunday | **R750 fixed** for any time inside 08:00–16:00 **+ R120 / h** before 08:00 or after 16:00 | same |
+
+Examples: Warehouse Mon 07–16 = R650 · Warehouse Mon 06–18 = R650 + 3 h × R81,25 = R893,75 · Warehouse Mon 16–20 (no day time) = R325 · Event Mon 07–16 = R750 · Event Mon 05–16 = R930 · Event Mon 16–18 = R180 · Sat 08–16 = R750 · Sat 06–18 = R750 + 4 h × R95 = R1 130 · Sun 08–16 = R750 · Sun 06–20 = R750 + 6 h × R120 = R1 470 · Sat 22:00–Sun 02:00 = 2 h × R95 + 2 h × R120 = R430.
 
 * **Music Bus** (work type *Music Bus*): Mon–Sat **R750 fixed** (07–16) **+ R120/h** outside · Sunday **R120/h**.
 * **Petrus (Tsotlego Petrus Malakoane) — NEW RULE from 22 Sep 2026 (rate rules v6)**: **set day rate R640,00** for 06:00–16:00, Monday–Saturday. Sunday is never automatic.
@@ -44,10 +45,10 @@ Applied automatically at **Final Submission**, priced **per shift on the actual 
 * **Gardeners (Givemore, Takavaudza)**: House / House-Garden work at **R62,50/h**. Their Warehouse Team / Team Assistance work is priced as general staff.
 * **Sharleen Ndlovu**: fixed weekly **R3 000**.
 * **Midnight rule**: one row; hours before 00:00 at the start day's rate, after 00:00 at the next day's.
-* **"Warehouse" only in the wording** (work type not Warehouse): red **Rate-choice** review; Bernie clicks Warehouse (R81,25/h) or Event/Venue (R750 + R90/h).
+* **"Warehouse" only in the wording** (work type not Warehouse): red **Rate-choice** review; Bernie clicks Warehouse (R650 fixed + R81,25/h) or Event/Venue (R750 fixed + R90/h). Weekends need no choice (same rates).
 * **Never**: R375 half day · Sunday ×1.5 / ×1.2 · Music Bus R130 / R190.
 
-Examples: Warehouse Mon 08–16 = R650 · Event Mon 05–16 = R930 · Event Sun 07–12 = R600 · Music Bus Sat 08–22 = R1 470 · Event Sat 22:00–02:00 = R430.
+Music Bus example: Sat 08–22 = R750 + 6 h × R120 = R1 470 · Sun 07–12 = R600.
 
 **Staff**: Bhekizitha, Brian, Daniel, Erence, Erick, Isaac, John, Joshua, Patrick, Solomon, Thandanani, Thina — general R90 base. Givemore — House R62,50 / Team Assistance R90. Takavaudza — House-Garden R62,50 / Warehouse Team R90. Lebo — R62,50. Petrus — R640 set day rate (see above). Sharleen — fixed weekly.
 
@@ -147,6 +148,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 * Approved "already paid" amounts on drafts now show immediately in the worker's green figure and row ("pays when final-submitted"), and are not re-flagged after Final Submission.
 * **Petrus rate rules v6** (table in Part 2): R640 set day rate for 06–16 Mon–Sat; Saturday extras R80/h automatic; **Sunday whole entry held for owner approval** (approve as recommended / other amount / decline); **Mon–Fri time outside 06–16 (R55/h) held for office approval and rate decision** (review key `petrus_extra|shift:ID`, route `/wages-admin/petrus-extra`). Earlier the same day the rule was briefly R633,33/day (v2026-09-22-2/-3) — superseded before any Petrus row was paid under it. Applies to every Petrus row final-submitted from 22 Sep; the dashboard rule summary and Excel breakdown text read "R640 set day rate (06–16)".
 * **Petrus: all deductions removed** — R450 Rent ended, no loans (see Part 2).
+* **General staff rule corrected (v2026-09-22-6, rate rules v7)**: Warehouse Mon–Fri is **R650 fixed 07–16 + R81,25/h outside** (was wrongly hourly-only); Saturday and Sunday are **R750 fixed 08–16 + R95/h / R120/h outside** (were wrongly hourly-only). Checked: the only rows already final-submitted in the 19–25 Sep payroll (Patrick, Event/Venue weekdays) are unchanged by the correction; closed payrolls untouched.
 
 # Part 8 — Payroll 12–18 Sep 2026 (paid 17 Sep) — final figures
 111 paid rows (24 missed) · claimed 843,50 h · R72 438,15 · **approved 793,75 h · R71 096,90** · missed 98,00 h · R8 861,25 · deductions R3 210,00 · **net R67 886,90**. Full detail: `handover-2026-09-16-complete-hardcopy.pdf`.
@@ -154,7 +156,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 # Part 9 — Restore points
 | Tag / folder | State |
 |---|---|
-| `restore-2026-09-22-petrus-v5` | **Live now (v2026-09-22-5)** — Petrus v5 rule + rent deduction removed. To undo only the deduction removal: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2` |
+| `restore-2026-09-22-petrus-v5` | **Live now (v2026-09-22-6)** — Petrus v5 rule + rent deduction removed. To undo only the deduction removal: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2` |
 | `restore-2026-09-21-already-paid` | v2026-09-21-2 (already-paid rule, old Petrus rule, rent deduction still active) |
 | `restore-2026-09-18-rolled-back` | v2026-09-16-2 after the 18 Sep rollback |
 | `restore-2026-09-15-approved` | 15 Sep approved state + full data snapshot (`docs/restore-2026-09-15-approved/`) |
@@ -167,7 +169,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 git checkout restore-2026-09-22-petrus-v5
 npm run build
 npx wrangler pages deploy dist --project-name bw-productions --branch main --commit-dirty=true
-curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-22-5
+curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-22-6
 ```
 To go back to before the already-paid rule: `git checkout restore-2026-09-18-rolled-back` and deploy (expect v2026-09-16-2); any `paid_before|…` reviews can then be deleted (they are the only rows it writes).
 
