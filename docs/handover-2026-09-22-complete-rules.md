@@ -1,7 +1,7 @@
 ---
 title: "B&W Productions — Wages System: Complete Rules & Handover"
 subtitle: "Every agreed rule and regulation, everything built and changed 12–22 September 2026, how the office reviews work, and how to restore"
-date: "22 September 2026 · live version v2026-09-22-11 · restore tag restore-2026-09-22-petrus-v5"
+date: "22 September 2026 · live version v2026-09-22-12 · restore tag restore-2026-09-22-petrus-v5"
 ---
 
 # Part 1 — Where things are
@@ -18,7 +18,7 @@ date: "22 September 2026 · live version v2026-09-22-11 · restore tag restore-2
 | Database | Cloudflare D1 `bw-productions-db` |
 | Code | git `main`, tag `restore-2026-09-21-already-paid` |
 
-# Part 2 — Pay rules (B&W rate rules v9 — general staff HOURLY BY PLACE, owner 22 Sep 2026; Petrus rule 22 Sep 2026)
+# Part 2 — Pay rules (B&W rate rules v10 — general staff HOURLY BY PLACE, owner 22 Sep 2026; Petrus rule 22 Sep 2026)
 
 General staff are paid **by the hour, to the hour, at the rate of the place they worked**. No fixed day; no before/after premium.
 
@@ -56,6 +56,24 @@ Owner's reasoning (22 Sep): "R650 ÷ 8 = R81,25. Take the time worked at the war
 Music Bus example: Sat 08–22 = R750 + 6 h × R120 = R1 470 · Sun 07–12 = R600.
 
 **Staff**: Bhekizitha, Brian, Daniel, Erence, Erick, Isaac, John, Joshua, Patrick, Solomon, Thandanani, Thina — general R90 base. Givemore — House R62,50 / Team Assistance R90. Takavaudza — House-Garden R62,50 / Warehouse Team R90. Lebo — R62,50. Petrus — R640 set day rate (see above). Sharleen — fixed weekly.
+
+## Public holidays (owner 22 Sep 2026, rate rules v10) — LIVE
+
+Official gov.za list (Public Holidays Act 36 of 1994; a holiday on a Sunday makes the following Monday a holiday) **plus the proclaimed Election Day, Wednesday 4 November 2026**. 2026 remaining: Thu 24 Sep Heritage Day · Wed 4 Nov Election Day · Wed 16 Dec Reconciliation · Fri 25 Dec Christmas · Sat 26 Dec Goodwill. 2027 loaded to Day of Goodwill (observed Mon 27 Dec). The list lives in `SA_PUBLIC_HOLIDAYS` in `src/index.tsx` and in the engine table `wage_public_holidays` (Election Day added 22 Sep).
+
+**Work on a public holiday is never paid automatically.** Every entry is a **red review** with the recommended amount and three buttons: **Approve public holiday — R…** · **Other amount** · **Decline — R0**. R0 until the owner decides. Recommended amounts:
+
+| Who | Public-holiday rate |
+|---|---|
+| General staff — Warehouse | **R162,50 / h** (R81,25 × 2) · **no meeting deduction** |
+| General staff — Venue | **R190 / h** (R95 × 2) |
+| Petrus | **No fixed day** — **R160 / h** for every hour (R80 × 2, R80 = R640 ÷ 8) |
+| Music Bus | **R750 fixed** 07–16 **+ R180 / h** outside 07–16 |
+| Gardener House work / Sharleen | own rule, unchanged |
+
+Examples (Heritage Day): Warehouse 06–16 = 10 h × R162,50 = R1 625 · Venue 08–18 = R1 900 · Petrus 06:30–16:00 = 9,5 h × R160 = R1 520 · Music Bus 08–22 = R750 + 6 h × R180 = R1 830 · Wed 23 Sep 22:00 → Thu 24 Sep 02:00 = 2 h × R95 paid + Heritage 2 h × R190 = R380 held.
+
+Owner's words: "Petrus — take the hourly rate, R80, or event rate, and multiply by 2 for the hours worked. No longer a fixed rate on a public holiday. Music Bus fixed 750 for 7 to 4; anything after 4 pm R180 an hour."
 
 # Part 3 — Rules for staff capturing
 1. Calendar allows **last payroll's Saturday → this payroll's Friday** only. Older: *"OLDER THAN ONE WEEK — cannot be final-submitted."* Later: *"NEXT PAYROLL — capture it from Saturday."* Server refuses both.
@@ -189,6 +207,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 * **Crew pattern & venue-name check (v2026-09-22-9)** — see Part 5b. Module `src/crew-pattern.ts`, review key `crew_pattern|shift:ID` / `crew_pattern|draft:ID`.
 * **Overlap reviews show the full breakdown; self-compare reviews auto-voided (v2026-09-22-10)** — see Part 5c. Patrick #9943 / #9951 voided (draft vs its own paid row).
 * **Place decision buttons (v2026-09-22-11)**: every Rate-choice / Crew-pattern review — paid row or draft — offers WAREHOUSE R81,25/h and VENUE R95/h with the rand each produces; a draft decision is applied automatically on Final Submission (owner: "pay as claimed doesn't tell me which one is warehouse and which is venue").
+* **Public holidays (v2026-09-22-12, rate rules v10)** — see Part 2 → Public holidays. Also fixed: the closed-week dashboard view had gone blank for one deploy ("too many SQL variables" on the overlap-breakdown lookup) — chunked, verified 12–18 Sep renders with 118 reviews.
 
 # Part 8 — Payroll 12–18 Sep 2026 (paid 17 Sep) — final figures
 111 paid rows (24 missed) · claimed 843,50 h · R72 438,15 · **approved 793,75 h · R71 096,90** · missed 98,00 h · R8 861,25 · deductions R3 210,00 · **net R67 886,90**. Full detail: `handover-2026-09-16-complete-hardcopy.pdf`.
@@ -196,7 +215,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 # Part 9 — Restore points
 | Tag / folder | State |
 |---|---|
-| `restore-2026-09-22-petrus-v5` | **Live now (v2026-09-22-11)** — Petrus v5 rule + rent deduction removed. To undo only the deduction removal: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2` |
+| `restore-2026-09-22-petrus-v5` | **Live now (v2026-09-22-12)** — Petrus v5 rule + rent deduction removed. To undo only the deduction removal: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2` |
 | `restore-2026-09-21-already-paid` | v2026-09-21-2 (already-paid rule, old Petrus rule, rent deduction still active) |
 | `restore-2026-09-18-rolled-back` | v2026-09-16-2 after the 18 Sep rollback |
 | `restore-2026-09-15-approved` | 15 Sep approved state + full data snapshot (`docs/restore-2026-09-15-approved/`) |
@@ -209,7 +228,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 git checkout restore-2026-09-22-petrus-v5
 npm run build
 npx wrangler pages deploy dist --project-name bw-productions --branch main --commit-dirty=true
-curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-22-11
+curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-22-12
 ```
 To go back to before the already-paid rule: `git checkout restore-2026-09-18-rolled-back` and deploy (expect v2026-09-16-2); any `paid_before|…` reviews can then be deleted (they are the only rows it writes).
 
