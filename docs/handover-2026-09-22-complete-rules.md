@@ -1,7 +1,7 @@
 ---
 title: "B&W Productions — Wages System: Complete Rules & Handover"
 subtitle: "Every agreed rule and regulation, everything built and changed 12–22 September 2026, how the office reviews work, and how to restore"
-date: "22 September 2026 · live version v2026-09-22-4 · restore tag restore-2026-09-22-petrus-v5"
+date: "22 September 2026 · live version v2026-09-22-5 · restore tag restore-2026-09-22-petrus-v5"
 ---
 
 # Part 1 — Where things are
@@ -30,16 +30,17 @@ Applied automatically at **Final Submission**, priced **per shift on the actual 
 | Sunday | R120 / h | R120 / h |
 
 * **Music Bus** (work type *Music Bus*): Mon–Sat **R750 fixed** (07–16) **+ R120/h** outside · Sunday **R120/h**.
-* **Petrus (Tsotlego Petrus Malakoane) — NEW RULE from 22 Sep 2026 (rate rules v6, final wording of the day)**: **set day rate R640,00** for 06:00–16:00, every day of the week.
+* **Petrus (Tsotlego Petrus Malakoane) — NEW RULE from 22 Sep 2026 (rate rules v6)**: **set day rate R640,00** for 06:00–16:00, Monday–Saturday. Sunday is never automatic.
 
   | Day | Inside 06:00–16:00 | Before 06:00 / after 16:00 |
   |---|---|---|
-  | Monday–Friday | **R640,00 set day rate** for the complete day, whatever time he arrives (he only starts at 06:00) | **R55 / h — not paid automatically.** Held and flagged red on the dashboard ("Petrus: time outside 06:00–16:00 on a weekday — approve and set the rate"). The office clicks **Approve at R55/h — R…**, types **another rate**, or **Not payable — R0**. Only then is it added to the shift and the Excel. |
-  | Saturday & Sunday | **R640,00 set day rate** | **R80 / h**, paid automatically |
+  | Monday–Friday | **R640,00 set day rate** for the complete day, whatever time he arrives (he only starts at 06:00) | **R55 / h — not paid automatically.** Held and flagged red ("Petrus: time outside 06:00–16:00 on a weekday — approve and set the rate"). Office clicks **Approve at R55/h — R…**, types **another rate**, or **Not payable — R0**. Only then is it added to the shift and the Excel. |
+  | Saturday | **R640,00 set day rate** | **R80 / h**, paid automatically |
+  | **Sunday** | **Nothing automatic — the whole entry is HELD.** Red flag "Petrus: Sunday entry — owner to approve or decline" with the recommendation (R640 set day rate + R80/h outside 06–16). Buttons: **Approve Sunday — R…** · **Other amount** · **Decline — R0**. R0 is paid until Bernie decides. | (included in the recommendation at R80/h) |
 
-  Examples: Mon 06:30–16:00 = R640 · Mon 06:30–16:30 = R640 paid + 0,5 h held (R27,50 if approved at R55) · Wed 04:50–16:00 = R640 paid + 1,17 h held · Fri 18:00–22:00 (no day time) = R0 paid + 4 h held · Sat 06:45–13:00 = R640 · **Sat 05:00–17:00 = R800 (day + 2 h × R80)** · Sun 07:00–12:00 = R640 · Sun 04:00–18:00 = R960.
+  Examples: Mon 06:30–16:00 = R640 · Mon 06:30–16:30 = R640 paid + 0,5 h held (R27,50 if approved at R55) · Wed 04:50–16:00 = R640 paid + 1,17 h held · Fri 18:00–22:00 (no day time) = R0 paid + 4 h held · Sat 06:45–13:00 = R640 · **Sat 05:00–17:00 = R800 (day + 2 h × R80)** · Sun 07:00–12:00 = R0 until approved (R640 recommended) · Sun 04:00–18:00 = R0 until approved (R960 recommended) · Sat 20:00–01:00 = R320 paid (Saturday 4 h × R80) + Sunday 1 h held (R80 recommended).
   Rows paid before 22 Sep under the old Petrus rule (R650 for 07–16 + R81,25/h; Sat/Sun R95/h) are **not** recalculated (closed payrolls are closed).
-* **Petrus — R450 "Rent" fixed weekly deduction REMOVED 22 Sep 2026** (owner: "we will pay him the money and he must keep it himself for the rent"). Deduction #2 ended (`active = 0`, effective to 2026-09-18); it no longer appears on the dashboard, Loans & Deductions tab or Auditor Trail. Backup of the record: `docs/restore-2026-09-22-petrus/rent_deduction_before.json`.
+* **Petrus — NO DEDUCTIONS from 22 Sep 2026.** Owner: "All deductions are removed. We no longer deduct anything from him going forward … unless an additional loan is made, but for now it's zero." The R450 "Rent" weekly deduction (#2) is ended (`active = 0`, effective to 2026-09-18) and he has **no loans**. Nothing is deducted on the dashboard, Loans & Deductions tab or Auditor Trail. Backup: `docs/restore-2026-09-22-petrus/rent_deduction_before.json`.
 * **Gardeners (Givemore, Takavaudza)**: House / House-Garden work at **R62,50/h**. Their Warehouse Team / Team Assistance work is priced as general staff.
 * **Sharleen Ndlovu**: fixed weekly **R3 000**.
 * **Midnight rule**: one row; hours before 00:00 at the start day's rate, after 00:00 at the next day's.
@@ -144,8 +145,8 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 
 **22 Sep 2026 (v2026-09-22-1, v2026-09-22-2)**
 * Approved "already paid" amounts on drafts now show immediately in the worker's green figure and row ("pays when final-submitted"), and are not re-flagged after Final Submission.
-* **Petrus rate rules v6** (table in Part 2): R640 set day rate for 06–16 every day; Sat/Sun extras R80/h automatic; **Mon–Fri time outside 06–16 (R55/h) held for office approval and rate decision** (review key `petrus_extra|shift:ID`, route `/wages-admin/petrus-extra`). Earlier the same day the rule was briefly R633,33/day (v2026-09-22-2/-3) — superseded before any Petrus row was paid under it. Applies to every Petrus row final-submitted from 22 Sep; the dashboard rule summary and Excel breakdown text read "R640 set day rate (06–16)".
-* **Petrus R450 Rent deduction removed** (see Part 2).
+* **Petrus rate rules v6** (table in Part 2): R640 set day rate for 06–16 Mon–Sat; Saturday extras R80/h automatic; **Sunday whole entry held for owner approval** (approve as recommended / other amount / decline); **Mon–Fri time outside 06–16 (R55/h) held for office approval and rate decision** (review key `petrus_extra|shift:ID`, route `/wages-admin/petrus-extra`). Earlier the same day the rule was briefly R633,33/day (v2026-09-22-2/-3) — superseded before any Petrus row was paid under it. Applies to every Petrus row final-submitted from 22 Sep; the dashboard rule summary and Excel breakdown text read "R640 set day rate (06–16)".
+* **Petrus: all deductions removed** — R450 Rent ended, no loans (see Part 2).
 
 # Part 8 — Payroll 12–18 Sep 2026 (paid 17 Sep) — final figures
 111 paid rows (24 missed) · claimed 843,50 h · R72 438,15 · **approved 793,75 h · R71 096,90** · missed 98,00 h · R8 861,25 · deductions R3 210,00 · **net R67 886,90**. Full detail: `handover-2026-09-16-complete-hardcopy.pdf`.
@@ -153,7 +154,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 # Part 9 — Restore points
 | Tag / folder | State |
 |---|---|
-| `restore-2026-09-22-petrus-v5` | **Live now (v2026-09-22-4)** — Petrus v5 rule + rent deduction removed. To undo only the deduction removal: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2` |
+| `restore-2026-09-22-petrus-v5` | **Live now (v2026-09-22-5)** — Petrus v5 rule + rent deduction removed. To undo only the deduction removal: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2` |
 | `restore-2026-09-21-already-paid` | v2026-09-21-2 (already-paid rule, old Petrus rule, rent deduction still active) |
 | `restore-2026-09-18-rolled-back` | v2026-09-16-2 after the 18 Sep rollback |
 | `restore-2026-09-15-approved` | 15 Sep approved state + full data snapshot (`docs/restore-2026-09-15-approved/`) |
@@ -166,7 +167,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 git checkout restore-2026-09-22-petrus-v5
 npm run build
 npx wrangler pages deploy dist --project-name bw-productions --branch main --commit-dirty=true
-curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-22-4
+curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-22-5
 ```
 To go back to before the already-paid rule: `git checkout restore-2026-09-18-rolled-back` and deploy (expect v2026-09-16-2); any `paid_before|…` reviews can then be deleted (they are the only rows it writes).
 

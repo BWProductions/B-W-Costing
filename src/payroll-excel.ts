@@ -122,7 +122,10 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     const pex = reviewsForPaid(r).find((v) => /^petrus_extra\|/.test(v.issue_key || ''))
     if (pex) {
       const ps = parseSnap(pex.system_snapshot_json)
-      if (pex.status === 'RESOLVED' && ps?.approvedExtraAmount !== undefined && Number(ps.approvedExtraAmount) > 0) pr = { amount: r2(pr.amount + Number(ps.approvedExtraAmount)), rate: pr.rate, breakdown: pr.breakdown.replace(/ HELD — office to approve.*$/, '') + ` + office approved ${Number(ps.extraHours || 0).toFixed(2)} h outside 06–16 × ${fmtR(Number(ps.approvedRate || 0))} = ${fmtR(Number(ps.approvedExtraAmount))} (#${pex.id})` }
+      if (ps?.petrusSunday) {
+        if (pex.status === 'RESOLVED') pr = { amount: r2(Number(ps.approvedExtraAmount || 0)), rate: pr.rate, breakdown: Number(ps.approvedExtraAmount || 0) > 0 ? `Petrus Sunday approved ${fmtR(Number(ps.approvedExtraAmount))} by ${ps.decidedBy || 'office'} (#${pex.id})` : `Petrus Sunday declined — R0 (#${pex.id})` }
+        else pr = { amount: 0, rate: pr.rate, breakdown: `Petrus Sunday — STILL OPEN #${pex.id}: R0 until the owner approves (recommended ${fmtR(Number(ps.recommendedAmount || 0))})` }
+      } else if (pex.status === 'RESOLVED' && ps?.approvedExtraAmount !== undefined && Number(ps.approvedExtraAmount) > 0) pr = { amount: r2(pr.amount + Number(ps.approvedExtraAmount)), rate: pr.rate, breakdown: pr.breakdown.replace(/ HELD — office to approve.*$/, '') + ` + office approved ${Number(ps.extraHours || 0).toFixed(2)} h outside 06–16 × ${fmtR(Number(ps.approvedRate || 0))} = ${fmtR(Number(ps.approvedExtraAmount))} (#${pex.id})` }
       else if (pex.status === 'RESOLVED') pr = { ...pr, breakdown: pr.breakdown.replace(/ HELD — office to approve.*$/, '') + ` (${Number(ps?.extraHours || 0).toFixed(2)} h outside 06–16 decided not payable, #${pex.id})` }
       else pr = { ...pr, breakdown: pr.breakdown + ` — STILL OPEN #${pex.id}: R0 paid for the extra time until the office decides` }
     }
