@@ -142,7 +142,7 @@ export async function runCrewPatternCheck(d: Deps, opts: { dryRun?: boolean } = 
     const summary = `${f.title} — ${e.name} — ${e.work_date}`
     const subjectSnap = JSON.stringify({ source: e.source, id: e.id, draftId: e.draftId, staffId: e.staff_id, employee: e.name, workDate: e.work_date, startTime: e.start, endTime: e.end, hours: e.hours, workType: e.work_type, venue: e.venue, area: e.area, workDescription: e.descr, amountNow: e.amount })
     // Paid rows: reuse the Rate-choice buttons (Warehouse / Venue re-prices the row). Drafts: record a decision; the worker corrects the entry.
-    const systemSnap = JSON.stringify({ comparisonLabel: 'crew pattern', warningTitle: f.title, humanReason: f.reason, crewPattern: 1, crewKind: f.kind, place: f.place, dayWarehouse: f.dayWarehouse, dayVenue: f.dayVenue, dayWorkers: f.dayWorkers, majorityPlace: f.majorityPlace, others: f.others, rateChoice: e.source === 'shift' ? 1 : 0, staffBlocking: 0, autoDuplicate: 0, conflictDetected: 0 })
+    const systemSnap = JSON.stringify({ comparisonLabel: 'crew pattern', warningTitle: f.title, humanReason: f.reason, crewPattern: 1, crewKind: f.kind, place: f.place, dayWarehouse: f.dayWarehouse, dayVenue: f.dayVenue, dayWorkers: f.dayWorkers, majorityPlace: f.majorityPlace, others: f.others, rateChoice: 1, staffBlocking: 0, autoDuplicate: 0, conflictDetected: 0 })
     const ex = open[key]
     if (!ex) {
       await db.prepare(`INSERT INTO wage_payroll_reviews (issue_key, status, warning_kind, severity, staff_id, staff_name, work_date, payroll_week_start, subject_source, subject_shift_id, compared_source, compared_shift_id, warning_reason, issue_summary, original_hours, facts_hash, subject_snapshot_json, system_snapshot_json)

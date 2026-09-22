@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-22-10'
+const WAGES_UI_VERSION = 'v2026-09-22-11'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3660,7 +3660,16 @@ async function applyOwnerRatesToFinalSubmission(env: Bindings | undefined, draft
   // Real date may have been restored a moment ago; re-read to be safe.
   const fresh = await db.prepare(`SELECT work_date FROM wage_shifts WHERE id = ?`).bind(row.id).first<{ work_date: string }>()
   const dateIso = fresh?.work_date || row.work_date
-  const kind = ownerPayKind(row.staff_id, row.work_type, [row.outlet_venue, row.event_name, row.work_description].join(' '), row.payroll_rule)
+  let kind = ownerPayKind(row.staff_id, row.work_type, [row.outlet_venue, row.event_name, row.work_description].join(' '), row.payroll_rule)
+  // Owner 2026-09-22: if the office already decided the PLACE on this draft (crew-pattern / rate-choice
+  // review), that decision wins over the worker's work type.
+  let placeNote = ''
+  if (kind === 'warehouse' || kind === 'event' || kind === 'warehouse_or_event') {
+    try {
+      const pd = await db.prepare(`SELECT id, decision_reason, system_snapshot_json FROM wage_payroll_reviews WHERE subject_source = 'draft' AND subject_shift_id = ? AND status = 'RESOLVED' AND (issue_key LIKE 'crew_pattern|draft:%' OR issue_key LIKE 'rate_choice_%|draft:%') ORDER BY reviewed_at DESC LIMIT 1`).bind(draftId).first<{ id: number, decision_reason: string, system_snapshot_json: string | null }>()
+      if (pd) { const sn = JSON.parse(pd.system_snapshot_json || '{}'); if (sn.placeDecision === 'warehouse' || sn.placeDecision === 'event') { kind = sn.placeDecision; placeNote = ' | Place decided by office (review #' + pd.id + ', ' + (sn.placeDecidedBy || 'office') + '): ' + (kind === 'warehouse' ? 'WAREHOUSE R81,25/h' : 'VENUE R95/h') } }
+    } catch (err) {}
+  }
   const priced = ownerPayForShift(dateIso, row.start_time, row.end_time, kind)
   if (!priced) {
     // Owner 2026-09-15: "warehouse" only in the wording → not clearly warehouse-only.
@@ -3672,7 +3681,7 @@ async function applyOwnerRatesToFinalSubmission(env: Bindings | undefined, draft
   await db.prepare(`UPDATE wage_shifts SET total_amount = ?, gross_wage = ?, hourly_rate_snapshot = ?, calculation_version = ?,
         payroll_note = CASE WHEN COALESCE(payroll_note,'') = '' THEN ? ELSE payroll_note || ' | ' || ? END
       WHERE id = ? AND staff_id = ?`)
-    .bind(priced.amount, priced.amount, priced.hourlyRate, OWNER_RATE_RULES_VERSION, 'Rate rules 2026-09-15: ' + priced.breakdown, 'Rate rules 2026-09-15: ' + priced.breakdown, row.id, staffId).run()
+    .bind(priced.amount, priced.amount, priced.hourlyRate, OWNER_RATE_RULES_VERSION, 'Rate rules 2026-09-15: ' + priced.breakdown + placeNote, 'Rate rules 2026-09-15: ' + priced.breakdown + placeNote, row.id, staffId).run()
   // Owner 2026-09-22: Petrus weekday time outside 06–16 is held for an office decision on the rate.
   if (kind === 'petrus' && ((priced.heldExtraHours && priced.heldExtraHours > 0) || priced.heldSunday)) {
     try { await openPetrusExtraReview(env, { id: row.id, staff_id: row.staff_id, work_date: dateIso, start_time: row.start_time, end_time: row.end_time, hours_worked: row.hours_worked, work_type: row.work_type, outlet_venue: row.outlet_venue, event_name: row.event_name, work_description: row.work_description }, priced) } catch (err) {}
@@ -4137,15 +4146,23 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     </form>`
     }
     if (snap?.rateChoice) {
+      // Owner 2026-09-22: the office must be able to say WHICH PLACE — two unambiguous buttons, each with the
+      // rate and the rand it produces. Works on paid rows (re-prices now) and drafts (applied on Final Submission).
+      const isDraft = v.subject_source === 'draft'
+      let sub: any = null; try { sub = v.subject_snapshot_json ? JSON.parse(v.subject_snapshot_json) : null } catch (err) {}
+      const wd = sub?.workDate || v.work_date, st = sub?.startTime || '', en = sub?.endTime || ''
+      const pw = st && en ? ownerPayForShift(wd, st, en, 'warehouse') : null
+      const pv = st && en ? ownerPayForShift(wd, st, en, 'event') : null
+      const workerSaid = sub?.workType ? `Worker selected “${escapeHtmlText(sub.workType)}”${sub.venue ? ` at “${escapeHtmlText(sub.venue)}”` : ''}.` : ''
       return `<form method="post" action="/wages-admin/rate-choice" class="bw-review-decide" style="margin-top:6px;padding:8px;border-radius:8px;background:rgba(255,255,255,.05);font-size:12px">
       <input type="hidden" name="review_id" value="${v.id}">
       <input type="hidden" name="return_to" value="__RETURN__">
-      <div style="margin-bottom:6px"><strong>${snap.crewPattern ? 'Confirm where he was — the office chooses the place (this re-prices the row):' : 'Bernie to choose the rate for this shift:'}</strong></div>
+      <div style="margin-bottom:6px"><strong>Where was he? ${workerSaid} Your click decides the place and the rate${isDraft ? ' — applied automatically when he final-submits' : ' — the row is re-priced now'}:</strong></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <button type="submit" name="choice" value="warehouse" style="padding:5px 10px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer">Warehouse (R81,25/h)</button>
-        <button type="submit" name="choice" value="event" style="padding:5px 10px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer">Venue/Event (R95/h)</button>
+        <button type="submit" name="choice" value="warehouse" style="padding:6px 10px;border-radius:6px;border:0;background:#93c5fd;color:#111;font-weight:800;cursor:pointer;text-align:left">WAREHOUSE — R81,25/h${pw ? `<br><span style="font-weight:600">${fmtRand(pw.amount)}</span> <span style="font-weight:400;opacity:.8">(${escapeHtmlText(pw.breakdown.replace(/^Warehouse: /, ''))})</span>` : ''}</button>
+        <button type="submit" name="choice" value="event" style="padding:6px 10px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer;text-align:left">VENUE — R95/h${pv ? `<br><span style="font-weight:600">${fmtRand(pv.amount)}</span> <span style="font-weight:400;opacity:.8">(${escapeHtmlText(pv.breakdown.replace(/^Venue\/event: /, ''))})</span>` : ''}</button>
       </div>
-      <div style="opacity:.6;margin-top:4px">Your choice is recorded with your name on review #${v.id} and the shift's amount is set to the chosen rule. Nothing else changes.</div>
+      <div style="opacity:.6;margin-top:4px">Recorded on review #${v.id} with your name and the place chosen. ${isDraft ? 'Nothing is paid until the worker final-submits; the rate you chose is then used, whatever work type he picked.' : 'The shift amount is set to the chosen place. Nothing else changes.'}</div>
     </form>`
     }
     if (snap?.paidBefore) {
@@ -5110,9 +5127,24 @@ app.post('/wages-admin/rate-choice', async (c) => {
   const sep = safeReturn.includes('?') ? '&' : '?'
   if (!reviewId || !['warehouse', 'event'].includes(choice)) return back(safeReturn + sep + 'error=' + encodeURIComponent('Invalid rate choice.'))
   try {
-    const rv = await db.prepare(`SELECT id, status, issue_key, subject_shift_id, staff_id FROM wage_payroll_reviews WHERE id = ?`).bind(reviewId).first<{ id: number, status: string, issue_key: string, subject_shift_id: number, staff_id: number }>()
-    if (!rv || !/^(rate_choice_warehouse_or_event|crew_pattern)\|shift:/.test(rv.issue_key || '')) return back(safeReturn + sep + 'error=' + encodeURIComponent('Review #' + reviewId + ' is not a rate-choice review.'))
+    const rv = await db.prepare(`SELECT id, status, issue_key, subject_source, subject_shift_id, staff_id, original_hours, system_snapshot_json FROM wage_payroll_reviews WHERE id = ?`).bind(reviewId).first<{ id: number, status: string, issue_key: string, subject_source: string, subject_shift_id: number, staff_id: number, original_hours: number | null, system_snapshot_json: string | null }>()
+    if (!rv || !/^(rate_choice_warehouse_or_event|crew_pattern)\|(shift|draft):/.test(rv.issue_key || '')) return back(safeReturn + sep + 'error=' + encodeURIComponent('Review #' + reviewId + ' is not a rate-choice review.'))
     if (rv.status !== 'OPEN') return back(safeReturn + sep + 'msg=' + encodeURIComponent('Review #' + reviewId + ' was already ' + rv.status + '.'))
+    if (rv.subject_source === 'draft') {
+      // Owner 2026-09-22: the office decides the PLACE on a draft. Recorded now with the rate; applied to
+      // the paid row the moment the worker final-submits (see applyOwnerRatesToFinalSubmission).
+      const dr = await db.prepare(`SELECT id, work_date, start_time, end_time, work_type, outlet_venue FROM wage_shift_drafts WHERE id = ? AND staff_id = ?`).bind(rv.subject_shift_id, rv.staff_id).first<{ id: number, work_date: string, start_time: string, end_time: string, work_type: string, outlet_venue: string }>()
+      const dk: OwnerPayKind = choice === 'warehouse' ? 'warehouse' : 'event'
+      const dp = dr ? ownerPayForShift(dr.work_date, dr.start_time, dr.end_time, dk) : null
+      const labelD = choice === 'warehouse' ? 'WAREHOUSE — R81,25/h' : 'VENUE — R95/h'
+      let snapD: any = {}; try { snapD = JSON.parse(rv.system_snapshot_json || '{}') } catch (err) {}
+      snapD.placeDecision = choice === 'warehouse' ? 'warehouse' : 'event'; snapD.placeDecidedBy = admin.name; snapD.placeAmountIfSubmitted = dp?.amount ?? null; snapD.placeBreakdown = dp?.breakdown || ''
+      const reasonD = labelD + ' chosen by ' + admin.name + ' for draft #' + rv.subject_shift_id + (dp ? ' — will pay ' + fmtRand(dp.amount) + ' when final-submitted (' + dp.breakdown + ')' : '') + (dr && !dr.work_type.toLowerCase().includes('warehouse') && choice === 'warehouse' ? ' — worker selected "' + (dr.work_type || 'Normal') + '"; office overrides to Warehouse' : '') + (dr && dr.work_type.toLowerCase().includes('warehouse') && choice === 'event' ? ' — worker selected "Warehouse Team"; office overrides to Venue' : '')
+      await db.prepare(`UPDATE wage_payroll_reviews SET status = 'RESOLVED', decision_type = 'approve_original', decision_reason = ?, approved_payable_hours = ?, system_snapshot_json = ?, reviewed_by_user_id = ?, reviewed_by_name = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'OPEN'`)
+        .bind(reasonD, rv.original_hours, JSON.stringify(snapD), admin.id || null, admin.name, reviewId).run()
+      await captureWagesDebug(c.env, { request_path: '/wages-admin/rate-choice (draft)', request_method: 'POST', original_payload_json: JSON.stringify({ review_id: reviewId, draft_id: rv.subject_shift_id, choice, by: admin.name }), rewritten_payload_json: JSON.stringify({ amount_if_submitted: dp?.amount ?? null, breakdown: dp?.breakdown || '' }), rewrite_applied: 1, response_status: 302, response_location: safeReturn, response_error_text: '' })
+      return back(safeReturn + sep + 'msg=' + encodeURIComponent('Review #' + reviewId + ': ' + labelD + ' recorded by ' + admin.name + ' for the draft. The rate is applied automatically when the worker final-submits' + (dp ? ' (' + fmtRand(dp.amount) + ')' : '') + '.') + '#bw-review-' + reviewId)
+    }
     const row = await db.prepare(`SELECT id, staff_id, work_date, start_time, end_time, total_amount, gross_wage FROM wage_shifts WHERE id = ? AND staff_id = ?`).bind(rv.subject_shift_id, rv.staff_id).first<{ id: number, staff_id: number, work_date: string, start_time: string, end_time: string, total_amount: number, gross_wage: number }>()
     if (!row) return back(safeReturn + sep + 'error=' + encodeURIComponent('Paid shift #' + rv.subject_shift_id + ' for review #' + reviewId + ' no longer exists.'))
     const kind: OwnerPayKind = choice === 'warehouse' ? 'warehouse' : 'event'

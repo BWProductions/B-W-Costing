@@ -1,7 +1,7 @@
 ---
 title: "B&W Productions — Wages System: Complete Rules & Handover"
 subtitle: "Every agreed rule and regulation, everything built and changed 12–22 September 2026, how the office reviews work, and how to restore"
-date: "22 September 2026 · live version v2026-09-22-10 · restore tag restore-2026-09-22-petrus-v5"
+date: "22 September 2026 · live version v2026-09-22-11 · restore tag restore-2026-09-22-petrus-v5"
 ---
 
 # Part 1 — Where things are
@@ -140,7 +140,7 @@ Known quirk (unchanged): the engine sometimes compares a draft with its own fina
 **What the system does** (current unpaid payroll only, on every dashboard load / Excel download, never in the staff app):
 1. **Venue must be named — RED.** Any entry priced at the venue rate whose venue field is blank or generic ("venue", "event", "site", "n/a", "x" …) is flagged: *"VENUE NOT NAMED: … claims the venue rate (R95/h) … but the venue field is (blank). Ask the worker where he was; if it was the warehouse, re-price at R81,25/h."*
 2. **Crew pattern — ORANGE.** On any day with 4 or more workers, if the minority place is 25 % or less of the crew, each minority entry is flagged with the names: *"CREW PATTERN: 7 of 8 workers say Warehouse on Mon 21 Sep (names) — X says venue 'FNB Stadium'. Was he really there? Confirm the venue, or re-price as Warehouse."* And the reverse: *"5 of 6 were at a venue (FNB Stadium) — X says Warehouse. Check he was not at the venue (R95/h would be due)."*
-3. **Decision**: on a **paid row** the office clicks **Warehouse (R81,25/h)** or **Venue/Event (R95/h)** — the row is re-priced, name and time recorded. On a **draft** the office records the decision; the worker corrects the entry before Final Submission.
+3. **Decision — two unambiguous buttons, on paid rows AND drafts**: *"Where was he? Worker selected 'Warehouse Team' at 'Warehouse'. Your click decides the place and the rate:"* **WAREHOUSE — R81,25/h · R650,00 (8 h × R81,25)** or **VENUE — R95/h · R760,00 (8 h × R95)**. Each button shows the rate and the rand it produces. On a paid row the row is re-priced immediately. On a draft the place is recorded with your name; **when the worker final-submits, the rate you chose is used automatically, whatever work type he picked**, and the paid row's note says "Place decided by office (review #…, name): WAREHOUSE R81,25/h". Nothing is paid before Final Submission.
 4. **Excluded**: Petrus, gardener House work, Music Bus, Sharleen (own rules). A row that already has a Rate-choice flag is not flagged twice. Decided flags never re-open; flags void themselves when the entry is corrected or deleted.
 
 First live run (22 Sep): one flag — #9955 Takavaudza, Mon 21 Sep, "5 of 6 at a venue (FNB Stadium), this one says Warehouse" — a genuine question for the office.
@@ -188,6 +188,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 * **Sunday ×1.2 and the unpaid 07:00–07:30 staff meeting (v2026-09-22-8, rate rules v9)**: Warehouse Sun R97,50/h, Venue Sun R114/h; Mon–Fri warehouse entries lose the meeting overlap. Rate-choice #9954 for Patrick's 22 Sep row now reads Warehouse R731,25 (9 h after the meeting) or Venue R902,50.
 * **Crew pattern & venue-name check (v2026-09-22-9)** — see Part 5b. Module `src/crew-pattern.ts`, review key `crew_pattern|shift:ID` / `crew_pattern|draft:ID`.
 * **Overlap reviews show the full breakdown; self-compare reviews auto-voided (v2026-09-22-10)** — see Part 5c. Patrick #9943 / #9951 voided (draft vs its own paid row).
+* **Place decision buttons (v2026-09-22-11)**: every Rate-choice / Crew-pattern review — paid row or draft — offers WAREHOUSE R81,25/h and VENUE R95/h with the rand each produces; a draft decision is applied automatically on Final Submission (owner: "pay as claimed doesn't tell me which one is warehouse and which is venue").
 
 # Part 8 — Payroll 12–18 Sep 2026 (paid 17 Sep) — final figures
 111 paid rows (24 missed) · claimed 843,50 h · R72 438,15 · **approved 793,75 h · R71 096,90** · missed 98,00 h · R8 861,25 · deductions R3 210,00 · **net R67 886,90**. Full detail: `handover-2026-09-16-complete-hardcopy.pdf`.
@@ -195,7 +196,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 # Part 9 — Restore points
 | Tag / folder | State |
 |---|---|
-| `restore-2026-09-22-petrus-v5` | **Live now (v2026-09-22-10)** — Petrus v5 rule + rent deduction removed. To undo only the deduction removal: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2` |
+| `restore-2026-09-22-petrus-v5` | **Live now (v2026-09-22-11)** — Petrus v5 rule + rent deduction removed. To undo only the deduction removal: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2` |
 | `restore-2026-09-21-already-paid` | v2026-09-21-2 (already-paid rule, old Petrus rule, rent deduction still active) |
 | `restore-2026-09-18-rolled-back` | v2026-09-16-2 after the 18 Sep rollback |
 | `restore-2026-09-15-approved` | 15 Sep approved state + full data snapshot (`docs/restore-2026-09-15-approved/`) |
@@ -208,7 +209,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 git checkout restore-2026-09-22-petrus-v5
 npm run build
 npx wrangler pages deploy dist --project-name bw-productions --branch main --commit-dirty=true
-curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-22-10
+curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-22-11
 ```
 To go back to before the already-paid rule: `git checkout restore-2026-09-18-rolled-back` and deploy (expect v2026-09-16-2); any `paid_before|…` reviews can then be deleted (they are the only rows it writes).
 
