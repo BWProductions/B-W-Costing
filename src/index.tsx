@@ -8,7 +8,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-22-1'
+const WAGES_UI_VERSION = 'v2026-09-22-2'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3802,12 +3802,14 @@ function subtractCovered(s: number, e: number, covered: Array<[number, number]>)
 //                  Mon–Fri Event/Venue  R750 fixed for 07–16 + R90/h before 07:00 / after 16:00
 //                  Saturday R95/h · Sunday R120/h (no fixed day)
 //   Music Bus      Mon–Sat R750 fixed for 07–16 + R120/h outside · Sunday R120/h
-//   Petrus (staff 4)  Mon–Fri R650 fixed for 07–16 + R81,25/h outside · Sat & Sun R95/h
+//   Petrus (staff 4)  v5: Mon–Sat R633,33 fixed for 06–16 (R3 800 ÷ 6) + R82/h after 16 (Sat also before 06) · Sun R95/h · Mon–Fri pre-06:00 ignored
 //   Gardeners (staff 1, 2)  House / House/Garden: engine's own gardener rate kept (not recalculated)
 //                  Team block (Warehouse Team / Team Assistance): general-staff rules for that day
 //   Never the old R375 half day; never the old ×1.2 / ×1.5 weekend factors.
 // ---------------------------------------------------------------------------
-const OWNER_RATE_RULES_VERSION = 4
+const OWNER_RATE_RULES_VERSION = 5
+// Petrus (staff 4), owner 2026-09-22: R3 800 / 6 days = R633,33 per day for 06:00–16:00; R82/h outside; Sunday R95/h.
+const PETRUS_DAY = 3800 / 6, PETRUS_WINDOW_START = 6 * 60, PETRUS_WINDOW_END = 16 * 60, PETRUS_EXTRA_RATE = 82
 // 'warehouse_or_event' (owner 2026-09-15): the work TYPE is not Warehouse but the wording
 // mentions "warehouse" — not clearly warehouse-only, so Bernie must choose Warehouse or
 // Event/Venue in Review before the weekday rate is decided (engine amount stands meanwhile).
@@ -3862,9 +3864,21 @@ function ownerPayForShift(dateIso: string, startTime: string, endTime: string, k
     return { amount: r2(amt), hourlyRate: 120, breakdown: `Music Bus: ${insideMin > 0 ? 'R750 fixed 07–16' : 'no 07–16 time'}${outsideH > 0 ? ` + ${h(outsideH)} h outside × R120` : ''}` }
   }
   if (kind === 'petrus') {
-    if (dow === 0 || dow === 6) return { amount: r2(totalH * 95), hourlyRate: 95, breakdown: `Petrus ${dow === 0 ? 'Sunday' : 'Saturday'}: ${h(totalH)} h × R95` }
-    const amt = (insideMin > 0 ? 650 : 0) + outsideH * 81.25
-    return { amount: r2(amt), hourlyRate: 81.25, breakdown: `Petrus weekday: ${insideMin > 0 ? 'R650 fixed 07–16' : 'no 07–16 time'}${outsideH > 0 ? ` + ${h(outsideH)} h outside × R81,25` : ''}` }
+    // Owner 2026-09-22 (rate rules v5): locked weekly R3 800 for 6 days = R633,33 per day
+    // covering 06:00–16:00 (Mon–Sat). Mon–Fri the day is FIXED regardless of arrival time —
+    // an early/late start inside the day is not extra and not a deduction. Before 06:00 /
+    // after 16:00 = R82/h extra. Sunday (only if worked) = R95/h for every hour (R79,17 × 1.2).
+    if (dow === 0) return { amount: r2(totalH * 95), hourlyRate: 95, breakdown: `Petrus Sunday: ${h(totalH)} h × R95 (R79,17 × 1.2)` }
+    const pInside = overlapMinutes(sMin, eMin, PETRUS_WINDOW_START, PETRUS_WINDOW_END)
+    // Mon–Fri: "he only starts work from 6" (owner 2026-09-22) — time clocked BEFORE 06:00 is
+    // ignored (taxi arrival, not work). Only time AFTER 16:00 is extra. Saturday: before 06:00
+    // and after 16:00 both count at R82/h (owner's table).
+    const pBeforeH = Math.max(0, Math.min(eMin, PETRUS_WINDOW_START) - sMin) / 60
+    const pAfterH = Math.max(0, eMin - Math.max(sMin, PETRUS_WINDOW_END)) / 60
+    const pOutsideH = (dow === 6 ? pBeforeH : 0) + pAfterH
+    const amt = (pInside > 0 ? PETRUS_DAY : 0) + pOutsideH * PETRUS_EXTRA_RATE
+    const ignored = dow !== 6 && pBeforeH > 0 ? ` (${h(pBeforeH)} h before 06:00 not counted — day starts 06:00)` : ''
+    return { amount: r2(amt), hourlyRate: PETRUS_EXTRA_RATE, breakdown: `Petrus ${dow === 6 ? 'Saturday' : 'weekday'}: ${pInside > 0 ? 'R633,33 fixed day (06–16, R3 800 ÷ 6)' : 'no 06–16 time'}${pOutsideH > 0 ? ` + ${h(pOutsideH)} h outside 06–16 × R82` : ''}${ignored}` }
   }
   // general staff (event / warehouse)
   if (dow === 0) return { amount: r2(totalH * 120), hourlyRate: 120, breakdown: `Sunday: ${h(totalH)} h × R120` }
@@ -3901,7 +3915,7 @@ function computeRuleDay(dateIso: string, segments: RuleSegment[]): RuleDayResult
       const inside = overlapMinutes(ps, pe, RULE_WINDOW_START, RULE_WINDOW_END)
       insideMin += inside
       if (kind === 'musicbus') outsideMbMin += (pe - ps) - inside; else outsideStdMin += (pe - ps) - inside
-      const fixed = /R750 fixed/.test(priced.breakdown) ? 750 : /R650 fixed/.test(priced.breakdown) ? 650 : 0
+      const fixed = /R750 fixed/.test(priced.breakdown) ? 750 : /R633,33 fixed/.test(priced.breakdown) ? PETRUS_DAY : /R650 fixed/.test(priced.breakdown) ? 650 : 0
       const variable = priced.amount - fixed
       overtime += variable
       if (fixed) {
@@ -3998,7 +4012,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     if (kind === 'warehouse_or_event' && shiftId && rateChoiceByShift[shiftId]) kind = rateChoiceByShift[shiftId]
     if (kind === 'gardener') return { start, end, rate: workRates[staffId + '|' + wt] ?? 62.5, kind: 'ownrate', label: wt }
     if (kind === 'musicbus') return { start, end, rate: 120, kind: 'musicbus', label: wt }
-    if (kind === 'petrus') return { start, end, rate: 81.25, kind: 'petrus', label: wt }
+    if (kind === 'petrus') return { start, end, rate: PETRUS_EXTRA_RATE, kind: 'petrus', label: wt }
     if (kind === 'warehouse') return { start, end, rate: 81.25, kind: 'warehouse', label: wt }
     if (kind === 'warehouse_or_event') return { start, end, rate: 90, kind: 'event', label: (wt || 'Normal') + ' – rate choice pending (Warehouse or Event/Venue)' }
     return { start, end, rate: 90, kind: 'event', label: wt }
@@ -4334,7 +4348,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     ${(() => {
       const sorted = ruleDiffsAll.slice().sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
       const head = `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div style="font-weight:800;color:#93c5fd">⚖ Pay-rule check — ${gRuleDays ? gRuleDays + ' day' + (gRuleDays === 1 ? '' : 's') + ' differ from the rule: paid ' + fmtRand(gRuleOver) + ' more and ' + fmtRand(gRuleUnder) + ' less than the rule (net ' + (gRuleAmount >= 0 ? '+' : '−') + fmtRand(Math.abs(gRuleAmount)) + ')' : 'every paid day matches the rule'}</div>${gRuleDays ? `<a href="#" onclick="var b=document.getElementById('bw-rule-list');b.style.display=b.style.display==='none'?'block':'none';return false" style="color:#e2b93b;font-weight:700;font-size:12px">show / hide list</a>` : ''}</div>
-        <div style="font-size:12px;opacity:.8;margin-top:3px">Rule used (B&W rate rules 2026-09-15): General staff — Mon–Fri Warehouse R81,25/h; Mon–Fri Event/Venue R750 fixed 07–16 + R90/h outside; Saturday R95/h; Sunday R120/h. Music Bus — Mon–Sat R750 fixed 07–16 + R120/h outside; Sunday R120/h. Petrus — Mon–Fri R650 fixed 07–16 + R81,25/h outside; Sat/Sun R95/h. Gardeners keep their gardener rate; on the Team block they get general-staff rates. A fixed day is counted once per person per day; overlapping entries once. <strong>Nothing is changed by this check</strong> — it only shows where the amount paid differs, so you can decide.</div>`
+        <div style="font-size:12px;opacity:.8;margin-top:3px">Rule used (B&W rate rules 2026-09-15): General staff — Mon–Fri Warehouse R81,25/h; Mon–Fri Event/Venue R750 fixed 07–16 + R90/h outside; Saturday R95/h; Sunday R120/h. Music Bus — Mon–Sat R750 fixed 07–16 + R120/h outside; Sunday R120/h. Petrus (from 22 Sep 2026) — Mon–Sat R633,33 fixed for 06–16 (R3 800 ÷ 6) + R82/h after 16:00 (Saturday also before 06:00); Mon–Fri time before 06:00 not counted; Sunday R95/h. Gardeners keep their gardener rate; on the Team block they get general-staff rates. A fixed day is counted once per person per day; overlapping entries once. <strong>Nothing is changed by this check</strong> — it only shows where the amount paid differs, so you can decide.</div>`
       if (!sorted.length) return `<section id="bw-rule-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(20,83,45,.18);border:1px solid rgba(96,165,250,.35)">${head}</section>`
       const lines = sorted.map((c) => `<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid rgba(255,255,255,.08);font-size:12.5px"><span style="flex:0 0 auto">${c.diff > 0 ? pill('OVER', '#7f1d1d', '#fff') : pill('UNDER', '#1e3a8a', '#fff')}</span><div style="flex:1"><strong>${escapeHtmlText(c.name)}</strong> · ${escapeHtmlText(c.date)} (${dayName(c.date)}) · ${escapeHtmlText(c.rule.span)} · paid <strong>${fmtRand(c.paid)}</strong> vs rule <strong>${fmtRand(c.rule.amount)}</strong> → <strong>${c.diff > 0 ? '+' : '−'}${fmtRand(Math.abs(c.diff))}</strong><a href="#" onclick="var b=document.getElementById('bw-rule-top-${c.staffId}-${c.date}');if(b){b.style.display=b.style.display==='none'?'block':'none'}return false" style="margin-left:8px;color:#e2b93b;font-weight:700">Open ▾</a><div id="bw-rule-top-${c.staffId}-${c.date}" style="display:none;margin-top:2px">${ruleDetailTop(c)}</div></div></div>`).join('')
       return `<section id="bw-rule-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(30,58,138,.12);border:1px solid rgba(96,165,250,.5)">${head}<div id="bw-rule-list" style="margin-top:6px">${lines}</div></section>`

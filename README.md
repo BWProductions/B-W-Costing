@@ -257,3 +257,8 @@ from→to). See `EDIT_AFTER_SIGN_EMAILS` in `src/routes/field.ts`.
 - **Already-paid check** live: current unpaid payroll week only; compares each entry with PAID rows on the same day; prices at the work type the worker selected; rate correction + extra hours; red review with full story and one-click "Approve as recommended — R…"; "I don't agree — change the hours" re-prices live; approved rand amount flows to green figure and Excel correction line; last week's row never changed.
 - Complete rules & handover: `docs/handover-2026-09-21-complete-rules.md` / `.pdf`.
 - Tag: `restore-2026-09-21-already-paid`. Reviews snapshot before first run: `docs/restore-2026-09-21-before-paid-before/`.
+
+## Restore point 22 Sep 2026 — `restore-2026-09-22-petrus-v5` (live v2026-09-22-2)
+- Petrus rate rules v5: R3 800 ÷ 6 = **R633,33 fixed per day** for 06:00–16:00 Mon–Sat; **R82/h** after 16:00 (Saturday also before 06:00); Mon–Fri time before 06:00 not counted (he starts at 06:00); **Sunday R95/h** (R79,17 × 1.2).
+- Petrus R450 "Rent" recurring deduction (#2) ended: `active = 0, effective_to = 2026-09-18`. Backup: `docs/restore-2026-09-22-petrus/rent_deduction_before.json`. Undo: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2`.
+- Handover: `docs/handover-2026-09-22-complete-rules.md` / `.pdf`.
