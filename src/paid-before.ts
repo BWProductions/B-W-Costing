@@ -150,8 +150,17 @@ export async function loadCurrentWeek(d: Deps): Promise<{ entries: Entry[]; paid
 export async function runPaidBeforeCheck(d: Deps, opts: { dryRun?: boolean } = {}): Promise<{ flags: PaidBeforeFlag[]; inserted: number; updated: number; voided: number }> {
   const { db } = d
   const { entries, paidRows } = await loadCurrentWeek(d)
-  const flags = computeFlags(d, entries, paidRows)
+  let flags = computeFlags(d, entries, paidRows)
   let inserted = 0, updated = 0, voided = 0
+  // Once Bernie has DECIDED an already-paid review on a draft, the paid row that draft becomes
+  // must not be flagged again (same key = same draft, so the decision carries over).
+  const decidedKeys = new Set<string>()
+  {
+    const dk = await db.prepare(`SELECT issue_key FROM wage_payroll_reviews WHERE issue_key LIKE '${PAID_BEFORE_PREFIX}%' AND status IN ('RESOLVED','VOID')`).all()
+    for (const r of (dk.results || []) as any[]) decidedKeys.add(String(r.issue_key))
+  }
+  const keyOfFlag = (f: PaidBeforeFlag) => PAID_BEFORE_PREFIX + (f.subject.draftId ? 'draft:' + f.subject.draftId : 'shift:' + f.subject.id)
+  flags = flags.filter((f) => !decidedKeys.has(keyOfFlag(f)))
   if (opts.dryRun) return { flags, inserted, updated, voided }
   const keyOf = (f: PaidBeforeFlag) => PAID_BEFORE_PREFIX + (f.subject.draftId ? 'draft:' + f.subject.draftId : 'shift:' + f.subject.id)
   const ex = await db.prepare(`SELECT id, issue_key, status, facts_hash FROM wage_payroll_reviews WHERE issue_key LIKE '${PAID_BEFORE_PREFIX}%' AND (payroll_week_start = ? OR work_date BETWEEN date(?, '-7 days') AND ?)`).bind(d.weekStart, d.weekStart, d.weekEnd).all()

@@ -8,7 +8,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-21-2'
+const WAGES_UI_VERSION = 'v2026-09-22-1'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4222,8 +4222,9 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         ${td(escapeHtmlText(d.work_description || ''))}
         ${td(escapeHtmlText(d.start_time) + '–' + escapeHtmlText(d.end_time), 'white-space:nowrap')}
         ${td(escapeHtmlText(d.work_type || ''))}
-        ${td('<span style="opacity:.5">not paid</span>', 'text-align:right;white-space:nowrap')}
-        ${td('<span style="opacity:.5">R0,00</span>', 'text-align:right;white-space:nowrap')}
+        ${(() => { const dec = revs.filter((v) => v.status === 'RESOLVED').sort((a, b) => b.id - a.id)[0]; let ds: any = null; try { ds = dec?.system_snapshot_json ? JSON.parse(dec.system_snapshot_json) : null } catch (err) {}
+          if (ds?.paidBefore && ds.approvedAmount !== undefined) return td(`<span style="color:#86efac;font-weight:700">${Number(dec.approved_payable_hours || 0).toFixed(2)} h extra</span>`, 'text-align:right;white-space:nowrap') + td(`<span style="color:#86efac;font-weight:700">${fmtRand(Number(ds.approvedAmount))}</span><div style="font-size:11px;opacity:.7">approved · pays when final-submitted</div>`, 'text-align:right;white-space:nowrap')
+          return td('<span style="opacity:.5">not paid</span>', 'text-align:right;white-space:nowrap') + td('<span style="opacity:.5">R0,00</span>', 'text-align:right;white-space:nowrap') })()}
         ${td((isMissed ? pill('MISSED SHIFT – actual date ' + escapeHtmlText(proxyLongDate(d.work_date)) + ' – ' + escapeHtmlText(d.work_description || ''), '#fdecec', '#7f1d1d') + '<div style="font-size:12px;opacity:.8">Saved temporarily by the worker; will be paid in this payroll once Final Submission is pressed.</div>' : '<div style="font-size:12px;opacity:.8">Saved temporarily by the worker; not yet final-submitted, so not yet in the payroll.</div>') + `<div>${workerAppBtn(sid, d.id)}</div>`)}
         ${td(revs.length ? reviewCell(revs, true, workerAppBtn(sid, d.id)) : workerAppBtn(sid, d.id), 'min-width:260px')}
         ${td(workerAppBtn(sid, d.id, '✎'), 'text-align:center;white-space:nowrap')}
@@ -4260,13 +4261,23 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         agreedA += Math.round(paidA * (ah / paidH) * 100) / 100; agreedApprox = true
       }
     })
+    // Owner 2026-09-22: an "already paid" review approved as a rand amount on a DRAFT (not yet
+    // final-submitted) is money Bernie has approved for this payroll — show it now, not R0.
+    let draftApprovedA = 0, draftApprovedH = 0, draftApprovedN = 0
+    g.drafts.forEach((d) => {
+      const dec = reviewsForDraft(d).filter((v) => v.status === 'RESOLVED').sort((a, b) => b.id - a.id)[0]
+      if (!dec) return
+      let ds: any = null; try { ds = dec.system_snapshot_json ? JSON.parse(dec.system_snapshot_json) : null } catch (err) {}
+      if (ds?.paidBefore && ds.approvedAmount !== undefined) { draftApprovedA += Number(ds.approvedAmount); draftApprovedH += Number(dec.approved_payable_hours || 0); draftApprovedN++ }
+    })
+    agreedH += draftApprovedH; agreedA += draftApprovedA
     gAgreedH += agreedH; gAgreedA += agreedA; if (personHasOpen) gAgreedPending++
     // Green text directly to the right of the yellow claimed figure (owner's spec):
     // "Admin approved: X hours · RY". Display only.
-    const agreedHtml = rows.length
+    const agreedHtml = (rows.length || draftApprovedN)
       ? (personHasOpen
         ? `<span style="color:#fbbf24;font-weight:700;margin-left:12px" title="The approved figure shows once every open review for this person has a recorded decision">Admin approved: ${openRev} review${openRev === 1 ? '' : 's'} still open</span>`
-        : `<span style="color:#86efac;font-weight:700;margin-left:12px" title="Claimed hours less what your resolved reviews took off">Admin approved: ${agreedH.toFixed(2)} hours · ${agreedApprox ? '≈' : ''}${fmtRand(agreedA)}</span>`)
+        : `<span style="color:#86efac;font-weight:700;margin-left:12px" title="Claimed hours less what your resolved reviews took off">Admin approved: ${agreedH.toFixed(2)} hours · ${agreedApprox ? '≈' : ''}${fmtRand(agreedA)}</span>${draftApprovedN ? `<span style="color:#86efac;margin-left:8px;font-size:12px">(includes ${fmtRand(draftApprovedA)} approved on ${draftApprovedN} entr${draftApprovedN === 1 ? 'y' : 'ies'} awaiting Final Submission)</span>` : ''}`)
       : ''
     const personOpenReviews = [...rows.flatMap((r) => reviewsForPaid(r)), ...g.drafts.flatMap((d) => reviewsForDraft(d))].filter((v) => v.status === 'OPEN')
     const personReviewsHtml = personOpenReviews.length
