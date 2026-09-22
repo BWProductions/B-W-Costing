@@ -67,7 +67,7 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
   const reviewsAll = (revRes.results || []) as ReviewRow[]
   const paidIds = new Set(paid.map((r) => r.id)); const paidDraftIds = new Set(paid.map((r) => r.source_draft_id).filter(Boolean) as number[])
   const reviewsForPaid = (r: PaidRow) => reviewsAll.filter((v) => (v.subject_source === 'shift' && v.subject_shift_id === r.id) || (v.subject_source === 'draft' && r.source_draft_id && v.subject_shift_id === r.source_draft_id))
-  const decidedFor = (r: PaidRow) => reviewsForPaid(r).filter((v) => v.status === 'RESOLVED' && v.approved_payable_hours !== null && v.approved_payable_hours !== undefined && !/^rate_choice_/.test(v.issue_key || '')).sort((a, b) => b.id - a.id)[0]
+  const decidedFor = (r: PaidRow) => reviewsForPaid(r).filter((v) => v.status === 'RESOLVED' && v.approved_payable_hours !== null && v.approved_payable_hours !== undefined && !/^(rate_choice_|petrus_extra)/.test(v.issue_key || '')).sort((a, b) => b.id - a.id)[0]
 
   // Prior payroll rows on the same real day (for the system note on missed shifts).
   const missedDates = Array.from(new Set(paid.filter((r) => r.work_date < weekStart).map((r) => r.work_date)))
@@ -118,6 +118,14 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     let pr = priceHours(r, approvedH, review?.approved_start_time || snap?.recommendedStart, review?.approved_end_time || snap?.recommendedEnd)
     // Owner 2026-09-21: "already paid" review decided as a RAND amount — that amount is what this entry pays
     // (rate correction on last week's hours + extra hours). Shown as a correction line; last week's row untouched.
+    // Owner 2026-09-22: Petrus weekday time outside 06–16 — held until the office decides; approved rand added.
+    const pex = reviewsForPaid(r).find((v) => /^petrus_extra\|/.test(v.issue_key || ''))
+    if (pex) {
+      const ps = parseSnap(pex.system_snapshot_json)
+      if (pex.status === 'RESOLVED' && ps?.approvedExtraAmount !== undefined && Number(ps.approvedExtraAmount) > 0) pr = { amount: r2(pr.amount + Number(ps.approvedExtraAmount)), rate: pr.rate, breakdown: pr.breakdown.replace(/ HELD — office to approve.*$/, '') + ` + office approved ${Number(ps.extraHours || 0).toFixed(2)} h outside 06–16 × ${fmtR(Number(ps.approvedRate || 0))} = ${fmtR(Number(ps.approvedExtraAmount))} (#${pex.id})` }
+      else if (pex.status === 'RESOLVED') pr = { ...pr, breakdown: pr.breakdown.replace(/ HELD — office to approve.*$/, '') + ` (${Number(ps?.extraHours || 0).toFixed(2)} h outside 06–16 decided not payable, #${pex.id})` }
+      else pr = { ...pr, breakdown: pr.breakdown + ` — STILL OPEN #${pex.id}: R0 paid for the extra time until the office decides` }
+    }
     if (snap?.paidBefore && snap.approvedAmount !== undefined) pr = { amount: Number(snap.approvedAmount), rate: Number(snap.newRate || pr.rate), breakdown: `CORRECTION: already paid ${fmtR(Number(snap.alreadyPaid || 0))} earlier; ${Number(snap.rateCorrection || 0) ? 'rate correction ' + fmtR(Number(snap.rateCorrection)) + ' + ' : ''}extra ${Number(snap.extraHours || 0).toFixed(2)} h ${fmtR(Number(snap.extraAmount || 0))} = approved ${fmtR(Number(snap.approvedAmount))}` }
     // System note: overlap/cross-check facts.
     const sameDay = prior.filter((p) => p.staff_id === r.staff_id && p.work_date === r.work_date)

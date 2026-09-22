@@ -8,7 +8,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-22-2'
+const WAGES_UI_VERSION = 'v2026-09-22-3'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3672,6 +3672,10 @@ async function applyOwnerRatesToFinalSubmission(env: Bindings | undefined, draft
         payroll_note = CASE WHEN COALESCE(payroll_note,'') = '' THEN ? ELSE payroll_note || ' | ' || ? END
       WHERE id = ? AND staff_id = ?`)
     .bind(priced.amount, priced.amount, priced.hourlyRate, OWNER_RATE_RULES_VERSION, 'Rate rules 2026-09-15: ' + priced.breakdown, 'Rate rules 2026-09-15: ' + priced.breakdown, row.id, staffId).run()
+  // Owner 2026-09-22: Petrus weekday time outside 06–16 is held for an office decision on the rate.
+  if (kind === 'petrus' && priced.heldExtraHours && priced.heldExtraHours > 0) {
+    try { await openPetrusExtraReview(env, { id: row.id, staff_id: row.staff_id, work_date: dateIso, start_time: row.start_time, end_time: row.end_time, hours_worked: row.hours_worked, work_type: row.work_type, outlet_venue: row.outlet_venue, event_name: row.event_name, work_description: row.work_description }, priced) } catch (err) {}
+  }
   await captureWagesDebug(env, { request_path: '/wages/drafts/' + draftId + '/final-submit (owner rates)', request_method: 'POST', original_payload_json: JSON.stringify({ shift_id: row.id, engine_amount: before, kind }), rewritten_payload_json: JSON.stringify({ amount: priced.amount, rate: priced.hourlyRate, breakdown: priced.breakdown }), rewrite_applied: 1, response_status: 200, response_location: '', response_error_text: '' })
 }
 
@@ -3695,6 +3699,27 @@ async function openWarehouseOrEventReview(env: Bindings | undefined, r: { id: nu
       SELECT ?, 'OPEN', 'possible_duplicate_manual_check', 'red', ?, ?, ?, (SELECT payroll_week_start FROM wage_shifts WHERE id = ?), 'shift', ?, 'shift', NULL, ?, ?, ?, ?, ?, ?
       WHERE NOT EXISTS (SELECT 1 FROM wage_payroll_reviews WHERE issue_key = ?)`)
     .bind(key, r.staff_id, name, r.work_date, r.id, r.id, reason, 'Rate choice needed — ' + name + ' — ' + r.work_date + ' — Warehouse or Event/Venue?', r.hours_worked, key, snapshot, system, key).run()
+}
+
+// Owner 2026-09-22: Petrus (staff 4) Mon–Fri time before 06:00 / after 16:00 is not paid until
+// the office approves it and decides the rate. Red review on the paid shift; the R633,33 day
+// (if any) is already paid; the held hours pay only when a decision is recorded.
+async function openPetrusExtraReview(env: Bindings | undefined, r: { id: number, staff_id: number, work_date: string, start_time: string, end_time: string, hours_worked: number, work_type: string, outlet_venue: string, event_name: string, work_description: string }, priced: OwnerPriced) {
+  const db = env?.DB
+  if (!db) return
+  const staff = await db.prepare(`SELECT display_name FROM wage_staff WHERE id = ?`).bind(r.staff_id).first<{ display_name: string }>()
+  const name = staff?.display_name || ('staff ' + r.staff_id)
+  const key = 'petrus_extra|shift:' + r.id
+  const heldH = Number(priced.heldExtraHours || 0), beforeH = Number(priced.heldBeforeHours || 0), afterH = Number(priced.heldAfterHours || 0)
+  const h2 = (n: number) => n.toFixed(2)
+  const parts = [beforeH > 0 ? h2(beforeH) + ' h before 06:00' : '', afterH > 0 ? h2(afterH) + ' h after 16:00' : ''].filter(Boolean).join(' and ')
+  const reason = 'PETRUS EXTRA TIME — APPROVAL NEEDED: ' + r.start_time + '–' + r.end_time + ' on ' + r.work_date + ' (' + (r.work_type || 'Normal') + ', ' + (r.outlet_venue || '') + '). The fixed day ' + (priced.baseAmount ? fmtRand(priced.baseAmount) + ' (06:00–16:00)' : '(no 06–16 time: R0)') + ' is paid. ' + parts + ' = ' + h2(heldH) + ' h outside 06:00–16:00 is HELD: the office must approve it and decide the rate (R82/h offered = ' + fmtRand(heldH * PETRUS_EXTRA_RATE) + '). Nothing extra is paid until then.'
+  const snapshot = JSON.stringify({ shiftId: r.id, source: 'shift', staffId: r.staff_id, employee: name, workDate: r.work_date, venue: r.outlet_venue, eventName: r.event_name, workType: r.work_type, workDescription: r.work_description, startTime: r.start_time, endTime: r.end_time, hours: r.hours_worked, amountNow: priced.amount })
+  const system = JSON.stringify({ comparisonLabel: 'Petrus extra time', warningTitle: 'Petrus: time outside 06:00–16:00 on a weekday — approve and set the rate', humanReason: reason, petrusExtra: 1, extraHours: heldH, beforeHours: beforeH, afterHours: afterH, baseAmount: Number(priced.baseAmount || 0), offeredRate: PETRUS_EXTRA_RATE, staffBlocking: 0, autoDuplicate: 0, conflictDetected: 0 })
+  await db.prepare(`INSERT INTO wage_payroll_reviews (issue_key, status, warning_kind, severity, staff_id, staff_name, work_date, payroll_week_start, subject_source, subject_shift_id, compared_source, compared_shift_id, warning_reason, issue_summary, original_hours, facts_hash, subject_snapshot_json, system_snapshot_json)
+      SELECT ?, 'OPEN', 'possible_duplicate_manual_check', 'red', ?, ?, ?, (SELECT payroll_week_start FROM wage_shifts WHERE id = ?), 'shift', ?, 'shift', NULL, ?, ?, ?, ?, ?, ?
+      WHERE NOT EXISTS (SELECT 1 FROM wage_payroll_reviews WHERE issue_key = ?)`)
+    .bind(key, r.staff_id, name, r.work_date, r.id, r.id, reason, 'Petrus extra time — ' + name + ' — ' + r.work_date + ' — ' + h2(heldH) + ' h outside 06–16 to approve', r.hours_worked, key, snapshot, system, key).run()
 }
 
 async function staffIdFromWageSession(env: Bindings | undefined, cookieHeader: string) {
@@ -3765,7 +3790,7 @@ function shiftsOverlap(aStart: string, aEnd: string, bStart: string, bEnd: strin
 //   4. Own-rate work (House / House/Garden R62,50; Tsotlego R81,25 …): hours × rate.
 // Read-only: the checker only compares; it never changes a paid record.
 const RULE_WINDOW_START = 7 * 60, RULE_WINDOW_END = 16 * 60, RULE_FULL_DAY = 750, RULE_HALF_DAY = 375, RULE_HALF_MAX_MIN = 4 * 60, RULE_SUNDAY_FACTOR = 1.2
-type RuleSegment = { start: string, end: string, rate: number, kind: 'event' | 'warehouse' | 'musicbus' | 'petrus' | 'ownrate' | 'standard', label: string }
+type RuleSegment = { start: string, end: string, rate: number, kind: 'event' | 'warehouse' | 'musicbus' | 'petrus' | 'ownrate' | 'standard', label: string, addAmount?: number, addLabel?: string }
 type RuleDayResult = { amount: number, insideMin: number, outsideStdMin: number, outsideMbMin: number, ownRateAmount: number, dayPart: number, overtime: number, sunday: boolean, span: string, notes: string[] }
 
 function ruleSegmentMinutes(seg: { start: string, end: string }) {
@@ -3831,7 +3856,8 @@ function ownerIsWeekday(dateIso: string) { const d = parseProxyIsoDate(dateIso);
 // Owner (2026-09-15): use the ACTUAL day the hours were worked — a shift that passes
 // midnight is priced in two parts (before midnight = start day's rate, after midnight =
 // next day's rate). It stays one shift on one row; only the pay calculation splits.
-function ownerPayForShift(dateIso: string, startTime: string, endTime: string, kind: OwnerPayKind): { amount: number, hourlyRate: number, breakdown: string } | null {
+type OwnerPriced = { amount: number, hourlyRate: number, breakdown: string, heldExtraHours?: number, heldBeforeHours?: number, heldAfterHours?: number, baseAmount?: number }
+function ownerPayForShift(dateIso: string, startTime: string, endTime: string, kind: OwnerPayKind): OwnerPriced | null {
   if (kind === 'fixed_weekly' || kind === 'gardener') return null
   const d0 = parseProxyIsoDate(dateIso); const s0 = timeToMinutes(startTime); const e0 = timeToMinutes(endTime)
   if (!d0 || s0 === null || e0 === null) return null
@@ -3849,7 +3875,8 @@ function ownerPayForShift(dateIso: string, startTime: string, endTime: string, k
     const a = ownerPayForShift(dateIso, startTime, '24:00', kind)
     const b = ownerPayForShift(nextIso, '00:00', String(Math.floor((end0 - 1440) / 60)).padStart(2, '0') + ':' + String((end0 - 1440) % 60).padStart(2, '0'), kind)
     if (!a || !b) return a || b
-    return { amount: Math.round((a.amount + b.amount) * 100) / 100, hourlyRate: a.hourlyRate, breakdown: `${a.breakdown} (until midnight) + ${b.breakdown} (after midnight, ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][next.getUTCDay()]})` }
+    const held = (a.heldExtraHours || 0) + (b.heldExtraHours || 0)
+    return { amount: Math.round((a.amount + b.amount) * 100) / 100, hourlyRate: a.hourlyRate, breakdown: `${a.breakdown} (until midnight) + ${b.breakdown} (after midnight, ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][next.getUTCDay()]})`, ...(held > 0 ? { heldExtraHours: Math.round(held * 100) / 100, heldBeforeHours: (a.heldBeforeHours || 0) + (b.heldBeforeHours || 0), heldAfterHours: (a.heldAfterHours || 0) + (b.heldAfterHours || 0), baseAmount: Math.round((a.amount + b.amount) * 100) / 100 } : {}) }
   }
   const d = d0; const sMin = s0; const eMin = end0
   const dow = d.getUTCDay() // 0 Sun … 6 Sat
@@ -3865,20 +3892,25 @@ function ownerPayForShift(dateIso: string, startTime: string, endTime: string, k
   }
   if (kind === 'petrus') {
     // Owner 2026-09-22 (rate rules v5): locked weekly R3 800 for 6 days = R633,33 per day
-    // covering 06:00–16:00 (Mon–Sat). Mon–Fri the day is FIXED regardless of arrival time —
-    // an early/late start inside the day is not extra and not a deduction. Before 06:00 /
-    // after 16:00 = R82/h extra. Sunday (only if worked) = R95/h for every hour (R79,17 × 1.2).
+    // covering 06:00–16:00 (Mon–Sat). Mon–Fri the day is FIXED regardless of arrival time.
+    // Saturday: before 06:00 / after 16:00 = R82/h extra, paid automatically (owner's table).
+    // Sunday (only if worked) = R95/h for every hour (R79,17 × 1.2).
+    // Mon–Fri time before 06:00 or after 16:00 (owner, later on 22 Sep): NOT paid automatically —
+    // it is HELD and flagged; the office approves it and decides the rate (R82/h offered).
     if (dow === 0) return { amount: r2(totalH * 95), hourlyRate: 95, breakdown: `Petrus Sunday: ${h(totalH)} h × R95 (R79,17 × 1.2)` }
     const pInside = overlapMinutes(sMin, eMin, PETRUS_WINDOW_START, PETRUS_WINDOW_END)
-    // Mon–Fri: "he only starts work from 6" (owner 2026-09-22) — time clocked BEFORE 06:00 is
-    // ignored (taxi arrival, not work). Only time AFTER 16:00 is extra. Saturday: before 06:00
-    // and after 16:00 both count at R82/h (owner's table).
     const pBeforeH = Math.max(0, Math.min(eMin, PETRUS_WINDOW_START) - sMin) / 60
     const pAfterH = Math.max(0, eMin - Math.max(sMin, PETRUS_WINDOW_END)) / 60
-    const pOutsideH = (dow === 6 ? pBeforeH : 0) + pAfterH
-    const amt = (pInside > 0 ? PETRUS_DAY : 0) + pOutsideH * PETRUS_EXTRA_RATE
-    const ignored = dow !== 6 && pBeforeH > 0 ? ` (${h(pBeforeH)} h before 06:00 not counted — day starts 06:00)` : ''
-    return { amount: r2(amt), hourlyRate: PETRUS_EXTRA_RATE, breakdown: `Petrus ${dow === 6 ? 'Saturday' : 'weekday'}: ${pInside > 0 ? 'R633,33 fixed day (06–16, R3 800 ÷ 6)' : 'no 06–16 time'}${pOutsideH > 0 ? ` + ${h(pOutsideH)} h outside 06–16 × R82` : ''}${ignored}` }
+    const dayText = pInside > 0 ? 'R633,33 fixed day (06–16, R3 800 ÷ 6)' : 'no 06–16 time'
+    if (dow === 6) {
+      const pOutsideH = pBeforeH + pAfterH
+      const amt = (pInside > 0 ? PETRUS_DAY : 0) + pOutsideH * PETRUS_EXTRA_RATE
+      return { amount: r2(amt), hourlyRate: PETRUS_EXTRA_RATE, breakdown: `Petrus Saturday: ${dayText}${pOutsideH > 0 ? ` + ${h(pOutsideH)} h outside 06–16 × R82` : ''}` }
+    }
+    const heldH = pBeforeH + pAfterH
+    const base = pInside > 0 ? PETRUS_DAY : 0
+    const heldParts = [pBeforeH > 0 ? `${h(pBeforeH)} h before 06:00` : '', pAfterH > 0 ? `${h(pAfterH)} h after 16:00` : ''].filter(Boolean).join(' + ')
+    return { amount: r2(base), hourlyRate: PETRUS_EXTRA_RATE, breakdown: `Petrus weekday: ${dayText}${heldH > 0 ? ` + ${heldParts} HELD — office to approve and set the rate (R82/h offered)` : ''}`, ...(heldH > 0 ? { heldExtraHours: r2(heldH), heldBeforeHours: r2(pBeforeH), heldAfterHours: r2(pAfterH), baseAmount: r2(base) } : {}) }
   }
   // general staff (event / warehouse)
   if (dow === 0) return { amount: r2(totalH * 120), hourlyRate: 120, breakdown: `Sunday: ${h(totalH)} h × R120` }
@@ -3924,6 +3956,7 @@ function computeRuleDay(dateIso: string, segments: RuleSegment[]): RuleDayResult
       }
       parts.push(priced.breakdown)
     }
+    if (seg.addAmount) { overtime += seg.addAmount; parts.push(seg.addLabel || ('office-approved extra ' + fmtRand(seg.addAmount))) }
   }
   const amount = Math.round((dayPart + overtime + ownRateAmount) * 100) / 100
   const fmtT2 = (mins: number) => fmtT(mins) + (mins >= 1440 ? ' (next day)' : '')
@@ -4006,13 +4039,20 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     const m = /^rate_choice_warehouse_or_event\|shift:(\d+)$/.exec(v.issue_key || '')
     if (m && v.status === 'RESOLVED') rateChoiceByShift[Number(m[1])] = /warehouse/i.test(v.decision_reason || '') ? 'warehouse' : 'event'
   }
+  // Office decisions on Petrus weekday extra time (review key petrus_extra|shift:ID).
+  const petrusExtraByShift: Record<number, { amount: number, label: string }> = {}
+  for (const v of reviewsAll) {
+    const m = /^petrus_extra\|shift:(\d+)$/.exec(v.issue_key || '')
+    if (!m || v.status !== 'RESOLVED') continue
+    try { const sn = JSON.parse(v.system_snapshot_json || '{}'); if (sn.approvedExtraAmount !== undefined) petrusExtraByShift[Number(m[1])] = { amount: Number(sn.approvedExtraAmount), label: `office approved ${Number(sn.extraHours || 0).toFixed(2)} h outside 06–16 × ${fmtRand(Number(sn.approvedRate || 0))} = ${fmtRand(Number(sn.approvedExtraAmount))} (#${v.id})` } } catch (err) {}
+  }
   const ruleSegmentFor = (staffId: number, workType: string, start: string, end: string, wording = '', shiftId = 0): RuleSegment => {
     const wt = workType || ''
     let kind = ownerPayKind(staffId, wt, wording, staffBase[staffId]?.payroll_rule || 'hourly')
     if (kind === 'warehouse_or_event' && shiftId && rateChoiceByShift[shiftId]) kind = rateChoiceByShift[shiftId]
     if (kind === 'gardener') return { start, end, rate: workRates[staffId + '|' + wt] ?? 62.5, kind: 'ownrate', label: wt }
     if (kind === 'musicbus') return { start, end, rate: 120, kind: 'musicbus', label: wt }
-    if (kind === 'petrus') return { start, end, rate: PETRUS_EXTRA_RATE, kind: 'petrus', label: wt }
+    if (kind === 'petrus') return { start, end, rate: PETRUS_EXTRA_RATE, kind: 'petrus', label: wt, ...(shiftId && petrusExtraByShift[shiftId] ? { addAmount: petrusExtraByShift[shiftId].amount, addLabel: petrusExtraByShift[shiftId].label } : {}) }
     if (kind === 'warehouse') return { start, end, rate: 81.25, kind: 'warehouse', label: wt }
     if (kind === 'warehouse_or_event') return { start, end, rate: 90, kind: 'event', label: (wt || 'Normal') + ' – rate choice pending (Warehouse or Event/Venue)' }
     return { start, end, rate: 90, kind: 'event', label: wt }
@@ -4026,6 +4066,21 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
 
   function decisionForm(v: AdminReviewRow, snap: any) {
     if (v.status !== 'OPEN') return ''
+    if (snap?.petrusExtra) {
+      const hrs = Number(snap.extraHours || 0), offered = Number(snap.offeredRate || PETRUS_EXTRA_RATE)
+      const parts = [Number(snap.beforeHours || 0) > 0 ? Number(snap.beforeHours).toFixed(2) + ' h before 06:00' : '', Number(snap.afterHours || 0) > 0 ? Number(snap.afterHours).toFixed(2) + ' h after 16:00' : ''].filter(Boolean).join(' and ')
+      return `<form method="post" action="/wages-admin/petrus-extra" class="bw-review-decide" style="margin-top:6px;padding:8px;border-radius:8px;background:rgba(255,255,255,.05);font-size:12px">
+      <input type="hidden" name="review_id" value="${v.id}">
+      <input type="hidden" name="return_to" value="__RETURN__">
+      <div style="margin-bottom:6px"><strong>Petrus: ${hrs.toFixed(2)} h outside 06:00–16:00 (${parts}) is held. The fixed day ${fmtRand(Number(snap.baseAmount || 0))} is paid. Office to approve and set the rate:</strong></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <button type="submit" name="choice" value="offered" style="padding:5px 10px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer">Approve at R${offered}/h — ${fmtRand(hrs * offered)}</button>
+        <span style="display:inline-flex;align-items:center;gap:4px">Other rate: R<input type="number" name="custom_rate" step="0.01" min="0" style="width:70px;padding:3px 5px;border-radius:5px;border:1px solid rgba(255,255,255,.3);background:#111;color:#fff">/h <button type="submit" name="choice" value="custom" style="padding:5px 10px;border-radius:6px;border:1px solid #e2b93b;background:transparent;color:#e2b93b;font-weight:700;cursor:pointer">Approve at this rate</button></span>
+        <button type="submit" name="choice" value="zero" style="padding:5px 10px;border-radius:6px;border:1px solid rgba(255,255,255,.35);background:transparent;color:#fff;font-weight:700;cursor:pointer">Not payable — R0</button>
+      </div>
+      <div style="margin-top:4px;opacity:.7">Only the ${hrs.toFixed(2)} h outside 06–16 is priced here; the R633,33 day is not changed.</div>
+    </form>`
+    }
     if (snap?.rateChoice) {
       return `<form method="post" action="/wages-admin/rate-choice" class="bw-review-decide" style="margin-top:6px;padding:8px;border-radius:8px;background:rgba(255,255,255,.05);font-size:12px">
       <input type="hidden" name="review_id" value="${v.id}">
@@ -4098,7 +4153,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         ? `<div style="margin-top:3px"><strong>Recommended payable: ${Number(v.system_proposed_payable_hours).toFixed(2)} h</strong>${snap?.recommendedStart ? ' (' + escapeHtmlText(snap.recommendedStart) + '–' + escapeHtmlText(snap.recommendedEnd) + ')' : ''}${v.previously_paid_hours ? ' · already paid ' + Number(v.previously_paid_hours).toFixed(2) + ' h that day' : ''}</div>`
         : ''
       const reason = snap?.recommendedReason ? `<div style="margin-top:2px;opacity:.85">Reason to record: “${escapeHtmlText(snap.recommendedReason)}”</div>` : ''
-      const decided = snap?.rateChoice && v.status !== 'OPEN'
+      const decided = (snap?.rateChoice || snap?.petrusExtra) && v.status !== 'OPEN'
         ? `<div style="margin-top:3px;color:#86efac"><strong>Decided: ${escapeHtmlText(v.decision_reason || v.status)}</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''}</div>`
         : v.approved_payable_hours !== null && v.approved_payable_hours !== undefined
         ? `<div style="margin-top:3px;color:#86efac"><strong>Decided: ${Number(v.approved_payable_hours).toFixed(2)} h</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''}${v.decision_reason ? ' — ' + escapeHtmlText(v.decision_reason) : ''}</div>`
@@ -4348,7 +4403,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     ${(() => {
       const sorted = ruleDiffsAll.slice().sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
       const head = `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div style="font-weight:800;color:#93c5fd">⚖ Pay-rule check — ${gRuleDays ? gRuleDays + ' day' + (gRuleDays === 1 ? '' : 's') + ' differ from the rule: paid ' + fmtRand(gRuleOver) + ' more and ' + fmtRand(gRuleUnder) + ' less than the rule (net ' + (gRuleAmount >= 0 ? '+' : '−') + fmtRand(Math.abs(gRuleAmount)) + ')' : 'every paid day matches the rule'}</div>${gRuleDays ? `<a href="#" onclick="var b=document.getElementById('bw-rule-list');b.style.display=b.style.display==='none'?'block':'none';return false" style="color:#e2b93b;font-weight:700;font-size:12px">show / hide list</a>` : ''}</div>
-        <div style="font-size:12px;opacity:.8;margin-top:3px">Rule used (B&W rate rules 2026-09-15): General staff — Mon–Fri Warehouse R81,25/h; Mon–Fri Event/Venue R750 fixed 07–16 + R90/h outside; Saturday R95/h; Sunday R120/h. Music Bus — Mon–Sat R750 fixed 07–16 + R120/h outside; Sunday R120/h. Petrus (from 22 Sep 2026) — Mon–Sat R633,33 fixed for 06–16 (R3 800 ÷ 6) + R82/h after 16:00 (Saturday also before 06:00); Mon–Fri time before 06:00 not counted; Sunday R95/h. Gardeners keep their gardener rate; on the Team block they get general-staff rates. A fixed day is counted once per person per day; overlapping entries once. <strong>Nothing is changed by this check</strong> — it only shows where the amount paid differs, so you can decide.</div>`
+        <div style="font-size:12px;opacity:.8;margin-top:3px">Rule used (B&W rate rules 2026-09-15): General staff — Mon–Fri Warehouse R81,25/h; Mon–Fri Event/Venue R750 fixed 07–16 + R90/h outside; Saturday R95/h; Sunday R120/h. Music Bus — Mon–Sat R750 fixed 07–16 + R120/h outside; Sunday R120/h. Petrus (from 22 Sep 2026) — Mon–Sat R633,33 fixed for 06–16 (R3 800 ÷ 6); Saturday before 06:00 / after 16:00 R82/h automatically; Mon–Fri before 06:00 / after 16:00 is HELD and flagged red — the office approves it and sets the rate (R82/h offered); Sunday R95/h. Gardeners keep their gardener rate; on the Team block they get general-staff rates. A fixed day is counted once per person per day; overlapping entries once. <strong>Nothing is changed by this check</strong> — it only shows where the amount paid differs, so you can decide.</div>`
       if (!sorted.length) return `<section id="bw-rule-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(20,83,45,.18);border:1px solid rgba(96,165,250,.35)">${head}</section>`
       const lines = sorted.map((c) => `<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid rgba(255,255,255,.08);font-size:12.5px"><span style="flex:0 0 auto">${c.diff > 0 ? pill('OVER', '#7f1d1d', '#fff') : pill('UNDER', '#1e3a8a', '#fff')}</span><div style="flex:1"><strong>${escapeHtmlText(c.name)}</strong> · ${escapeHtmlText(c.date)} (${dayName(c.date)}) · ${escapeHtmlText(c.rule.span)} · paid <strong>${fmtRand(c.paid)}</strong> vs rule <strong>${fmtRand(c.rule.amount)}</strong> → <strong>${c.diff > 0 ? '+' : '−'}${fmtRand(Math.abs(c.diff))}</strong><a href="#" onclick="var b=document.getElementById('bw-rule-top-${c.staffId}-${c.date}');if(b){b.style.display=b.style.display==='none'?'block':'none'}return false" style="margin-left:8px;color:#e2b93b;font-weight:700">Open ▾</a><div id="bw-rule-top-${c.staffId}-${c.date}" style="display:none;margin-top:2px">${ruleDetailTop(c)}</div></div></div>`).join('')
       return `<section id="bw-rule-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(30,58,138,.12);border:1px solid rgba(96,165,250,.5)">${head}<div id="bw-rule-list" style="margin-top:6px">${lines}</div></section>`
@@ -4977,6 +5032,52 @@ app.post('/wages-admin/rate-choice', async (c) => {
     return back(safeReturn + sep + 'msg=' + encodeURIComponent('Review #' + reviewId + ': ' + label + ' chosen by ' + admin.name + '. Shift #' + row.id + ' ' + fmtRand(before) + ' → ' + fmtRand(priced.amount) + ' (' + priced.breakdown + ').') + '#bw-review-' + reviewId)
   } catch (err) {
     return back(safeReturn + sep + 'error=' + encodeURIComponent('Could not record the rate choice: ' + describeProxyError(err)))
+  }
+})
+
+// Owner 2026-09-22: office decision on Petrus weekday time outside 06:00–16:00.
+// Adds the approved rand amount to the paid shift (the R633,33 day already there stays).
+app.post('/wages-admin/petrus-extra', async (c) => {
+  const db = c.env?.DB
+  const admin = await adminUserFromCookie(c.req.raw.headers.get('cookie') || '')
+  const back = (to: string) => c.redirect(to, 303)
+  if (!db) return back('/admin/wages?error=' + encodeURIComponent('Database not available.'))
+  if (!admin) return back('/login?next=' + encodeURIComponent('/admin/wages'))
+  let form: FormData
+  try { form = await c.req.raw.formData() } catch (err) { return back('/admin/wages?error=' + encodeURIComponent('Could not read the Petrus extra-time form.')) }
+  const reviewId = Number(normalizeProxyFieldValue(form.get('review_id')))
+  const choice = normalizeProxyFieldValue(form.get('choice'))
+  const customRate = Number(normalizeProxyFieldValue(form.get('custom_rate')) || 0)
+  const returnTo = normalizeProxyFieldValue(form.get('return_to')) || '/admin/wages'
+  const safeReturn = /^\/admin\/wages(\?|$)/.test(returnTo) ? returnTo : '/admin/wages'
+  const sep = safeReturn.includes('?') ? '&' : '?'
+  if (!reviewId || !['offered', 'custom', 'zero'].includes(choice)) return back(safeReturn + sep + 'error=' + encodeURIComponent('Invalid Petrus extra-time decision.'))
+  if (choice === 'custom' && !(customRate > 0)) return back(safeReturn + sep + 'error=' + encodeURIComponent('Type the rate per hour before clicking "Approve at this rate".') + '#bw-review-' + reviewId)
+  try {
+    const rv = await db.prepare(`SELECT id, status, issue_key, subject_shift_id, staff_id, system_snapshot_json FROM wage_payroll_reviews WHERE id = ?`).bind(reviewId).first<{ id: number, status: string, issue_key: string, subject_shift_id: number, staff_id: number, system_snapshot_json: string | null }>()
+    if (!rv || !/^petrus_extra\|shift:/.test(rv.issue_key || '')) return back(safeReturn + sep + 'error=' + encodeURIComponent('Review #' + reviewId + ' is not a Petrus extra-time review.'))
+    if (rv.status !== 'OPEN') return back(safeReturn + sep + 'msg=' + encodeURIComponent('Review #' + reviewId + ' was already ' + rv.status + '.'))
+    let snap: any = {}
+    try { snap = JSON.parse(rv.system_snapshot_json || '{}') } catch (err) { snap = {} }
+    const hrs = Number(snap.extraHours || 0)
+    const rate = choice === 'zero' ? 0 : choice === 'custom' ? Math.round(customRate * 100) / 100 : Number(snap.offeredRate || PETRUS_EXTRA_RATE)
+    const extra = Math.round(hrs * rate * 100) / 100
+    const row = await db.prepare(`SELECT id, staff_id, total_amount, gross_wage FROM wage_shifts WHERE id = ? AND staff_id = ?`).bind(rv.subject_shift_id, rv.staff_id).first<{ id: number, staff_id: number, total_amount: number, gross_wage: number }>()
+    if (!row) return back(safeReturn + sep + 'error=' + encodeURIComponent('Paid shift #' + rv.subject_shift_id + ' for review #' + reviewId + ' no longer exists.'))
+    const before = before0(row)
+    const after = Math.round((before + extra) * 100) / 100
+    const label = choice === 'zero' ? 'Not payable — R0' : hrs.toFixed(2) + ' h outside 06–16 × ' + fmtRand(rate) + '/h = ' + fmtRand(extra)
+    const note = 'Petrus extra time approved by ' + admin.name + ' (review #' + reviewId + '): ' + label + ' — shift ' + fmtRand(before) + ' → ' + fmtRand(after)
+    snap.approvedRate = rate; snap.approvedExtraAmount = extra; snap.decidedBy = admin.name
+    if (extra > 0) {
+      await db.prepare(`UPDATE wage_shifts SET total_amount = ?, gross_wage = ?, payroll_note = CASE WHEN COALESCE(payroll_note,'') = '' THEN ? ELSE payroll_note || ' | ' || ? END, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND staff_id = ?`).bind(after, after, note, note, row.id, row.staff_id).run()
+    }
+    await db.prepare(`UPDATE wage_payroll_reviews SET status = 'RESOLVED', decision_type = ?, decision_reason = ?, approved_payable_hours = ?, reviewed_by_user_id = ?, reviewed_by_name = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, system_snapshot_json = ? WHERE id = ? AND status = 'OPEN'`)
+      .bind(extra > 0 ? 'approve_adjusted' : 'already_paid_r0', label, extra > 0 ? hrs : 0, admin.id || null, admin.name, JSON.stringify(snap), reviewId).run()
+    await captureWagesDebug(c.env, { request_path: '/wages-admin/petrus-extra', request_method: 'POST', original_payload_json: JSON.stringify({ review_id: reviewId, shift_id: row.id, choice, custom_rate: customRate, before, by: admin.name }), rewritten_payload_json: JSON.stringify({ rate, hours: hrs, extra, after }), rewrite_applied: 1, response_status: 302, response_location: safeReturn, response_error_text: '' })
+    return back(safeReturn + sep + 'msg=' + encodeURIComponent('Review #' + reviewId + ': ' + label + ' by ' + admin.name + '. Shift #' + row.id + ' ' + fmtRand(before) + ' → ' + fmtRand(after) + '.') + '#bw-review-' + reviewId)
+  } catch (err) {
+    return back(safeReturn + sep + 'error=' + encodeURIComponent('Could not record the Petrus extra-time decision: ' + describeProxyError(err)))
   }
 })
 

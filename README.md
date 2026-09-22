@@ -258,7 +258,7 @@ from→to). See `EDIT_AFTER_SIGN_EMAILS` in `src/routes/field.ts`.
 - Complete rules & handover: `docs/handover-2026-09-21-complete-rules.md` / `.pdf`.
 - Tag: `restore-2026-09-21-already-paid`. Reviews snapshot before first run: `docs/restore-2026-09-21-before-paid-before/`.
 
-## Restore point 22 Sep 2026 — `restore-2026-09-22-petrus-v5` (live v2026-09-22-2)
-- Petrus rate rules v5: R3 800 ÷ 6 = **R633,33 fixed per day** for 06:00–16:00 Mon–Sat; **R82/h** after 16:00 (Saturday also before 06:00); Mon–Fri time before 06:00 not counted (he starts at 06:00); **Sunday R95/h** (R79,17 × 1.2).
+## Restore point 22 Sep 2026 — `restore-2026-09-22-petrus-v5` (live v2026-09-22-3)
+- Petrus rate rules v5: R3 800 ÷ 6 = **R633,33 fixed per day** for 06:00–16:00 Mon–Sat; Saturday before 06:00 / after 16:00 **R82/h automatic**; **Sunday R95/h** (R79,17 × 1.2); **Mon–Fri time before 06:00 / after 16:00 is HELD** — red review `petrus_extra|shift:ID`, office approves at R82/h, another rate, or R0 via `/wages-admin/petrus-extra`.
 - Petrus R450 "Rent" recurring deduction (#2) ended: `active = 0, effective_to = 2026-09-18`. Backup: `docs/restore-2026-09-22-petrus/rent_deduction_before.json`. Undo: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2`.
 - Handover: `docs/handover-2026-09-22-complete-rules.md` / `.pdf`.
