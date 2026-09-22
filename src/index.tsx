@@ -4119,7 +4119,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         <button type="submit" name="choice" value="warehouse" style="padding:5px 10px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer">Warehouse (R81,25/h)</button>
         <button type="submit" name="choice" value="event" style="padding:5px 10px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer">Venue/Event (R95/h)</button>
       </div>
-      <div style="opacity:.6;margin-top:4px">Your choice is recorded with your name on review #${v.id} and the shift's amount is set to the chosen rule (Sat/Sun hours are the same either way). Nothing else changes.</div>
+      <div style="opacity:.6;margin-top:4px">Your choice is recorded with your name on review #${v.id} and the shift's amount is set to the chosen rule. Nothing else changes.</div>
     </form>`
     }
     if (snap?.paidBefore) {
