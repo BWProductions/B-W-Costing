@@ -252,3 +252,8 @@ from→to). See `EDIT_AFTER_SIGN_EMAILS` in `src/routes/field.ts`.
 - 18 Sep review logic (crew check, duplicate catcher, proof rule, overlap wording) was rolled back the same day; kept on branch `review-logic-2026-09-18`, **not deployed**. Must only ever run on the current unpaid payroll week.
 - Complete handover: `docs/handover-2026-09-18-complete.md` / `.pdf`.
 - Tag: `restore-2026-09-18-rolled-back`. Removed review rows backup: `docs/rollback-2026-09-18/`.
+
+## Restore point 2026-09-21 (live v2026-09-21-2) — Already-paid rule
+- **Already-paid check** live: current unpaid payroll week only; compares each entry with PAID rows on the same day; prices at the work type the worker selected; rate correction + extra hours; red review with full story and one-click "Approve as recommended — R…"; "I don't agree — change the hours" re-prices live; approved rand amount flows to green figure and Excel correction line; last week's row never changed.
+- Complete rules & handover: `docs/handover-2026-09-21-complete-rules.md` / `.pdf`.
+- Tag: `restore-2026-09-21-already-paid`. Reviews snapshot before first run: `docs/restore-2026-09-21-before-paid-before/`.
