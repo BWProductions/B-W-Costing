@@ -8,7 +8,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-22-7'
+const WAGES_UI_VERSION = 'v2026-09-22-8'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3692,7 +3692,7 @@ async function openWarehouseOrEventReview(env: Bindings | undefined, r: { id: nu
   const staff = await db.prepare(`SELECT display_name FROM wage_staff WHERE id = ?`).bind(r.staff_id).first<{ display_name: string }>()
   const name = staff?.display_name || ('staff ' + r.staff_id)
   const key = 'rate_choice_warehouse_or_event|shift:' + r.id
-  const reason = 'RATE CHOICE NEEDED: the wording mentions "warehouse" but the work type is ' + (r.work_type || 'Normal') + ', so it is not clearly warehouse-only. Bernie must choose Warehouse (R81,25/h) or Venue/Event (R95/h) before the rate is decided. Until then the shift stays at the engine amount.'
+  const reason = 'RATE CHOICE NEEDED: the wording mentions "warehouse" but the work type is ' + (r.work_type || 'Normal') + ', so it is not clearly warehouse-only. Bernie must choose Warehouse (R81,25/h, Sunday R97,50, meeting time unpaid) or Venue/Event (R95/h, Sunday R114) before the rate is decided. Until then the shift stays at the engine amount.'
   const snapshot = JSON.stringify({ shiftId: r.id, source: 'shift', staffId: r.staff_id, employee: name, workDate: r.work_date, venue: r.outlet_venue, eventName: r.event_name, workType: r.work_type, workDescription: r.work_description, startTime: r.start_time, endTime: r.end_time, hours: r.hours_worked, amountNow: r.amount })
   const system = JSON.stringify({ comparisonLabel: 'rate choice', warningTitle: 'Rate choice: Warehouse or Event/Venue', humanReason: reason, rateChoice: 1, staffBlocking: 0, autoDuplicate: 0, conflictDetected: 0 })
   await db.prepare(`INSERT INTO wage_payroll_reviews (issue_key, status, warning_kind, severity, staff_id, staff_name, work_date, payroll_week_start, subject_source, subject_shift_id, compared_source, compared_shift_id, warning_reason, issue_summary, original_hours, facts_hash, subject_snapshot_json, system_snapshot_json)
@@ -3836,8 +3836,8 @@ function subtractCovered(s: number, e: number, covered: Array<[number, number]>)
 // B&W WAGES AND MUSIC BUS RATE RULES (owner, 2026-09-15). Replaces the previous
 // weekday/weekend calculations for NEW final submissions only.
 //   General staff (owner 2026-09-22, rate rules v8 — HOURLY BY PLACE, every day):
-//                  Warehouse (work type Warehouse Team)  R81,25 for every hour worked (R650 ÷ 8)
-//                  Venue / event (any other work type)    R95 for every hour worked
+//                  Warehouse (work type Warehouse Team)  R81,25 for every hour worked (R650 ÷ 8); Sunday R97,50; Mon–Fri 07:00–07:30 meeting unpaid
+//                  Venue / event (any other work type)    R95 for every hour worked; Sunday R114
 //                  No fixed day, no before/after premium; a man who moves from the warehouse to a
 //                  venue is paid the warehouse hours at R81,25 and the venue hours at R95.
 //   Music Bus      Mon–Sat R750 fixed for 07–16 + R120/h outside · Sunday R120/h
@@ -3846,9 +3846,12 @@ function subtractCovered(s: number, e: number, covered: Array<[number, number]>)
 //                  Team block (Warehouse Team / Team Assistance): general-staff rules for that day
 //   Never the old R375 half day; never the old ×1.2 / ×1.5 weekend factors.
 // ---------------------------------------------------------------------------
-const OWNER_RATE_RULES_VERSION = 8
+const OWNER_RATE_RULES_VERSION = 9
 // General staff hourly rates by place (owner 2026-09-22): warehouse R650 ÷ 8 = R81,25/h; venue R95/h.
-const WAREHOUSE_HOURLY = 81.25, VENUE_HOURLY = 95
+// Sunday ×1.2 (owner 2026-09-22): warehouse R97,50/h, venue R114/h.
+// Staff meeting (owner 2026-09-22): Mon–Fri 07:00–07:30 at the office is NOT paid — warehouse entries
+// covering that time lose the overlap (max 30 min = R40,62 at R81,25).
+const WAREHOUSE_HOURLY = 81.25, VENUE_HOURLY = 95, SUNDAY_FACTOR = 1.2, MEETING_START = 7 * 60, MEETING_END = 7 * 60 + 30
 // Petrus (staff 4), owner 2026-09-22 (amended later the same day): SET DAY RATE R640,00 for 06:00–16:00 every day;
 // Mon–Fri time before 06:00 / after 16:00 R55/h (held for office approval); Sat & Sun before 06:00 / after 16:00 R80/h (automatic).
 const PETRUS_DAY = 640, PETRUS_WINDOW_START = 6 * 60, PETRUS_WINDOW_END = 16 * 60, PETRUS_EXTRA_RATE = 55, PETRUS_WEEKEND_EXTRA_RATE = 80
@@ -3931,8 +3934,16 @@ function ownerPayForShift(dateIso: string, startTime: string, endTime: string, k
     const heldParts = [pBeforeH > 0 ? `${h(pBeforeH)} h before 06:00` : '', pAfterH > 0 ? `${h(pAfterH)} h after 16:00` : ''].filter(Boolean).join(' + ')
     return { amount: r2(base), hourlyRate: PETRUS_EXTRA_RATE, breakdown: `Petrus weekday: ${dayText}${heldH > 0 ? ` + ${heldParts} HELD — office to approve and set the rate (R55/h offered)` : ''}`, ...(heldH > 0 ? { heldExtraHours: r2(heldH), heldBeforeHours: r2(pBeforeH), heldAfterHours: r2(pAfterH), baseAmount: r2(base) } : {}) }
   }
-  // general staff — owner 2026-09-22 (rate rules v8): hourly by place, to the hour, every day.
-  if (kind === 'warehouse') return { amount: r2(totalH * WAREHOUSE_HOURLY), hourlyRate: WAREHOUSE_HOURLY, breakdown: `Warehouse: ${h(totalH)} h × R81,25` }
+  // general staff — owner 2026-09-22 (rate rules v9): hourly by place, to the hour, every day;
+  // Sunday ×1.2; Mon–Fri warehouse entries lose the 07:00–07:30 staff meeting (unpaid).
+  if (kind === 'warehouse') {
+    const rate = dow === 0 ? r2(WAREHOUSE_HOURLY * SUNDAY_FACTOR) : WAREHOUSE_HOURLY
+    const meetingMin = dow >= 1 && dow <= 5 ? overlapMinutes(sMin, eMin, MEETING_START, MEETING_END) : 0
+    const paidH = totalH - meetingMin / 60
+    const meetTxt = meetingMin > 0 ? ` − ${h(meetingMin / 60)} h staff meeting 07:00–07:30 (unpaid, ${fmtRand(r2(meetingMin / 60 * rate))})` : ''
+    return { amount: r2(paidH * rate), hourlyRate: rate, breakdown: dow === 0 ? `Warehouse Sunday: ${h(totalH)} h × R97,50 (R81,25 × 1.2)` : `Warehouse: ${h(totalH)} h${meetTxt}${meetingMin > 0 ? ` = ${h(paidH)} h` : ''} × R81,25` }
+  }
+  if (dow === 0) return { amount: r2(totalH * VENUE_HOURLY * SUNDAY_FACTOR), hourlyRate: r2(VENUE_HOURLY * SUNDAY_FACTOR), breakdown: `Venue/event Sunday: ${h(totalH)} h × R114 (R95 × 1.2)` }
   return { amount: r2(totalH * VENUE_HOURLY), hourlyRate: VENUE_HOURLY, breakdown: `Venue/event: ${h(totalH)} h × R95` }
 }
 
@@ -4432,7 +4443,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     ${(() => {
       const sorted = ruleDiffsAll.slice().sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
       const head = `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div style="font-weight:800;color:#93c5fd">⚖ Pay-rule check — ${gRuleDays ? gRuleDays + ' day' + (gRuleDays === 1 ? '' : 's') + ' differ from the rule: paid ' + fmtRand(gRuleOver) + ' more and ' + fmtRand(gRuleUnder) + ' less than the rule (net ' + (gRuleAmount >= 0 ? '+' : '−') + fmtRand(Math.abs(gRuleAmount)) + ')' : 'every paid day matches the rule'}</div>${gRuleDays ? `<a href="#" onclick="var b=document.getElementById('bw-rule-list');b.style.display=b.style.display==='none'?'block':'none';return false" style="color:#e2b93b;font-weight:700;font-size:12px">show / hide list</a>` : ''}</div>
-        <div style="font-size:12px;opacity:.8;margin-top:3px">Rule used (B&W rate rules v8, owner 22 Sep 2026): General staff — hourly by place, to the hour, every day: Warehouse Team R81,25/h (R650 ÷ 8); Venue/Event (any other work type) R95/h. No fixed day; a man who moves from the warehouse to a venue is paid the warehouse hours at R81,25 and the venue hours at R95. Music Bus — Mon–Sat R750 fixed 07–16 + R120/h outside; Sunday R120/h. Petrus (from 22 Sep 2026) — R640 set day rate for 06–16 Mon–Sat; Saturday before 06:00 / after 16:00 R80/h automatically; Mon–Fri before 06:00 / after 16:00 (R55/h) is HELD and flagged red — the office approves it or sets another rate; SUNDAY is never automatic — the whole entry is held (R640 + R80/h recommended) until the owner approves or declines. No deductions for Petrus. Gardeners keep their gardener rate; on the Team block they get general-staff rates. Overlapping entries are counted once. <strong>Nothing is changed by this check</strong> — it only shows where the amount paid differs, so you can decide.</div>`
+        <div style="font-size:12px;opacity:.8;margin-top:3px">Rule used (B&W rate rules v9, owner 22 Sep 2026): General staff — hourly by place, to the hour: Warehouse Team R81,25/h (R650 ÷ 8); Venue/Event (any other work type) R95/h; Sunday ×1.2 (R97,50 / R114); Mon–Fri the 07:00–07:30 staff meeting is unpaid — warehouse entries covering it lose that time (30 min = R40,62). No fixed day; a man who moves from the warehouse to a venue is paid the warehouse hours at R81,25 and the venue hours at R95. Music Bus — Mon–Sat R750 fixed 07–16 + R120/h outside; Sunday R120/h. Petrus (from 22 Sep 2026) — R640 set day rate for 06–16 Mon–Sat; Saturday before 06:00 / after 16:00 R80/h automatically; Mon–Fri before 06:00 / after 16:00 (R55/h) is HELD and flagged red — the office approves it or sets another rate; SUNDAY is never automatic — the whole entry is held (R640 + R80/h recommended) until the owner approves or declines. No deductions for Petrus. Gardeners keep their gardener rate; on the Team block they get general-staff rates. Overlapping entries are counted once. <strong>Nothing is changed by this check</strong> — it only shows where the amount paid differs, so you can decide.</div>`
       if (!sorted.length) return `<section id="bw-rule-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(20,83,45,.18);border:1px solid rgba(96,165,250,.35)">${head}</section>`
       const lines = sorted.map((c) => `<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid rgba(255,255,255,.08);font-size:12.5px"><span style="flex:0 0 auto">${c.diff > 0 ? pill('OVER', '#7f1d1d', '#fff') : pill('UNDER', '#1e3a8a', '#fff')}</span><div style="flex:1"><strong>${escapeHtmlText(c.name)}</strong> · ${escapeHtmlText(c.date)} (${dayName(c.date)}) · ${escapeHtmlText(c.rule.span)} · paid <strong>${fmtRand(c.paid)}</strong> vs rule <strong>${fmtRand(c.rule.amount)}</strong> → <strong>${c.diff > 0 ? '+' : '−'}${fmtRand(Math.abs(c.diff))}</strong><a href="#" onclick="var b=document.getElementById('bw-rule-top-${c.staffId}-${c.date}');if(b){b.style.display=b.style.display==='none'?'block':'none'}return false" style="margin-left:8px;color:#e2b93b;font-weight:700">Open ▾</a><div id="bw-rule-top-${c.staffId}-${c.date}" style="display:none;margin-top:2px">${ruleDetailTop(c)}</div></div></div>`).join('')
       return `<section id="bw-rule-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(30,58,138,.12);border:1px solid rgba(96,165,250,.5)">${head}<div id="bw-rule-list" style="margin-top:6px">${lines}</div></section>`
