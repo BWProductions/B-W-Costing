@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { buildPayrollWorkbook } from './payroll-excel'
 import { runPaidBeforeCheck } from './paid-before'
+import { runCrewPatternCheck } from './crew-pattern'
 
 type Bindings = {
   ANTHROPIC_API_KEY?: string
@@ -8,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-22-8'
+const WAGES_UI_VERSION = 'v2026-09-22-9'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4063,7 +4064,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   // Bernie's recorded Warehouse / Event/Venue choices (review key rate_choice_warehouse_or_event|shift:ID).
   const rateChoiceByShift: Record<number, OwnerPayKind> = {}
   for (const v of reviewsAll) {
-    const m = /^rate_choice_warehouse_or_event\|shift:(\d+)$/.exec(v.issue_key || '')
+    const m = /^(?:rate_choice_warehouse_or_event|crew_pattern)\|shift:(\d+)$/.exec(v.issue_key || '')
     if (m && v.status === 'RESOLVED') rateChoiceByShift[Number(m[1])] = /warehouse/i.test(v.decision_reason || '') ? 'warehouse' : 'event'
   }
   // Office decisions on Petrus weekday extra time (review key petrus_extra|shift:ID).
@@ -4125,7 +4126,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       return `<form method="post" action="/wages-admin/rate-choice" class="bw-review-decide" style="margin-top:6px;padding:8px;border-radius:8px;background:rgba(255,255,255,.05);font-size:12px">
       <input type="hidden" name="review_id" value="${v.id}">
       <input type="hidden" name="return_to" value="__RETURN__">
-      <div style="margin-bottom:6px"><strong>Bernie to choose the rate for this shift:</strong></div>
+      <div style="margin-bottom:6px"><strong>${snap.crewPattern ? 'Confirm where he was — the office chooses the place (this re-prices the row):' : 'Bernie to choose the rate for this shift:'}</strong></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         <button type="submit" name="choice" value="warehouse" style="padding:5px 10px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer">Warehouse (R81,25/h)</button>
         <button type="submit" name="choice" value="event" style="padding:5px 10px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer">Venue/Event (R95/h)</button>
@@ -4940,7 +4941,7 @@ async function proxyRequest(c: any) {
       const weekStart = fromDate ? formatProxyIsoDate(proxyStartOfPayrollWeek(fromDate)) : currentProxyPayrollWeekStart()
       const employeeFilter = (incomingUrl.searchParams.get('staff_id') || incomingUrl.searchParams.get('employee') || incomingUrl.searchParams.get('staff') || '').trim()
       // Owner 2026-09-21: "already paid" check — CURRENT (unpaid) payroll week ONLY, never a closed one.
-      if (weekStart === currentProxyPayrollWeekStart()) { try { await runPaidBeforeCheck({ db: c.env.DB, weekStart, weekEnd: proxyEndOfPayrollWeek(weekStart), ownerPayKind, ownerPayForShift }) } catch (err) {} }
+      if (weekStart === currentProxyPayrollWeekStart()) { try { await runPaidBeforeCheck({ db: c.env.DB, weekStart, weekEnd: proxyEndOfPayrollWeek(weekStart), ownerPayKind, ownerPayForShift }) } catch (err) {} try { await runCrewPatternCheck({ db: c.env.DB, weekStart, weekEnd: proxyEndOfPayrollWeek(weekStart), ownerPayKind }) } catch (err) {} }
       const tableHtmlRaw = await buildAdminCombinedSheet(c.env, weekStart, employeeFilter)
       const cleanReturn = new URL(incomingUrl.toString()); cleanReturn.searchParams.delete('msg'); cleanReturn.searchParams.delete('error')
       const flashMsg = incomingUrl.searchParams.get('msg') || ''
@@ -4971,7 +4972,7 @@ app.get('/wages-admin/payroll.xlsx', async (c) => {
   const weekStart = fromDate ? formatProxyIsoDate(proxyStartOfPayrollWeek(fromDate)) : currentProxyPayrollWeekStart()
   const weekEnd = proxyEndOfPayrollWeek(weekStart)
   try {
-    if (weekStart === currentProxyPayrollWeekStart()) { try { await runPaidBeforeCheck({ db, weekStart, weekEnd, ownerPayKind, ownerPayForShift }) } catch (err) {} }
+    if (weekStart === currentProxyPayrollWeekStart()) { try { await runPaidBeforeCheck({ db, weekStart, weekEnd, ownerPayKind, ownerPayForShift }) } catch (err) {} try { await runCrewPatternCheck({ db, weekStart, weekEnd, ownerPayKind }) } catch (err) {} }
     const out = await buildPayrollWorkbook({ db, weekStart, weekEnd, ownerPayKind, ownerPayForShift, timeToMinutes })
     if (c.req.query('check') === '1') return c.json({ weekStart, weekEnd, ...out.checks })
     return new Response(out.bytes, { status: 200, headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'content-disposition': `attachment; filename="${out.filename}"`, 'cache-control': 'no-store' } })
@@ -5053,7 +5054,7 @@ app.post('/wages-admin/rate-choice', async (c) => {
   if (!reviewId || !['warehouse', 'event'].includes(choice)) return back(safeReturn + sep + 'error=' + encodeURIComponent('Invalid rate choice.'))
   try {
     const rv = await db.prepare(`SELECT id, status, issue_key, subject_shift_id, staff_id FROM wage_payroll_reviews WHERE id = ?`).bind(reviewId).first<{ id: number, status: string, issue_key: string, subject_shift_id: number, staff_id: number }>()
-    if (!rv || !/^rate_choice_warehouse_or_event\|shift:/.test(rv.issue_key || '')) return back(safeReturn + sep + 'error=' + encodeURIComponent('Review #' + reviewId + ' is not a rate-choice review.'))
+    if (!rv || !/^(rate_choice_warehouse_or_event|crew_pattern)\|shift:/.test(rv.issue_key || '')) return back(safeReturn + sep + 'error=' + encodeURIComponent('Review #' + reviewId + ' is not a rate-choice review.'))
     if (rv.status !== 'OPEN') return back(safeReturn + sep + 'msg=' + encodeURIComponent('Review #' + reviewId + ' was already ' + rv.status + '.'))
     const row = await db.prepare(`SELECT id, staff_id, work_date, start_time, end_time, total_amount, gross_wage FROM wage_shifts WHERE id = ? AND staff_id = ?`).bind(rv.subject_shift_id, rv.staff_id).first<{ id: number, staff_id: number, work_date: string, start_time: string, end_time: string, total_amount: number, gross_wage: number }>()
     if (!row) return back(safeReturn + sep + 'error=' + encodeURIComponent('Paid shift #' + rv.subject_shift_id + ' for review #' + reviewId + ' no longer exists.'))
