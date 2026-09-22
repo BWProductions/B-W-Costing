@@ -1,7 +1,7 @@
 ---
 title: "B&W Productions — Wages System: Complete Rules & Handover"
 subtitle: "Every agreed rule and regulation, everything built and changed 12–22 September 2026, how the office reviews work, and how to restore"
-date: "22 September 2026 · live version v2026-09-22-9 · restore tag restore-2026-09-22-petrus-v5"
+date: "22 September 2026 · live version v2026-09-22-10 · restore tag restore-2026-09-22-petrus-v5"
 ---
 
 # Part 1 — Where things are
@@ -145,6 +145,25 @@ Known quirk (unchanged): the engine sometimes compares a draft with its own fina
 
 First live run (22 Sep): one flag — #9955 Takavaudza, Mon 21 Sep, "5 of 6 at a venue (FNB Stadium), this one says Warehouse" — a genuine question for the office.
 
+# Part 5c — OVERLAP REVIEWS SHOW THE FULL BREAKDOWN (owner 22 Sep 2026) — LIVE
+
+Owner: *"I cannot record a decision if I don't know if it was already billed. Give me a full breakdown so I know exactly what the hour is that I must approve."*
+
+Every overlap / possible-duplicate review now carries a **"What overlaps what"** box:
+
+* **ALREADY BILLED** — day, date, times, hours, work type, venue, description, **rand amount**, shift number and **which payroll it was paid in** (e.g. "PAID in payroll 2026-09-12 → 2026-09-18 (closed)" or "in THIS payroll, not yet paid").
+* **THIS ENTRY** — the same facts for the entry under review (draft or paid row).
+* **Overlap by the clock** — the exact overlapping window and hours (e.g. "06:30–12:00 = 5.50 h overlap") and **"Not covered by the other entry"** (e.g. "12:00–16:00 (4.00 h) after it").
+* **Recommendation in yellow**, one of:
+  * *DIFFERENT DAYS: … same clock times, but not the same day — nothing billed twice. Recommended: pay as claimed.*
+  * *Identical times and place — looks like a DUPLICATE. Recommended: approve 0 h (the other one already pays X h).*
+  * *Recommended: approve only the hours NOT already covered — 4.00 h (12:00–16:00). The 5.50 h overlap is already billed on shift #….*
+  * *This is the SAME entry (the draft became this paid row) — nothing billed twice.*
+
+The Approve-hours box, reason and Record decision buttons sit directly under it.
+
+**Self-compare reviews are auto-voided.** The engine sometimes opens an overlap review comparing a draft with the very paid row it became on Final Submission (Patrick #9943 and #9951 were this). The dashboard now voids these automatically with the reason recorded — nothing was billed twice, no decision needed.
+
 # Part 6 — Payroll Excel for the auditor (6 tabs)
 1. **Wage Detail Linked** (master; yellow = editable) — per shift: claimed / approved / override / **effective** hours and amounts, rate, breakdown, review #, system note, decision.
 2. **Auditor Trail Linked** — Employee · Sat…Fri (**HR** editable · Amount) · **6 MISSED SHIFTS** · **Total Hours (Sat–Fri + Missed)** · Wages · deductions · loans · **NET WAGE**. No Bonus / Gross-incl-bonus. Typing HR re-prices proportionally and flows to Summary.
@@ -168,6 +187,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 * **General staff → HOURLY BY PLACE (v2026-09-22-7, rate rules v8)**: Warehouse Team R81,25/h, Venue/Event R95/h, every hour, every day. Replaces every fixed-day rule for general staff (v7's R650/R750 fixed days lasted about an hour and priced no rows). Patrick's 4 venue rows already in the 19–25 Sep payroll re-priced to R95/h (R795→R902,50; R180→R190; R90→R95; R360→R380; backup `docs/restore-2026-09-22-rules-v8/patrick_rows_before.json`); his 22 Sep "Wearhouse — Loading" row (work type Normal) got a Rate-choice flag #9954 (Warehouse R771,88 or Venue R902,50; stays R795 until chosen). Closed payrolls untouched.
 * **Sunday ×1.2 and the unpaid 07:00–07:30 staff meeting (v2026-09-22-8, rate rules v9)**: Warehouse Sun R97,50/h, Venue Sun R114/h; Mon–Fri warehouse entries lose the meeting overlap. Rate-choice #9954 for Patrick's 22 Sep row now reads Warehouse R731,25 (9 h after the meeting) or Venue R902,50.
 * **Crew pattern & venue-name check (v2026-09-22-9)** — see Part 5b. Module `src/crew-pattern.ts`, review key `crew_pattern|shift:ID` / `crew_pattern|draft:ID`.
+* **Overlap reviews show the full breakdown; self-compare reviews auto-voided (v2026-09-22-10)** — see Part 5c. Patrick #9943 / #9951 voided (draft vs its own paid row).
 
 # Part 8 — Payroll 12–18 Sep 2026 (paid 17 Sep) — final figures
 111 paid rows (24 missed) · claimed 843,50 h · R72 438,15 · **approved 793,75 h · R71 096,90** · missed 98,00 h · R8 861,25 · deductions R3 210,00 · **net R67 886,90**. Full detail: `handover-2026-09-16-complete-hardcopy.pdf`.
@@ -175,7 +195,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 # Part 9 — Restore points
 | Tag / folder | State |
 |---|---|
-| `restore-2026-09-22-petrus-v5` | **Live now (v2026-09-22-9)** — Petrus v5 rule + rent deduction removed. To undo only the deduction removal: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2` |
+| `restore-2026-09-22-petrus-v5` | **Live now (v2026-09-22-10)** — Petrus v5 rule + rent deduction removed. To undo only the deduction removal: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2` |
 | `restore-2026-09-21-already-paid` | v2026-09-21-2 (already-paid rule, old Petrus rule, rent deduction still active) |
 | `restore-2026-09-18-rolled-back` | v2026-09-16-2 after the 18 Sep rollback |
 | `restore-2026-09-15-approved` | 15 Sep approved state + full data snapshot (`docs/restore-2026-09-15-approved/`) |
@@ -188,7 +208,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 git checkout restore-2026-09-22-petrus-v5
 npm run build
 npx wrangler pages deploy dist --project-name bw-productions --branch main --commit-dirty=true
-curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-22-9
+curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-22-10
 ```
 To go back to before the already-paid rule: `git checkout restore-2026-09-18-rolled-back` and deploy (expect v2026-09-16-2); any `paid_before|…` reviews can then be deleted (they are the only rows it writes).
 

@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-22-9'
+const WAGES_UI_VERSION = 'v2026-09-22-10'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4002,7 +4002,7 @@ function ruleBreakdownText(r: RuleDayResult) {
 
 type AdminPaidRow = { id: number, staff_id: number, display_name: string, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, work_type: string, outlet_venue: string, area: string, event_name: string, work_description: string, payroll_week_start: string | null, missed_previous_week: number, overnight_confirmed: number, source_draft_id: number | null, manager_update_reason: string | null }
 type AdminDraftRow = { id: number, staff_id: number, display_name: string, work_date: string, start_time: string, end_time: string, outlet_venue: string, work_type: string, work_description: string, status: string, missed_previous_week: number }
-type AdminReviewRow = { id: number, issue_key?: string, status: string, severity: string, staff_id: number, work_date: string, subject_source: string, subject_shift_id: number, compared_shift_id: number | null, original_hours: number | null, previously_paid_hours: number | null, system_proposed_payable_hours: number | null, approved_payable_hours: number | null, decision_type: string | null, decision_reason: string | null, reviewed_by_name: string | null, issue_summary: string, warning_reason: string, system_snapshot_json: string | null }
+type AdminReviewRow = { id: number, issue_key?: string, status: string, severity: string, staff_id: number, work_date: string, subject_source: string, subject_shift_id: number, compared_source?: string | null, compared_shift_id: number | null, compared_payroll_week_start?: string | null, compared_hours?: number | null, subject_snapshot_json?: string | null, compared_snapshot_json?: string | null, original_hours: number | null, previously_paid_hours: number | null, system_proposed_payable_hours: number | null, approved_payable_hours: number | null, decision_type: string | null, decision_reason: string | null, reviewed_by_name: string | null, issue_summary: string, warning_reason: string, system_snapshot_json: string | null }
 
 // Combined per-person wage sheet (2026-09-14, owner's spec): for the payroll
 // week in the page filter, ONE section per worker containing every paid shift
@@ -4038,10 +4038,24 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
 
   const staffIds = Array.from(new Set([...paid.map((r) => r.staff_id), ...drafts.map((r) => r.staff_id)]))
   const ph = staffIds.map(() => '?').join(',')
-  const revRes = await db.prepare(`SELECT id, issue_key, status, severity, staff_id, work_date, subject_source, subject_shift_id, compared_shift_id, original_hours, previously_paid_hours,
-        system_proposed_payable_hours, approved_payable_hours, approved_start_time, approved_end_time, decision_type, decision_reason, reviewed_by_name, issue_summary, warning_reason, system_snapshot_json
+  // Owner 2026-09-22: a review that compares a draft with the PAID ROW THAT DRAFT BECAME is the entry
+  // compared with itself (engine artefact after Final Submission) — void it, nothing was billed twice.
+  try {
+    await db.prepare(`UPDATE wage_payroll_reviews SET status = 'VOID', void_reason = 'Auto: the "other overlapping entry" is this entry itself — the draft became this paid row on Final Submission. Nothing was billed twice.', voided_by_name = 'system self-compare check', voided_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE status = 'OPEN' AND subject_source = 'draft' AND compared_source = 'shift' AND staff_id IN (${ph})
+          AND EXISTS (SELECT 1 FROM wage_shift_drafts d WHERE d.id = wage_payroll_reviews.subject_shift_id AND d.final_shift_id = wage_payroll_reviews.compared_shift_id)`).bind(...staffIds).run()
+  } catch (err) {}
+  const revRes = await db.prepare(`SELECT id, issue_key, status, severity, staff_id, work_date, subject_source, subject_shift_id, compared_source, compared_shift_id, compared_payroll_week_start, original_hours, compared_hours, previously_paid_hours,
+        system_proposed_payable_hours, approved_payable_hours, approved_start_time, approved_end_time, decision_type, decision_reason, reviewed_by_name, issue_summary, warning_reason, system_snapshot_json, subject_snapshot_json, compared_snapshot_json
       FROM wage_payroll_reviews WHERE staff_id IN (${ph}) AND status <> 'VOID' AND (work_date BETWEEN date(?, '-7 days') AND ?)`).bind(...staffIds, weekStart, weekEnd).all()
   const reviewsAll = (revRes.results || []) as AdminReviewRow[]
+  // Live facts for the compared paid rows (amount / payroll they were paid in), so the overlap breakdown is current.
+  const cmpIds = Array.from(new Set(reviewsAll.filter((v) => v.compared_shift_id).map((v) => Number(v.compared_shift_id))))
+  const cmpRows: Record<number, { id: number, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, work_type: string, outlet_venue: string, area: string, work_description: string, payroll_week_start: string | null, source_draft_id: number | null }> = {}
+  if (cmpIds.length) {
+    const cr = await db.prepare(`SELECT id, work_date, start_time, end_time, hours_worked, COALESCE(gross_wage, total_amount, 0) amount, work_type, outlet_venue, area, work_description, payroll_week_start, source_draft_id FROM wage_shifts WHERE id IN (${cmpIds.map(() => '?').join(',')})`).bind(...cmpIds).all()
+    for (const r of (cr.results || []) as any[]) cmpRows[Number(r.id)] = r
+  }
   const paidIds = new Set(paid.map((r) => r.id)), paidDraftIds = new Set(paid.map((r) => r.source_draft_id).filter(Boolean) as number[]), draftIds = new Set(drafts.map((d) => d.id))
   const reviews = reviewsAll.filter((v) => (v.subject_source === 'shift' && paidIds.has(v.subject_shift_id)) || (v.subject_source === 'draft' && (paidDraftIds.has(v.subject_shift_id) || draftIds.has(v.subject_shift_id))))
 
@@ -4209,9 +4223,52 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         const decidedAmt = v.status !== 'OPEN' ? `<div style="margin-top:3px;color:#86efac"><strong>Decided: ${snap.approvedAmount !== undefined ? fmtRand(Number(snap.approvedAmount)) : (v.approved_payable_hours !== null && v.approved_payable_hours !== undefined ? Number(v.approved_payable_hours).toFixed(2) + ' h' : v.status)}</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''}${v.decision_reason ? ' — ' + escapeHtmlText(v.decision_reason) : ''}</div>` : ''
         return `<div id="bw-review-${v.id}" style="font-size:12px;line-height:1.4;margin-bottom:6px">${head}<span style="opacity:.6">#${v.id}</span>${body}${decidedAmt}${withForm ? decisionForm(v, snap) : ''}${editHtml}</div>`
       }
+      // Owner 2026-09-22: an overlap review must SHOW the two entries side by side — what was billed
+      // before (which payroll, hours, place, rand) versus this entry — and the exact overlapping hours.
+      let overlapBox = ''
+      if (v.compared_shift_id && /overlap|duplicate/i.test((v.issue_key || '') + ' ' + (v.warning_reason || ''))) {
+        let sub: any = null, cmp: any = null
+        try { sub = v.subject_snapshot_json ? JSON.parse(v.subject_snapshot_json) : null } catch (err) {}
+        try { cmp = v.compared_snapshot_json ? JSON.parse(v.compared_snapshot_json) : null } catch (err) {}
+        const live = cmpRows[Number(v.compared_shift_id)]
+        const cStart = live?.start_time || cmp?.startTime || '', cEnd = live?.end_time || cmp?.endTime || '', cDate = live?.work_date || cmp?.workDate || v.work_date
+        const cVenue = live?.outlet_venue || cmp?.venue || '', cWt = live?.work_type || cmp?.workType || 'Normal', cDesc = live?.work_description || cmp?.workDescription || ''
+        const cHours = Number(live?.hours_worked ?? cmp?.hours ?? v.compared_hours ?? 0), cAmt = live ? Number(live.amount || 0) : Number(cmp?.amount ?? 0)
+        const cWeek = live?.payroll_week_start || cmp?.payrollWeekStart || (cDate >= weekStart ? weekStart : null)
+        const cPaidIn = cWeek && cWeek < weekStart ? `PAID in payroll ${cWeek} → ${proxyEndOfPayrollWeek(cWeek)} (closed)` : `in THIS payroll (${weekStart} → ${weekEnd}, not yet paid)`
+        const sStart = sub?.startTime || '', sEnd = sub?.endTime || '', sVenue = sub?.venue || '', sWt = sub?.workType || 'Normal', sDesc = sub?.workDescription || '', sHours = Number(sub?.hours ?? v.original_hours ?? 0)
+        const a = timeToMinutes(sStart), b0 = timeToMinutes(sEnd), c0 = timeToMinutes(cStart), d0 = timeToMinutes(cEnd)
+        let ovText = 'times unreadable', ovH = 0, extraText = ''
+        if (a !== null && b0 !== null && c0 !== null && d0 !== null) {
+          const b = b0 <= a ? b0 + 1440 : b0, dd = d0 <= c0 ? d0 + 1440 : d0
+          const os = Math.max(a, c0), oe = Math.min(b, dd)
+          ovH = Math.max(0, oe - os) / 60
+          const fm = (m: number) => String(Math.floor((m % 1440) / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0')
+          ovText = ovH > 0 ? `${fm(os)}–${fm(oe)} = ${ovH.toFixed(2)} h overlap` : 'no overlapping minutes'
+          const before = Math.max(0, c0 - a) / 60, after = Math.max(0, b - dd) / 60
+          const parts = [before > 0 ? `${fm(a)}–${fm(Math.min(c0, b))} (${before.toFixed(2)} h) before the other entry` : '', after > 0 ? `${fm(Math.max(dd, a))}–${fm(b)} (${after.toFixed(2)} h) after it` : ''].filter(Boolean)
+          extraText = parts.length ? parts.join(' + ') : 'none — this entry lies entirely inside the other one'
+        }
+        const isSelf = live && Number(live.source_draft_id) === Number(v.subject_shift_id) && v.subject_source === 'draft'
+        const same = cDate === (sub?.workDate || v.work_date) && sStart === cStart && sEnd === cEnd && (sVenue || '').trim().toLowerCase() === (cVenue || '').trim().toLowerCase()
+        const sDate = sub?.workDate || v.work_date
+        const verdict = isSelf ? 'This is the SAME entry (the draft became this paid row) — nothing billed twice. No decision needed.'
+          : cDate !== sDate ? `DIFFERENT DAYS: the other entry is ${cDate} (${dayName(cDate)}), this one is ${sDate} (${dayName(sDate)}). Same clock times, but not the same day — nothing billed twice. Recommended: pay as claimed (${sHours.toFixed(2)} h).`
+          : same ? `Identical times and place — looks like a DUPLICATE. Recommended: approve 0 h on this entry (the other one already pays ${cHours.toFixed(2)} h).`
+          : ovH > 0 ? `Recommended: approve only the hours NOT already covered — ${(sHours - ovH).toFixed(2)} h (${extraText}). The ${ovH.toFixed(2)} h overlap is already billed on shift #${v.compared_shift_id}.`
+          : 'No overlapping minutes — recommended: pay as claimed.'
+        const line = (label: string, color: string, date: string, st: string, en: string, hrs: number, wt: string, venue: string, desc: string, money: string) => `<div style="margin:3px 0;padding:4px 6px;border-left:3px solid ${color};background:rgba(255,255,255,.04)"><div style="font-weight:800;color:${color}">${label}</div><div>${escapeHtmlText(dayName(date))} ${escapeHtmlText(date)} · <strong>${escapeHtmlText(st)}–${escapeHtmlText(en)}</strong> · ${hrs.toFixed(2)} h</div><div style="opacity:.9">${escapeHtmlText(wt)} · ${escapeHtmlText(venue)}${desc ? ' · ' + escapeHtmlText(desc) : ''}</div><div style="opacity:.9">${money}</div></div>`
+        overlapBox = `<div style="margin-top:5px;padding:7px 9px;border-radius:8px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.14)">
+          <div style="font-weight:800;margin-bottom:2px">What overlaps what</div>
+          ${line('ALREADY BILLED', '#93c5fd', cDate, cStart, cEnd, cHours, cWt, cVenue, cDesc, `<strong>${fmtRand(cAmt)}</strong> · shift #${v.compared_shift_id} · ${escapeHtmlText(cPaidIn)}`)}
+          ${line('THIS ENTRY', '#e2b93b', sDate, sStart, sEnd, sHours, sWt, sVenue, sDesc, v.subject_source === 'draft' ? 'draft — not yet final-submitted' : 'shift #' + v.subject_shift_id + ' in this payroll')}
+          <div style="margin-top:4px"><strong>Overlap by the clock:</strong> ${escapeHtmlText(ovText)}${ovH > 0 && cDate === sDate ? `<br><strong>Not covered by the other entry:</strong> ${escapeHtmlText(extraText)}` : ''}</div>
+          <div style="margin-top:4px;padding:5px 7px;border-radius:6px;background:rgba(253,230,138,.12);color:#fde68a;font-weight:700">${escapeHtmlText(verdict)}</div>
+        </div>`
+      }
       const summary = openRed ? '' : `<div style="opacity:.8">${escapeHtmlText((v.issue_summary || '').replace(/^Manual overlap review — [^—]+— /, 'Overlap check — '))}</div>`
       const detail = openRed ? `<div style="opacity:.9;margin-top:2px">${escapeHtmlText(snap?.humanReason || v.warning_reason || '')}</div>` : (open ? `<div style="opacity:.75;margin-top:2px">${escapeHtmlText((v.warning_reason || '').replace(/ Do not block staff entry.*$/i, ''))}</div>` : '')
-      return `<div id="bw-review-${v.id}" style="font-size:12px;line-height:1.35;margin-bottom:6px">${head}<span style="opacity:.6">#${v.id}</span>${summary}${detail}${rec}${reason}${decided}${withForm ? decisionForm(v, snap) : ''}${editHtml}</div>`
+      return `<div id="bw-review-${v.id}" style="font-size:12px;line-height:1.35;margin-bottom:6px">${head}<span style="opacity:.6">#${v.id}</span>${summary}${detail}${overlapBox}${rec}${reason}${decided}${withForm ? decisionForm(v, snap) : ''}${editHtml}</div>`
     }).join('')
   }
 
