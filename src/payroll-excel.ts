@@ -95,7 +95,7 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     const full = Number(r.hours_worked || 0)
     if (Math.abs(hours - full) < 0.001 || hours <= 0) {
       const p = hours <= 0 ? { amount: 0, hourlyRate: Number(r.rate || 0), breakdown: 'Approved 0 h — nothing payable' } : deps.ownerPayForShift(r.work_date, r.start_time, r.end_time, effKind)
-      if (p) return { amount: p.amount, rate: p.hourlyRate, breakdown: p.breakdown + (kind === 'warehouse_or_event' && !rateChoice && hours > 0 ? ' (rate choice pending — priced as Event/Venue until Bernie chooses)' : '') }
+      if (p) return { amount: p.amount, rate: p.hourlyRate, breakdown: p.breakdown + (kind === 'warehouse_or_event' && !rateChoice && hours > 0 ? ' (rate choice pending — priced as Venue/Event R95/h until Bernie chooses)' : '') }
       return { amount: Number(r.amount || 0), rate: Number(r.rate || 0), breakdown: 'System amount kept (' + (kind === 'gardener' ? 'gardener rate' : kind === 'fixed_weekly' ? 'fixed weekly' : 'unpriced') + ')' }
     }
     // Partial approval: price the approved window if known, else the LAST `hours` of the shift (extra hours are usually the late ones).

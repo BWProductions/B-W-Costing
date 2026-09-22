@@ -1,7 +1,7 @@
 ---
 title: "B&W Productions — Wages System: Complete Rules & Handover"
 subtitle: "Every agreed rule and regulation, everything built and changed 12–22 September 2026, how the office reviews work, and how to restore"
-date: "22 September 2026 · live version v2026-09-22-6 · restore tag restore-2026-09-22-petrus-v5"
+date: "22 September 2026 · live version v2026-09-22-7 · restore tag restore-2026-09-22-petrus-v5"
 ---
 
 # Part 1 — Where things are
@@ -18,17 +18,20 @@ date: "22 September 2026 · live version v2026-09-22-6 · restore tag restore-20
 | Database | Cloudflare D1 `bw-productions-db` |
 | Code | git `main`, tag `restore-2026-09-21-already-paid` |
 
-# Part 2 — Pay rules (B&W rate rules v7 — general staff corrected by the owner 22 Sep 2026; Petrus rule 22 Sep 2026)
+# Part 2 — Pay rules (B&W rate rules v8 — general staff HOURLY BY PLACE, owner 22 Sep 2026; Petrus rule 22 Sep 2026)
 
-The rate depends on the **work type the worker selects** and the **actual day worked**. A fixed day is paid **once per person per day**; overlapping entries are counted once.
+General staff are paid **by the hour, to the hour, at the rate of the place they worked**, every day of the week. No fixed day; no before/after premium.
 
-| Day | Warehouse (work type "Warehouse Team") | Event / Venue (any other work type) |
-|---|---|---|
-| Monday–Friday | **R650 fixed** for any time inside 07:00–16:00 **+ R81,25 / h** before 07:00 or after 16:00 | **R750 fixed** for any time inside 07:00–16:00 **+ R90 / h** before 07:00 or after 16:00 |
-| Saturday | **R750 fixed** for any time inside 08:00–16:00 **+ R95 / h** before 08:00 or after 16:00 | same |
-| Sunday | **R750 fixed** for any time inside 08:00–16:00 **+ R120 / h** before 08:00 or after 16:00 | same |
+| Place (chosen by the work type) | Rate |
+|---|---|
+| **Warehouse** (work type "Warehouse Team") | **R81,25 per hour** (R650 ÷ 8) |
+| **Venue / event** (any other work type) | **R95 per hour** |
 
-Examples: Warehouse Mon 07–16 = R650 · Warehouse Mon 06–18 = R650 + 3 h × R81,25 = R893,75 · Warehouse Mon 16–20 (no day time) = R325 · Event Mon 07–16 = R750 · Event Mon 05–16 = R930 · Event Mon 16–18 = R180 · Sat 08–16 = R750 · Sat 06–18 = R750 + 4 h × R95 = R1 130 · Sun 08–16 = R750 · Sun 06–20 = R750 + 6 h × R120 = R1 470 · Sat 22:00–Sun 02:00 = 2 h × R95 + 2 h × R120 = R430.
+A man who moves from the warehouse to a venue is paid the warehouse hours at R81,25 and the venue hours at R95, each entered as its own entry. Gaps (travel) are not paid. Overlapping entries are counted once.
+
+Examples: Warehouse 06–12 = 6 h × R81,25 = R487,50 · Venue 12–20 = 8 h × R95 = R760 → day R1 247,50 · Warehouse 06–16 (stayer) = R812,50 · Venue 07–16 = R855 · Venue Sat 08–16 = R760 · Venue Sat 22:00–Sun 02:00 = 4 h × R95 = R380.
+
+Owner's reasoning (22 Sep): "R650 ÷ 8 = R81,25. Take the time worked at the warehouse at R81,25, and the difference at R95 if it's at the venue. Stay with an hourly rate, but to the hour."
 
 * **Music Bus** (work type *Music Bus*): Mon–Sat **R750 fixed** (07–16) **+ R120/h** outside · Sunday **R120/h**.
 * **Petrus (Tsotlego Petrus Malakoane) — NEW RULE from 22 Sep 2026 (rate rules v6)**: **set day rate R640,00** for 06:00–16:00, Monday–Saturday. Sunday is never automatic.
@@ -45,8 +48,8 @@ Examples: Warehouse Mon 07–16 = R650 · Warehouse Mon 06–18 = R650 + 3 h × 
 * **Gardeners (Givemore, Takavaudza)**: House / House-Garden work at **R62,50/h**. Their Warehouse Team / Team Assistance work is priced as general staff.
 * **Sharleen Ndlovu**: fixed weekly **R3 000**.
 * **Midnight rule**: one row; hours before 00:00 at the start day's rate, after 00:00 at the next day's.
-* **"Warehouse" only in the wording** (work type not Warehouse): red **Rate-choice** review; Bernie clicks Warehouse (R650 fixed + R81,25/h) or Event/Venue (R750 fixed + R90/h). Weekends need no choice (same rates).
-* **Never**: R375 half day · Sunday ×1.5 / ×1.2 · Music Bus R130 / R190.
+* **"Warehouse" only in the wording** (work type not Warehouse): red **Rate-choice** review; Bernie clicks Warehouse (R81,25/h) or Venue/Event (R95/h). Also catches the "Wearhouse" misspelling.
+* **Never**: R375 half day · R750/R650 fixed days for general staff · Sunday ×1.5 / ×1.2 · Music Bus R130 / R190.
 
 Music Bus example: Sat 08–22 = R750 + 6 h × R120 = R1 470 · Sun 07–12 = R600.
 
@@ -148,7 +151,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 * Approved "already paid" amounts on drafts now show immediately in the worker's green figure and row ("pays when final-submitted"), and are not re-flagged after Final Submission.
 * **Petrus rate rules v6** (table in Part 2): R640 set day rate for 06–16 Mon–Sat; Saturday extras R80/h automatic; **Sunday whole entry held for owner approval** (approve as recommended / other amount / decline); **Mon–Fri time outside 06–16 (R55/h) held for office approval and rate decision** (review key `petrus_extra|shift:ID`, route `/wages-admin/petrus-extra`). Earlier the same day the rule was briefly R633,33/day (v2026-09-22-2/-3) — superseded before any Petrus row was paid under it. Applies to every Petrus row final-submitted from 22 Sep; the dashboard rule summary and Excel breakdown text read "R640 set day rate (06–16)".
 * **Petrus: all deductions removed** — R450 Rent ended, no loans (see Part 2).
-* **General staff rule corrected (v2026-09-22-6, rate rules v7)**: Warehouse Mon–Fri is **R650 fixed 07–16 + R81,25/h outside** (was wrongly hourly-only); Saturday and Sunday are **R750 fixed 08–16 + R95/h / R120/h outside** (were wrongly hourly-only). Checked: the only rows already final-submitted in the 19–25 Sep payroll (Patrick, Event/Venue weekdays) are unchanged by the correction; closed payrolls untouched.
+* **General staff → HOURLY BY PLACE (v2026-09-22-7, rate rules v8)**: Warehouse Team R81,25/h, Venue/Event R95/h, every hour, every day. Replaces every fixed-day rule for general staff (v7's R650/R750 fixed days lasted about an hour and priced no rows). Patrick's 4 venue rows already in the 19–25 Sep payroll re-priced to R95/h (R795→R902,50; R180→R190; R90→R95; R360→R380; backup `docs/restore-2026-09-22-rules-v8/patrick_rows_before.json`); his 22 Sep "Wearhouse — Loading" row (work type Normal) got a Rate-choice flag #9954 (Warehouse R771,88 or Venue R902,50; stays R795 until chosen). Closed payrolls untouched.
 
 # Part 8 — Payroll 12–18 Sep 2026 (paid 17 Sep) — final figures
 111 paid rows (24 missed) · claimed 843,50 h · R72 438,15 · **approved 793,75 h · R71 096,90** · missed 98,00 h · R8 861,25 · deductions R3 210,00 · **net R67 886,90**. Full detail: `handover-2026-09-16-complete-hardcopy.pdf`.
@@ -156,7 +159,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 # Part 9 — Restore points
 | Tag / folder | State |
 |---|---|
-| `restore-2026-09-22-petrus-v5` | **Live now (v2026-09-22-6)** — Petrus v5 rule + rent deduction removed. To undo only the deduction removal: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2` |
+| `restore-2026-09-22-petrus-v5` | **Live now (v2026-09-22-7)** — Petrus v5 rule + rent deduction removed. To undo only the deduction removal: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2` |
 | `restore-2026-09-21-already-paid` | v2026-09-21-2 (already-paid rule, old Petrus rule, rent deduction still active) |
 | `restore-2026-09-18-rolled-back` | v2026-09-16-2 after the 18 Sep rollback |
 | `restore-2026-09-15-approved` | 15 Sep approved state + full data snapshot (`docs/restore-2026-09-15-approved/`) |
@@ -169,7 +172,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 git checkout restore-2026-09-22-petrus-v5
 npm run build
 npx wrangler pages deploy dist --project-name bw-productions --branch main --commit-dirty=true
-curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-22-6
+curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-22-7
 ```
 To go back to before the already-paid rule: `git checkout restore-2026-09-18-rolled-back` and deploy (expect v2026-09-16-2); any `paid_before|…` reviews can then be deleted (they are the only rows it writes).
 
