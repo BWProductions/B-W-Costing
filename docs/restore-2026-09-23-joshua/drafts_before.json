@@ -1,0 +1,42 @@
+[
+ {
+  "id": 642,
+  "staff_id": 15,
+  "work_date": "2026-09-13",
+  "outlet_venue": "Pastdal pretoria",
+  "area": "Pretoria",
+  "work_type": "Normal",
+  "work_description": "Break down",
+  "start_time": "07:00",
+  "end_time": "13:00",
+  "status": "submitted",
+  "final_shift_id": 9852,
+  "created_at": "2026-09-13 11:16:27",
+  "updated_at": "2026-09-23 06:27:42",
+  "submitted_at": "2026-09-23 06:27:42",
+  "missed_previous_week": 1,
+  "overnight_confirmed": 0,
+  "payroll_week_start": "2026-09-19",
+  "payroll_note": "Real work date 2026-09-13; paid in current payroll 2026-09-19 to 2026-09-25; flagged for payroll cross-check.\n\nSystem review: claimed against payroll week 2026-09-19; exact work date 2026-09-13; venue Pastdal pretoria; work type / role Normal; description Break down; captured time 07:00-13:00; belongs to previous payroll yes.\nConflict review: possible already-claimed or overlapping shift detected for backend review only. Do not block staff entry. Do not auto-call it duplicate. Existing entries on this date overlap the captured time 07:00-13:00. Office must review manually and correct payable hours if needed."
+ },
+ {
+  "id": 847,
+  "staff_id": 15,
+  "work_date": "2026-09-23",
+  "outlet_venue": "Warehouse",
+  "area": "Meyerton",
+  "work_type": "Normal",
+  "work_description": "Cleaning warehouse",
+  "start_time": "07:00",
+  "end_time": "16:00",
+  "status": "submitted",
+  "final_shift_id": 9853,
+  "created_at": "2026-09-22 13:49:30",
+  "updated_at": "2026-09-23 06:28:16",
+  "submitted_at": "2026-09-23 06:28:16",
+  "missed_previous_week": 0,
+  "overnight_confirmed": 0,
+  "payroll_week_start": null,
+  "payroll_note": "System review: claimed against payroll week not supplied; exact work date 2026-09-23; venue Warehouse; work type / role Normal; description Cleaning warehouse; captured time 07:00-16:00; belongs to previous payroll no.\nConflict review: possible already-claimed or overlapping shift detected for backend review only. Do not block staff entry. Do not auto-call it duplicate. Existing entries on this date overlap the captured time 07:00-16:00. Office must review manually and correct payable hours if needed."
+ }
+]

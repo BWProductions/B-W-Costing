@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-23-4'
+const WAGES_UI_VERSION = 'v2026-09-23-5'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4074,7 +4074,7 @@ function ruleBreakdownText(r: RuleDayResult) {
   return parts.join(' + ') || 'no priced entries'
 }
 
-type AdminPaidRow = { id: number, staff_id: number, display_name: string, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, work_type: string, outlet_venue: string, area: string, event_name: string, work_description: string, payroll_week_start: string | null, missed_previous_week: number, overnight_confirmed: number, source_draft_id: number | null, manager_update_reason: string | null }
+type AdminPaidRow = { id: number, staff_id: number, display_name: string, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, work_type: string, outlet_venue: string, area: string, event_name: string, work_description: string, payroll_week_start: string | null, missed_previous_week: number, overnight_confirmed: number, source_draft_id: number | null, manager_update_reason: string | null, hourly_rate_snapshot?: number | null }
 type AdminDraftRow = { id: number, staff_id: number, display_name: string, work_date: string, start_time: string, end_time: string, outlet_venue: string, work_type: string, work_description: string, status: string, missed_previous_week: number }
 type AdminReviewRow = { id: number, issue_key?: string, status: string, severity: string, staff_id: number, work_date: string, subject_source: string, subject_shift_id: number, compared_source?: string | null, compared_shift_id: number | null, compared_payroll_week_start?: string | null, compared_hours?: number | null, subject_snapshot_json?: string | null, compared_snapshot_json?: string | null, original_hours: number | null, previously_paid_hours: number | null, system_proposed_payable_hours: number | null, approved_payable_hours: number | null, decision_type: string | null, decision_reason: string | null, reviewed_by_name: string | null, issue_summary: string, warning_reason: string, system_snapshot_json: string | null }
 
@@ -4090,7 +4090,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
 
   const paidRes = await db.prepare(`SELECT w.id, w.staff_id, s.display_name, w.work_date, w.start_time, w.end_time, w.hours_worked,
         COALESCE(w.gross_wage, w.total_amount, 0) AS amount, w.work_type, w.outlet_venue, w.area, w.event_name, w.work_description,
-        w.payroll_week_start, w.missed_previous_week, w.overnight_confirmed, w.source_draft_id, w.manager_update_reason
+        w.payroll_week_start, w.missed_previous_week, w.overnight_confirmed, w.source_draft_id, w.manager_update_reason, w.hourly_rate_snapshot
       FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id
       WHERE (w.work_date BETWEEN ? AND ? AND (w.payroll_week_start IS NULL OR w.payroll_week_start = ?))
          OR (w.payroll_week_start = ? AND w.work_date < ?)
@@ -4551,7 +4551,14 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         ${td(escapeHtmlText(r.work_description || ''))}
         ${td(escapeHtmlText(r.start_time) + '–' + escapeHtmlText(r.end_time), 'white-space:nowrap')}
         ${td(escapeHtmlText(r.work_type || ''))}
-        ${td(Number(r.hours_worked || 0).toFixed(2), 'text-align:right;white-space:nowrap')}
+        ${td((() => {
+          // Owner 2026-09-23: "7 to 7:30 is a meeting, so that can't be 9 hours." Show the PAID hours, with the clocked
+          // hours underneath, whenever the amount is on fewer hours than were clocked (warehouse meeting, R0 rows).
+          const clocked = Number(r.hours_worked || 0), amt = Number(r.amount || 0), rate = Number((r as any).hourly_rate_snapshot || 0)
+          if (amt === 0 && clocked > 0) return `<strong>0.00</strong><br><span style="opacity:.6;font-size:11px">${clocked.toFixed(2)} clocked · R0</span>`
+          if (rate > 0 && amt > 0) { const paidH = Math.round(amt / rate * 100) / 100; if (Math.abs(paidH - clocked) >= 0.24 && paidH < clocked) return `<strong>${paidH.toFixed(2)}</strong><br><span style="opacity:.6;font-size:11px">${clocked.toFixed(2)} clocked − ${(clocked - paidH).toFixed(2)} meeting</span>` }
+          return clocked.toFixed(2)
+        })(), 'text-align:right;white-space:nowrap')}
         ${td(fmtRand(r.amount), 'text-align:right;white-space:nowrap;font-weight:700')}
         ${td(missedCell(r), 'min-width:240px')}
         ${td((revs.length ? reviewCell(revs, true, editBtn(r.id)) : editBtn(r.id)) + (r.manager_update_reason ? `<div style="font-size:12px;color:#86efac">Corrected: ${escapeHtmlText(r.manager_update_reason)}</div>` : ''), 'min-width:260px')}
@@ -4975,6 +4982,23 @@ async function proxyRequest(c: any) {
           const rd = await c.env.DB.prepare(`SELECT real_date FROM wage_draft_real_dates WHERE draft_id = ?`).bind(Number(finalSubmitMatch[1])).first<{ real_date: string }>()
           if (rd?.real_date) iso = rd.real_date
         }
+        // Owner 2026-09-23 (Joshua Wed 23 Sep ×2, John 17 Sep ×2, Sat 13 Sep re-claimed): a worker may not
+        // final-submit a SECOND entry for the same day whose times fall inside an entry already paid to him
+        // (this payroll or an earlier one). The office is told which row already covers it.
+        if (d && d.status === 'draft' && iso && staffId) {
+          const full = await c.env.DB.prepare(`SELECT start_time, end_time, outlet_venue FROM wage_shift_drafts WHERE id = ?`).bind(Number(finalSubmitMatch[1])).first<{ start_time: string, end_time: string, outlet_venue: string }>()
+          const same = full ? await c.env.DB.prepare(`SELECT id, start_time, end_time, outlet_venue, payroll_week_start FROM wage_shifts WHERE staff_id = ? AND work_date = ? AND COALESCE(gross_wage, total_amount, 0) > 0`).bind(staffId, iso).all() : { results: [] }
+          const a = full ? timeToMinutes(full.start_time) : null, b0 = full ? timeToMinutes(full.end_time) : null
+          if (a !== null && b0 !== null) {
+            const b = b0 <= a ? b0 + 1440 : b0
+            const dup = ((same.results || []) as any[]).find((p) => { const c0 = timeToMinutes(p.start_time), d0 = timeToMinutes(p.end_time); if (c0 === null || d0 === null) return false; const dd = d0 <= c0 ? d0 + 1440 : d0; return a >= c0 && b <= dd })
+            if (dup) {
+              const msg = 'Not final-submitted: you have ALREADY been paid for ' + proxyLongDate(iso) + ' ' + dup.start_time + '–' + dup.end_time + ' (' + (dup.outlet_venue || '') + (dup.payroll_week_start && dup.payroll_week_start < currentProxyPayrollWeekStart() ? ', payroll ' + dup.payroll_week_start : ', this payroll') + '). This entry ' + full!.start_time + '–' + full!.end_time + ' falls inside those hours. If you worked EXTRA hours that day, edit this entry to only the extra hours (e.g. 16:00–20:00). If it is a mistake, delete it. Ask the office if unsure.'
+              await captureWagesDebug(c.env, { request_path: incomingUrl.pathname, request_method: 'POST', original_payload_json: JSON.stringify({ draft_id: Number(finalSubmitMatch[1]), work_date: iso, start: full!.start_time, end: full!.end_time, covered_by_shift: dup.id }), rewritten_payload_json: '{}', rewrite_applied: 1, response_status: 302, response_location: 'duplicate-block', response_error_text: msg })
+              return new Response(null, { status: 302, headers: { location: '/wages/me?error=' + encodeURIComponent(msg), 'cache-control': 'no-store' } })
+            }
+          }
+        }
         const err = d ? proxyWorkDateWindowError(iso) : null
         if (err) {
           await captureWagesDebug(c.env, { request_path: incomingUrl.pathname, request_method: 'POST', original_payload_json: JSON.stringify({ work_date: iso }), rewritten_payload_json: '{}', rewrite_applied: 1, response_status: 302, response_location: 'window-refused', response_error_text: err })
@@ -5326,7 +5350,7 @@ app.post('/wages-admin/rate-choice', async (c) => {
       await captureWagesDebug(c.env, { request_path: '/wages-admin/rate-choice (draft)', request_method: 'POST', original_payload_json: JSON.stringify({ review_id: reviewId, draft_id: rv.subject_shift_id, choice, by: admin.name }), rewritten_payload_json: JSON.stringify({ amount_if_submitted: dp?.amount ?? null, breakdown: dp?.breakdown || '' }), rewrite_applied: 1, response_status: 302, response_location: safeReturn, response_error_text: '' })
       return back(safeReturn + sep + 'msg=' + encodeURIComponent('Review #' + reviewId + ': ' + labelD + ' recorded by ' + admin.name + ' for the draft. The rate is applied automatically when the worker final-submits' + (dp ? ' (' + fmtRand(dp.amount) + ')' : '') + '.') + '#bw-review-' + reviewId)
     }
-    const row = await db.prepare(`SELECT id, staff_id, work_date, start_time, end_time, total_amount, gross_wage FROM wage_shifts WHERE id = ? AND staff_id = ?`).bind(rv.subject_shift_id, rv.staff_id).first<{ id: number, staff_id: number, work_date: string, start_time: string, end_time: string, total_amount: number, gross_wage: number }>()
+    const row = await db.prepare(`SELECT id, staff_id, work_date, start_time, end_time, total_amount, gross_wage, payroll_week_start FROM wage_shifts WHERE id = ? AND staff_id = ?`).bind(rv.subject_shift_id, rv.staff_id).first<{ id: number, staff_id: number, work_date: string, start_time: string, end_time: string, total_amount: number, gross_wage: number, payroll_week_start: string | null }>()
     if (!row) return back(safeReturn + sep + 'error=' + encodeURIComponent('Paid shift #' + rv.subject_shift_id + ' for review #' + reviewId + ' no longer exists.'))
     const kind: OwnerPayKind = choice === 'warehouse' ? 'warehouse' : 'event'
     let priced = ownerPayForShift(row.work_date, row.start_time, row.end_time, kind)
