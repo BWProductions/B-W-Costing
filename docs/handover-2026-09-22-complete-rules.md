@@ -1,7 +1,7 @@
 ---
 title: "B&W Productions — Wages System: Complete Rules & Handover"
 subtitle: "Every agreed rule and regulation, everything built and changed 12–23 September 2026, how the office reviews work, the 19–25 Sep payroll as sent to the auditors, and how to restore"
-date: "23 September 2026 · live version v2026-09-23-12 · restore tag restore-2026-09-23-payroll-final"
+date: "23 September 2026 · live version v2026-09-23-13 · restore tag restore-2026-09-23-payroll-final"
 ---
 
 # Part 1 — Where things are
@@ -11,7 +11,7 @@ date: "23 September 2026 · live version v2026-09-23-12 · restore tag restore-2
 | Office dashboard | https://bwprodsystem.co.za/admin/wages (any logged-in office user) |
 | Payroll Excel (auditor) | **Download Payroll Excel (new)** button on the dashboard · `/wages-admin/payroll.xlsx?from=YYYY-MM-DD` |
 | Old export | **Export Excel (old rules – reference only)** + CSV — kept until told otherwise |
-| Live code version | **v2026-09-23-12** — check at `/wages-version` |
+| Live code version | **v2026-09-23-13** — check at `/wages-version` |
 | Health | `/wages-health` |
 | Payroll week | **Saturday → Friday** |
 | Auditor run | **Wednesday**. Hours for Wed–Sun are entered as a best guess ("a normal day"); staff correct them the following week. |
@@ -88,6 +88,8 @@ Examples (Heritage Day): Warehouse 07–15 = 8 h − 0,5 h meeting = 7,5 h × R1
 
 The planned end **15:00** is recorded in the new table `wage_planned_hours` (2026-09-24 → 15:00). Any Heritage Day entry a worker captures past 15:00 is flagged red **⏰ CLAIMED PAST 15:00** on the dashboard, and from Monday 28 Sep the dashboard opens a **public-holiday follow-up panel** (Part 4) asking, per worker, "what time did he really work until?" with the rand difference worked out.
 
+**Owner 23 Sep, verbatim: "Even if they worked less, I don't want anything to be done. I only want something to be done if we underpaid them."** So on Monday: Bernie picks the real end time per person → worked MORE than paid = top-up line at the holiday rule in the 26 Sep payroll; worked less or the same = nothing paid, nothing deducted, answer recorded only. Petrus's holiday pricing also deducts the meeting (06:30–14:00 = 7 h × R160 = R1 120 shows as "as paid").
+
 Owner's words: "Petrus — take the hourly rate, R80, or event rate, and multiply by 2 for the hours worked. No longer a fixed rate on a public holiday. Music Bus fixed 750 for 7 to 4; anything after 4 pm R180 an hour."
 
 # Part 3 — Rules for staff capturing
@@ -117,7 +119,7 @@ Owner's words: "Petrus — take the hourly rate, R80, or event rate, and multipl
 | **MISSED SHIFT – actual date …** + OVERLAP/CLEAR | pink / red / green | Previous-week date paid this week, checked against last payroll |
 | `7.50 h paid (8.00 clocked)` in the hours column | grey | Hours actually paid vs hours clocked when the 07:00–07:30 meeting was deducted (v2026-09-23-5) |
 | **⏰ CLAIMED PAST 15:00** | red | Entry runs past the end time the owner set for that day in `wage_planned_hours` (v2026-09-23-7) |
-| **Public-holiday follow-up panel** at the top of the dashboard | red box | Appears the week after a holiday whose hours the owner set: every holiday row, what was paid, a drop-down of real end times (12:00–16:00) each showing the rand it produces, **Confirm** button → correction row (+ or −) in the current payroll and the row marked *HOLIDAY HOURS CONFIRMED* (route `/wages-admin/confirm-holiday-hours`) |
+| **Public-holiday follow-up panel** at the top of the dashboard | red box | Appears the week after a holiday whose hours the owner set: every holiday row (one line per person, John twice: warehouse + Music Bus), what was paid, a drop-down of real end times (11:00–18:00 in half hours) each showing the rand and *UNDERPAID, top-up +R…* / *worked less, nothing recovered* / *as paid — nothing to do*, **Confirm** button. **Owner rule (23 Sep): only an UNDERPAYMENT creates a top-up line in the current payroll; if he worked less or the same, nothing is done — the answer is only written on the row** (*HOLIDAY HOURS CONFIRMED*). Route `/wages-admin/confirm-holiday-hours`. Tested live: worked-less → no row, no deduction; worked-more → +R125 top-up (test rows removed). |
 | **✎ Edit shift** / **Open X's worker app ↗** | gold | Manager correction form / worker's own page |
 
 **Retired 23 Sep (owner instruction — "remove the Pay-rule check, only that")**: the *RULE +R… / ⚖ all days match pay rule* panel and tile are gone. Every other flag (already paid, rate choice, crew pattern, overlap, holiday, Petrus, stale draft, planned end) stays.
@@ -312,6 +314,7 @@ Both new loans carry the worker's WhatsApp wording in the reason and start deduc
 * **v-11** Pay-rule check UI retired (owner: only that). **Double-tap protection** — phone lock + overlay, server duplicate-save block, final-submit block (Part 3 item 7). **Public-holiday follow-up panel** + `/wages-admin/confirm-holiday-hours` (Part 4). Excel: owner corrections final (`manager_update_reason` → "OWNER CORRECTION"), DIFFERENCE ONLY rows, paid-before R0 no longer applied to a row the owner set to a positive amount. Takavaudza venue / warehouse / Sunday House R375. Petrus Heritage Day 06:30–14:00 R1 120. Lebo stale draft removed.
 * **v-12** Green "Admin approved" figure shows owner-corrected rows at the corrected amount (paid hours, R0 rows count 0 h); John #9979 noise review voided. **Verified: Excel = database, 0 mismatches, 0 open reviews** → `docs/BW_Payroll_2026-09-19_to_25_AUDITOR.xlsx` sent to the auditors (R61 933,86 + Sharleen R3 000 = **R64 933,86**). Backups `docs/restore-2026-09-23-final/`.
 * **Loans**: Erick #7 R500 and Isaac #8 R500 (both 22 Sep, WhatsApp wording, deductions start 26 Sep); Daniel #5 marked paid in full; Isaac #6 R600 deducted this week as scheduled (owner: leave as is). Backups `docs/restore-2026-09-23-loans/`.
+* **v-13** Follow-up panel: owner rule "only if we underpaid" — top-up only, never a recovery; half-hour end times 11:00–18:00 with UNDERPAID / worked-less labels; Petrus holiday pricing deducts the meeting. Live-tested both paths, test rows removed, DB back to 91 rows R61 933,86.
 * Throughout: the type-checker (`npx tsc --noEmit`) is run before every deploy — it caught two use-before-declaration bugs (`hrs` in crew-pattern, `workRates` in index) that would have blanked the dashboard.
 
 # Part 8 — Payroll figures
@@ -340,7 +343,7 @@ Both new loans carry the worker's WhatsApp wording in the reason and start deduc
 
 Hours are the hours actually paid (meeting deducted where it applies; R0 duplicate rows count 0 h). Heritage Day (Thu 24 Sep) is included at the approved holiday amounts in Part 2. Deductions / loans as per the **Loans & Deductions** tab (Isaac #6 R600 + scheduled instalments on #1–#3; Petrus none; Daniel none). Full detail: `docs/BW_Payroll_2026-09-19_to_25_AUDITOR.xlsx`.
 
-**To confirm on Monday 28 Sep (follow-up panel):** Petrus really finished 14:00? · Givemore worked 08–15 (7 h) or only 4 h? · anybody in the warehouse past 15:00? Each answer creates a + / − correction row in the 26 Sep – 2 Oct payroll.
+**To confirm on Monday 28 Sep (follow-up panel):** Petrus really finished 14:00? · Givemore worked 08–15 (7 h) or only 4 h? · anybody in the warehouse past 15:00? Only an answer that shows an **under**payment creates a top-up row in the 26 Sep – 2 Oct payroll; worked-less answers are recorded and nothing is recovered (owner rule).
 
 ## Payroll 12–18 Sep 2026 (paid 17 Sep) — final figures
 111 paid rows (24 missed) · claimed 843,50 h · R72 438,15 · **approved 793,75 h · R71 096,90** · missed 98,00 h · R8 861,25 · deductions R3 210,00 · **net R67 886,90**. Full detail: `handover-2026-09-16-complete-hardcopy.pdf`.
@@ -348,7 +351,7 @@ Hours are the hours actually paid (meeting deducted where it applies; R0 duplica
 # Part 9 — Restore points
 | Tag / folder | State |
 |---|---|
-| `restore-2026-09-23-payroll-final` | **Live now (v2026-09-23-12)** — payroll 19–25 Sep as sent to the auditors; owner sentence + single APPROVE, Warehouse-Team cross-check, double-tap protection, planned end / holiday follow-up, hours column, pay-rule check retired, owner corrections final in Excel. Data backups `docs/restore-2026-09-23-{givemore,john,john2,joshua,holiday,final,loans}/`. |
+| `restore-2026-09-23-payroll-final` | **Live now (v2026-09-23-13)** — payroll 19–25 Sep as sent to the auditors; owner sentence + single APPROVE, Warehouse-Team cross-check, double-tap protection, planned end / holiday follow-up, hours column, pay-rule check retired, owner corrections final in Excel. Data backups `docs/restore-2026-09-23-{givemore,john,john2,joshua,holiday,final,loans}/`. |
 | `restore-2026-09-23-difference` | v2026-09-23-2 — WAREHOUSE / VENUE buttons pay only the DIFFERENCE when part of the day was paid in an earlier payroll (4-line sum). |
 | `restore-2026-09-23-reopen` | v2026-09-22-16 — Reopen a decided review, area-aware crew check, partial hours priced by place. |
 | `restore-2026-09-22-petrus-v5` | v2026-09-22-14 — Petrus v5 rule + rent deduction removed. To undo only the deduction removal: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2` |
@@ -364,7 +367,7 @@ Hours are the hours actually paid (meeting deducted where it applies; R0 duplica
 git checkout restore-2026-09-23-payroll-final
 npm run build
 npx wrangler pages deploy dist --project-name bw-productions --branch main --commit-dirty=true
-curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-23-12
+curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-23-13
 ```
 To go back to before the already-paid rule: `git checkout restore-2026-09-18-rolled-back` and deploy (expect v2026-09-16-2); any `paid_before|…` reviews can then be deleted (they are the only rows it writes).
 
@@ -381,7 +384,7 @@ To go back to before the already-paid rule: `git checkout restore-2026-09-18-rol
 10. Keep the CSV and old-rules Excel buttons until told otherwise.
 11. **"Warehouse Team" only means the warehouse when the place says warehouse** (23 Sep). Venue / area / description naming FNB, Riverside, a stadium, a garden or a house decides the rate — the system asks, Bernie clicks warehouse / venue / garden.
 12. **The 07:00–07:30 meeting is deducted on public holidays too** (23 Sep) — deduct first, then ×2.
-13. **When the owner sets a day's hours for everybody** (e.g. "Thursday everyone in the warehouse 07:00–15:00"), the planned end goes into `wage_planned_hours`; the next week's dashboard must ask what time each man really worked until and work out the over/under-payment. Nothing is adjusted without Bernie's Confirm.
+13. **When the owner sets a day's hours for everybody** (e.g. "Thursday everyone in the warehouse 07:00–15:00"), the planned end goes into `wage_planned_hours`; the next week's dashboard must ask what time each man really worked until. **Only an underpayment is corrected (top-up line); if he worked less, nothing is done** — owner 23 Sep. Nothing is adjusted without Bernie's Confirm.
 14. **One shift, one row.** Double presses are swallowed on the phone and refused on the server; a shift whose hours are already paid cannot be final-submitted again. A worker who worked different hours enters only the different hours.
 15. **An owner correction on a row is final** for the Excel and the green figure — no automatic check may re-price it.
 

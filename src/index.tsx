@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-23-12'
+const WAGES_UI_VERSION = 'v2026-09-23-13'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3992,7 +3992,14 @@ function ownerPayForShift(dateIso: string, startTime: string, endTime: string, k
     // until the office approves. The review shows the recommendation and the buttons.
     let rec = 0, rate = 0, text = ''
     if (kind === 'musicbus') { rec = r2((insideMin > 0 ? 750 : 0) + outsideH * MUSICBUS_HOLIDAY_EXTRA); rate = MUSICBUS_HOLIDAY_EXTRA; text = `Music Bus public holiday (${holiday}): ${insideMin > 0 ? 'R750 fixed 07–16' : 'no 07–16 time'}${outsideH > 0 ? ` + ${h(outsideH)} h outside 07–16 × R180` : ''}` }
-    else if (kind === 'petrus') { rec = r2(totalH * PETRUS_HOLIDAY_HOURLY); rate = PETRUS_HOLIDAY_HOURLY; text = `Petrus public holiday (${holiday}): no fixed day — ${h(totalH)} h × R160 (R80 × 2)` }
+    else if (kind === 'petrus') {
+      // Owner 2026-09-23: the 07:00–07:30 meeting is deducted on a public holiday for everyone — Petrus too
+      // (Heritage Day 06:30–14:00 = 7,5 h − 0,5 h = 7 h × R160 = R1 120, as approved).
+      const meetingMinP = dow >= 1 && dow <= 5 ? overlapMinutes(sMin, eMin, MEETING_START, MEETING_END) : 0
+      const paidHP = r2(totalH - meetingMinP / 60)
+      rec = r2(paidHP * PETRUS_HOLIDAY_HOURLY); rate = PETRUS_HOLIDAY_HOURLY
+      text = `Petrus public holiday (${holiday}): no fixed day — ${h(totalH)} h${meetingMinP > 0 ? ` − ${h(meetingMinP / 60)} h staff meeting 07:00–07:30 (unpaid) = ${h(paidHP)} h` : ''} × R160 (R80 × 2)`
+    }
     else if (kind === 'warehouse') {
       // Owner 2026-09-23: "There's still a meeting deduction on a holiday. We always have a meeting." Mon–Fri holiday
       // in the warehouse: the 07:00–07:30 meeting comes off first, then × 2.
@@ -4546,10 +4553,14 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         const li = hrows.map((r) => {
           const confirmed = /HOLIDAY HOURS CONFIRMED/.test(r.payroll_note || '')
           const kind = ownerPayKind(r.staff_id, r.work_type, [r.outlet_venue, r.work_description].join(' '), r.payroll_rule)
-          const opts = ['12:00', '13:00', '14:00', '15:00', '16:00'].map((t) => {
+          const paidAmt = Number(r.amount || 0)
+          const opts = ['11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00', '17:30', '18:00'].filter((t) => timeToMinutes(t)! > timeToMinutes(r.start_time)!).map((t) => {
             const p = kind === 'gardener' || kind === 'fixed_weekly' ? null : ownerPayForShift(hd.work_date, r.start_time, t, kind === 'warehouse_or_event' ? 'warehouse' : kind)
             const amt = p ? Number(p.recommendedAmount || p.amount || 0) : (kind === 'gardener' ? Math.round((hoursBetween(r.start_time, t) * 62.5 * 2) * 100) / 100 : 0)
-            return `<option value="${t}" ${t === r.end_time ? 'selected' : ''}>${t} → ${fmtRand(amt)}${t === r.end_time ? ' (as paid)' : ''}</option>`
+            const d = Math.round((amt - paidAmt) * 100) / 100
+            // Owner 23 Sep: "Even if they worked less, I don't want anything to be done. Only if we underpaid them."
+            const tail = t === r.end_time || Math.abs(d) < 0.005 ? ' (as paid — nothing to do)' : d > 0.004 ? ' — UNDERPAID, top-up +' + fmtRand(d) : ' — worked less, nothing recovered'
+            return `<option value="${t}" ${t === r.end_time ? 'selected' : ''}>${t} → ${fmtRand(amt)}${tail}</option>`
           }).join('')
           return `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 0;border-top:1px solid rgba(255,255,255,.08);font-size:12.5px;${confirmed ? 'opacity:.6' : ''}">
             <span style="flex:0 0 190px;font-weight:700">${escapeHtmlText(r.display_name)}</span>
@@ -4561,7 +4572,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       }
       if (blocks.length) followUpPanel = `<section id="bw-holiday-followup" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(127,29,29,.18);border:1px solid rgba(252,165,165,.6)">
         <div style="font-weight:800;color:#fca5a5;font-size:14px">⏰ Bernie — what time did they REALLY work until on the public holiday?</div>
-        <div style="font-size:12.5px;opacity:.85;margin-top:2px">You set the end time before the day. Pick the real end time per person; the system re-prices the row at the holiday rule (meeting deducted first, ×2) and shows if we under- or over-paid. Nothing changes until you press Confirm.</div>
+        <div style="font-size:12.5px;opacity:.85;margin-top:2px">You set the end time before the day. Pick the real end time per person and press Confirm. <strong>If he worked MORE than paid</strong> the system adds the top-up (holiday rule: meeting deducted first, ×2) as a line in this payroll. <strong>If he worked less, or the same, nothing is done</strong> — the answer is only recorded on the row. Nothing changes until you press Confirm.</div>
         ${blocks.join('')}
       </section>`
     }
@@ -5575,17 +5586,21 @@ app.post('/wages-admin/confirm-holiday-hours', async (c) => {
     if (kind === 'gardener') { const h = Math.max(0, (timeToMinutes(actualEnd)! - timeToMinutes(r.start_time)!) / 60); should = Math.round(h * 62.5 * 2 * 100) / 100; text = `gardener ${h.toFixed(2)} h × R62,50 × 2` }
     else { const p = ownerPayForShift(r.work_date, r.start_time, actualEnd, kind === 'warehouse_or_event' ? 'warehouse' : kind); should = Number(p?.recommendedAmount ?? p?.amount ?? 0); text = (p?.breakdown || '').replace(/^PUBLIC HOLIDAY — HELD for owner approval — recommended /, '').replace(/; R0 until approved$/, '') }
     const paid = Number(r.amount || 0), diff = Math.round((should - paid) * 100) / 100
-    const verdict = Math.abs(diff) < 0.01 ? 'paid correctly' : diff > 0 ? 'UNDERPAID by ' + fmtRand(diff) : 'OVERPAID by ' + fmtRand(-diff)
+    // Owner 23 Sep 2026: "Even if they worked less, I don't want anything to be done. I only want something to be
+    // done if we underpaid them." → a top-up line ONLY when diff > 0; worked-less is recorded on the row, no recovery.
+    const verdict = Math.abs(diff) < 0.01 ? 'paid correctly — nothing to do' : diff > 0 ? 'UNDERPAID by ' + fmtRand(diff) + ' — top-up added' : 'worked less than paid (' + fmtRand(-diff) + ') — owner rule: nothing recovered, recorded only'
     const note = ' | HOLIDAY HOURS CONFIRMED by ' + admin.name + ' ' + new Date().toISOString().slice(0, 10) + ': really worked ' + r.start_time + '–' + actualEnd + ' (paid as ' + r.start_time + '–' + r.end_time + ', ' + fmtRand(paid) + '); should be ' + text + ' = ' + fmtRand(should) + ' → ' + verdict
     await db.prepare(`UPDATE wage_shifts SET payroll_note = COALESCE(payroll_note,'') || ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(note, shiftId).run()
     let corr = ''
-    if (Math.abs(diff) >= 0.01) {
-      // Correction row in the CURRENT payroll (the holiday payroll is closed). Negative = recovery.
+    if (diff >= 0.01) {
+      // Top-up row in the CURRENT payroll (the holiday payroll is closed). Never negative (owner rule).
       const wk = currentProxyPayrollWeekStart()
       await db.prepare(`INSERT INTO wage_shifts (staff_id, work_date, outlet_venue, area, event_name, work_description, start_time, end_time, hours_worked, normal_hours, hourly_rate_snapshot, base_rate_snapshot, total_amount, normal_amount, gross_wage, entered_by, entered_by_type, manager_update_reason, work_type, calculation_version, missed_previous_week, payroll_week_start, payroll_note)
           VALUES (?, ?, ?, ?, 'Public holiday correction', ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, 'manager', ?, ?, 10, 1, ?, ?)`)
         .bind(r.staff_id, r.work_date, r.outlet_venue, r.area, 'CORRECTION — public holiday ' + r.work_date + ': really worked until ' + actualEnd + ' (paid to ' + r.end_time + ')', r.start_time, actualEnd, Number(r.hourly_rate_snapshot || 0), Number(r.hourly_rate_snapshot || 0), diff, diff, diff, admin.name, 'Holiday hours confirmed by ' + admin.name + ': ' + verdict + ' on shift #' + shiftId, r.work_type, wk, 'Correction line for shift #' + shiftId + ' (' + r.work_date + ' public holiday). Paid ' + fmtRand(paid) + ' for ' + r.start_time + '–' + r.end_time + '; really ' + r.start_time + '–' + actualEnd + ' = ' + fmtRand(should) + '. ' + verdict + '.').run()
-      corr = ' A correction line of ' + fmtRand(diff) + ' was added to this payroll.'
+      corr = ' A top-up line of ' + fmtRand(diff) + ' was added to this payroll.'
+    } else if (diff <= -0.01) {
+      corr = ' Nothing was deducted (your rule: only underpayments are corrected).'
     }
     await captureWagesDebug(c.env, { request_path: '/wages-admin/confirm-holiday-hours', request_method: 'POST', original_payload_json: JSON.stringify({ shift_id: shiftId, actual_end: actualEnd, paid, should, diff, by: admin.name }), rewritten_payload_json: '{}', rewrite_applied: 1, response_status: 302, response_location: safeReturn, response_error_text: '' })
     return back(safeReturn + sep + 'msg=' + encodeURIComponent(r.display_name + ' ' + r.work_date + ': really worked until ' + actualEnd + ' — ' + verdict + ' (paid ' + fmtRand(paid) + ', should be ' + fmtRand(should) + ').' + corr))
