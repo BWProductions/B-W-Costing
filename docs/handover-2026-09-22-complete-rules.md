@@ -1,7 +1,7 @@
 ---
 title: "B&W Productions — Wages System: Complete Rules & Handover"
-subtitle: "Every agreed rule and regulation, everything built and changed 12–22 September 2026, how the office reviews work, and how to restore"
-date: "23 September 2026 · live version v2026-09-23-2 · restore tag restore-2026-09-23-difference"
+subtitle: "Every agreed rule and regulation, everything built and changed 12–23 September 2026, how the office reviews work, the 19–25 Sep payroll as sent to the auditors, and how to restore"
+date: "23 September 2026 · live version v2026-09-23-12 · restore tag restore-2026-09-23-payroll-final"
 ---
 
 # Part 1 — Where things are
@@ -11,12 +11,13 @@ date: "23 September 2026 · live version v2026-09-23-2 · restore tag restore-20
 | Office dashboard | https://bwprodsystem.co.za/admin/wages (any logged-in office user) |
 | Payroll Excel (auditor) | **Download Payroll Excel (new)** button on the dashboard · `/wages-admin/payroll.xlsx?from=YYYY-MM-DD` |
 | Old export | **Export Excel (old rules – reference only)** + CSV — kept until told otherwise |
-| Live code version | **v2026-09-21-2** — check at `/wages-version` |
+| Live code version | **v2026-09-23-12** — check at `/wages-version` |
 | Health | `/wages-health` |
 | Payroll week | **Saturday → Friday** |
 | Auditor run | **Wednesday**. Hours for Wed–Sun are entered as a best guess ("a normal day"); staff correct them the following week. |
 | Database | Cloudflare D1 `bw-productions-db` |
-| Code | git `main`, tag `restore-2026-09-21-already-paid` |
+| Code | git `main`, tag `restore-2026-09-23-payroll-final` |
+| Latest auditor file | `docs/BW_Payroll_2026-09-19_to_25_AUDITOR.xlsx` — 91 rows, **R61 933,86** + Sharleen R3 000 = **R64 933,86**, 0 mismatches Excel vs database, 0 open reviews |
 
 # Part 2 — Pay rules (B&W rate rules v10 — general staff HOURLY BY PLACE, owner 22 Sep 2026; Petrus rule 22 Sep 2026)
 
@@ -27,7 +28,8 @@ General staff are paid **by the hour, to the hour, at the rate of the place they
 | **Warehouse** (work type "Warehouse Team") | **R81,25 / h** (R650 ÷ 8) | **R97,50 / h** |
 | **Venue / event** (any other work type) | **R95 / h** | **R114 / h** |
 
-* **Staff meeting 07:00–07:30, Mon–Fri, is not paid.** A warehouse entry covering that time loses the overlap (max 30 min = R40,63 at R81,25; 15 min if he arrives 07:15). Venue entries are not touched (he is not at the office). Saturday has no meeting. Petrus's R640 set day is not touched.
+* **Staff meeting 07:00–07:30, Mon–Fri, is not paid.** A warehouse entry covering that time loses the overlap (max 30 min = R40,63 at R81,25; 15 min if he arrives 07:15). Venue entries are not touched (he is not at the office). Saturday has no meeting. Petrus's R640 set day is not touched. **Owner 23 Sep: the meeting is deducted on public holidays too** (Heritage Day 07:00–15:00 warehouse = 7,5 h, not 8).
+* **"Warehouse Team" only means the warehouse when the PLACE says warehouse (owner 23 Sep, Takavaudza rule).** Work type Warehouse Team with venue/area/description naming FNB, Riverside, a stadium, a garden, a client's house etc. is priced by the place named: venue → R95/h, House → gardener R62,50/h. The system cross-checks every Warehouse Team entry against venue, area and description and asks the office warehouse / venue / garden (Part 5b item 4). Example: Takavaudza Sun 20 Sep "Warehouse Team" at the House, 6 h = 6 × R62,50 = **R375** (gardener rate, no Sunday ×1.2).
 * A man who moves from the warehouse to a venue is paid the warehouse hours at R81,25 and the venue hours at R95, each as its own entry. Gaps (travel) are not paid. Overlapping entries are counted once.
 * Midnight: hours before 00:00 at that day's rate, after 00:00 at the next day's (Sat 22:00–Sun 02:00 = 2 × R95 + 2 × R114 = R418).
 
@@ -69,9 +71,22 @@ Official gov.za list (Public Holidays Act 36 of 1994; a holiday on a Sunday make
 | General staff — Venue | **R190 / h** (R95 × 2) |
 | Petrus | **No fixed day** — **R160 / h** for every hour (R80 × 2, R80 = R640 ÷ 8) |
 | Music Bus | **R750 fixed** 07–16 **+ R180 / h** outside 07–16 |
-| Gardener House work / Sharleen | own rule, unchanged |
+| Gardener House work (Givemore, Takavaudza) | **R125 / h** (R62,50 × 2) — owner 23 Sep |
+| Sharleen | own rule, unchanged |
 
-Examples (Heritage Day): Warehouse 06–16 = 10 h × R162,50 = R1 625 · Venue 08–18 = R1 900 · Petrus 06:30–16:00 = 9,5 h × R160 = R1 520 · Music Bus 08–22 = R750 + 6 h × R180 = R1 830 · Wed 23 Sep 22:00 → Thu 24 Sep 02:00 = 2 h × R95 paid + Heritage 2 h × R190 = R380 held.
+Examples (Heritage Day): Warehouse 07–15 = 8 h − 0,5 h meeting = 7,5 h × R162,50 = **R1 218,75** · Warehouse 06–16 = 9,5 h × R162,50 = R1 543,75 · Venue 08–18 = R1 900 · Petrus 06:30–14:00 with meeting deducted = 7 h × R160 = **R1 120** · Music Bus 12–18 = R750 + 2 h × R180 = R1 110 · Gardener 08–15 = 7 h × R125 = **R875** · Wed 23 Sep 22:00 → Thu 24 Sep 02:00 = 2 h × R95 paid + Heritage 2 h × R190 = R380 held.
+
+**Heritage Day, Thursday 24 September 2026 — what was actually approved (owner 23 Sep).** Owner: *"Everyone is in the warehouse Thursday 07:00 to 15:00 — no set-ups. Deduct the meeting. Next week the system must ask me what time they really worked until and flag over- or under-payment."* All Heritage Day rows were set by the office to the planned day (hours in red below are the owner's guess, to be confirmed the following Monday):
+
+| Worker | Approved hours | Rule | Amount paid this payroll |
+|---|---|---|---|
+| Bhekizitha, Daniel, Erence, Erick, Isaac, Joshua, Solomon, Takavaudza, Thandanani | 07:00–15:00 warehouse | 7,5 h × R162,50 (meeting off) | **R1 218,75** each |
+| Patrick | 06:30–15:00 warehouse | 8 h × R162,50 | **R1 300,00** |
+| Petrus | 06:30–14:00 (meeting off) | 7 h × R160 | **R1 120,00** — confirm 14:00 next week |
+| Givemore (gardener) | 08:00–15:00 House/Garden | 7 h × R125 | **R875,00** — flag next week if he only worked 4 h |
+| John | 07:00–12:00 warehouse **+** 12:00–18:00 Music Bus | 4,5 h × R162,50 = R731,25 + R750 + 2 h × R180 = R1 110 | **R1 841,25** |
+
+The planned end **15:00** is recorded in the new table `wage_planned_hours` (2026-09-24 → 15:00). Any Heritage Day entry a worker captures past 15:00 is flagged red **⏰ CLAIMED PAST 15:00** on the dashboard, and from Monday 28 Sep the dashboard opens a **public-holiday follow-up panel** (Part 4) asking, per worker, "what time did he really work until?" with the rand difference worked out.
 
 Owner's words: "Petrus — take the hourly rate, R80, or event rate, and multiply by 2 for the hours worked. No longer a fixed rate on a public holiday. Music Bus fixed 750 for 7 to 4; anything after 4 pm R180 an hour."
 
@@ -82,6 +97,11 @@ Owner's words: "Petrus — take the hourly rate, R80, or event rate, and multipl
 4. After Final Submission the card is **Submitted — locked**; locked missed shifts move into **Finally submitted shifts** with *"…do not capture them again."*
 5. A draft is **R0** until final-submitted.
 6. **Staff never see reviews or the office dashboard.** Nothing the office does can block a worker from capturing.
+7. **Double-tap protection (owner 23 Sep, v2026-09-23-11).** Owner: *"Workers are pressing the button two, three, four times and the same shift lands 2–4 times."* Three layers, none of which can stop a genuine capture:
+   * **In the phone**: the first press locks the form, every button greys out and reads **"Saving… please wait"**, an overlay covers the page; a second press is swallowed. Unlocks after 20 s if the network is slow.
+   * **Saving a new draft** with the **same date + start + end** as a draft he already has, or as a paid row for those hours, is refused with the message *"This shift (Thu 24 Sep 07:00–15:00) is ALREADY SAVED — it was not lost. Open it below and press Final Submission once."* (or *"…has ALREADY been submitted and is in the payroll. It was not entered again. If you worked different hours that day, enter only the different hours."*). Editing an existing draft is never blocked.
+   * **Final Submission** of a draft whose hours are already fully covered by a paid row (this payroll or an earlier one) is refused: *"Not final-submitted: you have ALREADY been paid for … (shift #…, payroll …)"*. Every refusal is logged in `wage_debug_capture`.
+   Tested live on the preview (double-save and double-final-submit both stopped) before deployment.
 
 **Stale drafts (owner 22 Sep 2026).** A draft the worker saved but never final-submitted, dated **before the capture window** (before last Saturday), can never be submitted and must not stay on the system — it confuses everyone and the day was usually paid already. The dashboard now shows every such draft in **red — "STALE DRAFT – … is before the capture window"** — with a **🗑 Delete draft** button. The office can also delete any other unsubmitted draft that should not be there. Deleting: asks for confirmation, keeps a full copy in the log (`wage_debug_capture`), voids any open review on it, removes it from the worker's app and the dashboard. A draft that was already final-submitted **cannot** be deleted this way (use the manager correction on the paid shift). 22 Sep: Erick's draft #720 (9 Sep, already paid as shift #9643 R1 200 in the 12 Sep payroll) removed; 14 "ghost" reviews on drafts the workers had already deleted were auto-voided (backups in `docs/restore-2026-09-22-stale-draft-720/`).
 
@@ -95,10 +115,14 @@ Owner's words: "Petrus — take the hourly rate, R80, or event rate, and multipl
 | **REVIEW – open** | orange | Manual check (engine overlap review) |
 | **REVIEW – RESOLVED** | green | Decided — hours or amount, your name, reason |
 | **MISSED SHIFT – actual date …** + OVERLAP/CLEAR | pink / red / green | Previous-week date paid this week, checked against last payroll |
-| **RULE +R…** / **⚖ all days match pay rule** | red-blue / green | Pay-rule check (display only) |
+| `7.50 h paid (8.00 clocked)` in the hours column | grey | Hours actually paid vs hours clocked when the 07:00–07:30 meeting was deducted (v2026-09-23-5) |
+| **⏰ CLAIMED PAST 15:00** | red | Entry runs past the end time the owner set for that day in `wage_planned_hours` (v2026-09-23-7) |
+| **Public-holiday follow-up panel** at the top of the dashboard | red box | Appears the week after a holiday whose hours the owner set: every holiday row, what was paid, a drop-down of real end times (12:00–16:00) each showing the rand it produces, **Confirm** button → correction row (+ or −) in the current payroll and the row marked *HOLIDAY HOURS CONFIRMED* (route `/wages-admin/confirm-holiday-hours`) |
 | **✎ Edit shift** / **Open X's worker app ↗** | gold | Manager correction form / worker's own page |
 
-**Approved-hours rule (what the auditor sees)**: per paid shift, the latest RESOLVED review with approved hours (rate-choice excluded), else claimed. An **"already paid" review approved as a rand amount** pays exactly that amount on the entry (shown as a correction line).
+**Retired 23 Sep (owner instruction — "remove the Pay-rule check, only that")**: the *RULE +R… / ⚖ all days match pay rule* panel and tile are gone. Every other flag (already paid, rate choice, crew pattern, overlap, holiday, Petrus, stale draft, planned end) stays.
+
+**Approved-hours rule (what the auditor sees)**: per paid shift, the latest RESOLVED review with approved hours (rate-choice / crew-pattern / Petrus / holiday excluded), else claimed. An **"already paid" review approved as a rand amount** pays exactly that amount on the entry (shown as a correction line). **An owner correction on the row itself (✎ Edit shift with a reason, or a Heritage Day / difference decision) is final**: the Excel and the green figure show the corrected amount as *"OWNER CORRECTION: …"* and no review can override it (v2026-09-23-11/-12).
 
 **Reviews the system raises**
 
@@ -106,6 +130,8 @@ Owner's words: "Petrus — take the hourly rate, R80, or event rate, and multipl
 |---|---|---|---|
 | **ALREADY PAID — …** (new, 21 Sep) | an entry in the current payroll overlaps a day already **paid** in an earlier payroll | red | **Approve as recommended — R…** / Nothing due / change hours |
 | **Rate choice: Warehouse or Event/Venue** | "warehouse" wording, work type not Warehouse | red | Warehouse / Event-Venue |
+| **WAREHOUSE CLAIMED BUT THE ENTRY NAMES "…"** (23 Sep) | Warehouse Team selected but venue / area / description names a venue, garden or client | red | WAREHOUSE / VENUE (or the owner's one-line **APPROVE** when part of the day was paid before) |
+| **Public holiday — …** (22 Sep) | any entry on a public holiday | red | Approve public holiday — R… / Other amount / Decline |
 | **Manual overlap review** (engine) | worker has another entry overlapping this one | orange | Approve hours / Pay as claimed / No issue |
 | **Double claim — already paid** (engine) | catch-up older than one week | red | 0 h |
 
@@ -161,14 +187,20 @@ Known quirk (unchanged): the engine sometimes compares a draft with its own fina
 1. **Venue must be named — RED.** Any entry priced at the venue rate whose venue field is blank or generic ("venue", "event", "site", "n/a", "x" …) is flagged: *"VENUE NOT NAMED: … claims the venue rate (R95/h) … but the venue field is (blank). Ask the worker where he was; if it was the warehouse, re-price at R81,25/h."*
 2. **Crew pattern — ORANGE.** On any day with 4 or more workers, if the minority place is 25 % or less of the crew, each minority entry is flagged with the names: *"CREW PATTERN: 7 of 8 workers say Warehouse on Mon 21 Sep (names) — X says venue 'FNB Stadium'. Was he really there? Confirm the venue, or re-price as Warehouse."* And the reverse: *"5 of 6 were at a venue (FNB Stadium) — X says Warehouse. Check he was not at the venue (R95/h would be due)."*
 3. **Decision — two unambiguous buttons, on paid rows AND drafts**: *"Where was he? Worker selected 'Warehouse Team' at 'Warehouse'. Your click decides the place and the rate:"* **WAREHOUSE — R81,25/h · R650,00 (8 h × R81,25)** or **VENUE — R95/h · R760,00 (8 h × R95)**. Each button shows the rate and the rand it produces. On a paid row the row is re-priced immediately. On a draft the place is recorded with your name; **when the worker final-submits, the rate you chose is used automatically, whatever work type he picked**, and the paid row's note says "Place decided by office (review #…, name): WAREHOUSE R81,25/h". Nothing is paid before Final Submission.
-4. **Area field is read too — RED (owner 22 Sep, v2026-09-22-15).** Owner: *"even though he says 'warehouse' underneath, it says 'Pretoria FNB'. You should have picked up that the team was at Pretoria and FNB."* If the worker selects Warehouse Team / venue "Warehouse" but types a real place in the **Area** box (anything that is not Meyerton / Henley / Randvaal / the warehouse address), the entry is flagged: *"WAREHOUSE CLAIMED BUT AREA SAYS 'Pretoria and fnb' … that is a venue, not the warehouse. Other workers were at Botanical garden Pretoria that day."* Same WAREHOUSE / VENUE buttons decide it. First live case: Givemore Thu 17 Sep (#10073).
+4. **Venue, Area AND Description are all read — RED (owner 22–23 Sep, v2026-09-22-15 → v2026-09-23-4).** Owner: *"even though he says 'warehouse' underneath, it says 'Pretoria FNB'. You should have picked up that the team was at Pretoria and FNB."* and *"Givemore writes warehouse then puts a venue name — always cross-check venue, area and description and ask me warehouse / venue / garden."* Every Warehouse Team entry is checked: if the venue, the Area box or the description names a real place (FNB, Riverside, a stadium, botanical garden, Pretoria, a client's house … anything that is not Meyerton / Henley / Randvaal / the warehouse address), it is flagged: *"WAREHOUSE CLAIMED BUT THE ENTRY NAMES "Pretoria and fnb": Givemore selected Warehouse Team at "Warehouse" … but wrote "Pretoria and fnb" — that is a venue, not the warehouse."* Same WAREHOUSE / VENUE buttons decide it; when the Area names a venue the **Venue** amount is offered as the default. First live case: Givemore Thu 17 Sep (#10073 → Venue R640 approved).
 5. **Part of the day already paid in an EARLIER payroll → the buttons pay only the DIFFERENCE (owner 23 Sep, v2026-09-23-1/-2).** Owner: *"That has already been paid for the missed shift from 8 to 4, so we should only suggest paying the difference … show me your working out."* When the entry overlaps a row paid in a previous payroll, a red box lists what was paid (times, place, hours × rate = rand, shift #, payroll) and each button shows the sum **in the owner's order**:
    1. paid hours — what was paid last week (e.g. 08:00–16:00 as House/Garden, 8 h × R62,50 = R500,00)
    2. the same hours at the chosen place (8 h × R95 = R760,00)
    3. difference (2 − 1) = R260,00
    4. additional hours not yet paid at the chosen rate (4 h × R95 = R380,00; Warehouse loses the 07:00–07:30 meeting)
    **AMOUNT TO APPROVE (3 + 4)** — e.g. Givemore Thu 17 Sep: **Warehouse R434,38 · Venue R640,00**.
-   The click sets the row to that amount (last week's row untouched), writes the 4-line sum into the row's payroll note and the Excel breakdown ("DIFFERENCE ONLY …"), and voids the hour-based overlap / already-paid reviews on the same entry as superseded. Uses the same engine as the Already-paid rule (Part 5), forced to each place. Without an earlier payment the buttons show the full-day amounts as before.
+   **Owner's own layout (v2026-09-23-3).** Bernie asked for the sum in his words and ONE button. The review now reads, in a white box:
+   > Paid last week &nbsp; 08:00–16:00 · House/Garden · 8,00 h × R62,50 &nbsp; **R500,00** (shift #9705, payroll 12–18 Sep)
+   > 06:00–18:00 at a venue &nbsp; 12,00 h × R95 &nbsp; **R1 140,00**
+   > Less the Garden already paid &nbsp; **− R500,00**
+   > **WHAT YOU SHOULD PAY THIS WEEK &nbsp; R640,00**
+   > **[ APPROVE — R640,00 ]** &nbsp; *(or: this was the warehouse — R434,38)*
+   The green APPROVE pays the difference on the row (last week's row untouched), writes the sum into the row's payroll note and the Excel breakdown ("DIFFERENCE ONLY …"), and voids the hour-based overlap / already-paid reviews on the same entry as superseded. Uses the same engine as the Already-paid rule (Part 5), forced to each place. Without an earlier payment the buttons show the full-day amounts as before. **Approved on 23 Sep: Givemore Thu 17 Sep → Venue R640,00** (row #9789).
 6. **Excluded**: Petrus, gardener House work, Music Bus, Sharleen (own rules). A row that already has a Rate-choice flag is not flagged twice. Decided flags never re-open; flags void themselves when the entry is corrected or deleted.
 
 First live run (22 Sep): one flag — #9955 Takavaudza, Mon 21 Sep, "5 of 6 at a venue (FNB Stadium), this one says Warehouse" — a genuine question for the office.
@@ -205,7 +237,46 @@ The Approve-hours box, reason and Record decision buttons sit directly under it.
 6. **Missed Shifts** — Worker · shift · **Approved hours** (editable) · Amount · Notes; per-worker shading; feeds block 6 on the Trail.
 Colour key: yellow editable · light-blue sub-total · pink attention · pastel bands = one worker. Fully formula-linked.
 
-# Part 7 — Everything done 12–21 September 2026
+# Part 6b — 19–25 Sep payroll: every decision taken with the owner on 23 Sep 2026 (alphabetical)
+
+The owner went through **every worker** before the auditor run. All decisions are recorded on the rows (payroll note / manager reason) and in the reviews; before-states are in `docs/restore-2026-09-23-*/`.
+
+| Worker | Decisions (old → new) |
+|---|---|
+| **Bhekizitha** | Thu 17 Sep FNB 16–18 (missed shift) R190 kept. Heritage Day 07–15 warehouse R1 218,75. |
+| **Daniel** | Week as claimed (warehouse). Heritage Day R1 218,75. Loan #5 (R3 000 CT scan) **marked PAID IN FULL outside the payroll** — no wage deductions were or will be made. |
+| **Erence** | Week as claimed. Heritage Day R1 218,75. |
+| **Erick** | Mon–Wed warehouse (his Mon 21 "FNB" row was really **Thu 17 Sep 16:00–18:00 FNB** — the same shift as Bhekizitha — moved to the right date, R190 missed shift; a **Mon 21 warehouse row** was added by the office R690,63). Tue 22 / Wed 23 → warehouse R690,63 each. Heritage Day R1 218,75. **New loan #7 R500** (22 Sep). |
+| **Givemore** | Thu 17 Sep: 08–16 Garden paid R500 last week; now 06–18 at Pretoria/FNB → **Venue difference R640** approved (#10073). Heritage Day gardener 08–15 → **R875** (flag next week if only 4 h). Earlier 4 duplicate rows already removed 15 Sep. |
+| **Isaac** | Week as claimed. Heritage Day R1 218,75. **Loan #6 R600 deducted in full this payroll as scheduled** (owner: "leave it as is"). **New loan #8 R500** (22 Sep). |
+| **John** | Wed 16 Sep: rate corrected to **R105/h** (owner correction). **Thu 17 Sep**: duplicate draft #848 deleted; only 16:00–20:00 (4 h × R120) = **R480** due (earlier hours paid last week). Mon 21 Sep duplicate → **R0**. Heritage Day 07–12 warehouse R731,25 **+** 12–18 Music Bus **R1 110** kept. Week approved **R6 461,26**. |
+| **Joshua** | All shifts listed for the owner. Pastdal **Sat 13 Sep → R0** (paid in payroll 12–18 Sep). **Wed 23 Sep duplicate → R0**. Heritage Day R1 218,75. |
+| **Lebo** | Stale draft removed (before capture window). |
+| **Patrick** | Heritage Day 06:30–15:00 warehouse **R1 300**. Earlier Rate-choice #9954 ("Wearhouse — Loading") decided Warehouse. |
+| **Petrus** | Heritage Day 06:30–14:00, meeting deducted, 7 h × R160 = **R1 120** — owner to confirm the 14:00 next week. No deductions (Part 2). |
+| **Solomon** | Tue 22 Sep → **warehouse R690,63** (was venue). Heritage Day R1 218,75. |
+| **Takavaudza** | Rule set (Part 2): Warehouse Team = warehouse only if the place says warehouse; FNB / Riverside = venue R95; House = garden R62,50. **Sun 20 Sep House 6 h = R375.** Heritage Day R1 218,75. |
+| **Thandanani** | Two unsubmitted drafts (#905, #736) removed. Heritage Day R1 218,75. |
+| **Thina** | One missed shift 5 h R475 (venue). |
+| **Sharleen** | Fixed R3 000. |
+
+Noise reviews (engine self-compare, superseded hour-based reviews once a rand decision was taken) were voided with the reason recorded. Result sent to the auditors: **0 open reviews, 0 open drafts for 12–25 Sep, Excel = database (0 mismatches)**.
+
+**Additional loans (state after 23 Sep)**
+
+| # | Worker | Taken | Amount | Repayment | Status |
+|---|---|---|---|---|---|
+| 1 | Erick | 8 Aug | R2 000 (car) | R500 / week | R500 outstanding |
+| 2 | Isaac | 11 Aug | R900 | R250 / week | R350 outstanding |
+| 3 | Isaac | 16 Aug | R600 | R250 / week | R150 outstanding |
+| 5 | Daniel | 23 Aug | R3 000 (CT scan) | — | **PAID IN FULL outside payroll (owner 23 Sep)** |
+| 6 | Isaac | 1 Sep | R600 (kids' trip) | R600 once | Deducted this payroll (19–25 Sep) — left as scheduled |
+| **7** | **Erick** | **22 Sep** | **R500** (asked R600 by WhatsApp 07:15 — "please deduct all this week") | **R500 in the 26 Sep – 2 Oct payroll** | new |
+| **8** | **Isaac** | **22 Sep** | **R500** (asked R600 by WhatsApp 08:15 — fuel/oil) | **R250 in 26 Sep – 2 Oct + R250 in 3 – 9 Oct** | new |
+
+Both new loans carry the worker's WhatsApp wording in the reason and start deducting from the **26 Sep** payroll (`deduction_start_date`), so they do not touch the payroll now with the auditors. Backups: `docs/restore-2026-09-23-loans/`.
+
+# Part 7 — Everything done 12–23 September 2026
 **12–14 Sep** — working platform baseline, missed-shift tint, Final Shift Check real date, ✎ Edit buttons, calendar window.
 **15 Sep** — rate rules v4 + midnight split at Final Submission; week corrected to the rules (14 rows; Patrick Sat 12 Sep R772,50 → R475); rate-choice review; John's Sunday duplicate to red review; **Payroll Excel** 6 tabs; missed shifts in the Excel; auditor sees approved hours only; locked missed shifts under *Finally submitted shifts*; duplicates removed with audit copies (Givemore ×4, Erick ×2); triple-check approved-hours-only passed; Givemore Friday R0 fixed (0 h review voided); 0 mismatches Excel vs database; handover PDFs + restore points.
 **16 Sep** — Excel HR cells and Missed-Shift approved hours **editable** with auto re-price (v2026-09-16-1); **per-worker shading** (v2026-09-16-2).
@@ -228,15 +299,57 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 * **↺ Reopen** on every decided review (Part 5c). **Area-aware crew check** (Part 5b). Overlap box now shows a draft that has since been final-submitted as "final-submitted → shift #… in this payroll (R… on the row)" instead of "not yet final-submitted"; compared drafts show their real hours/amount.
 * **Approved hours priced by place** on the dashboard and in the Excel; WAREHOUSE / VENUE clicks on crew-pattern flags are honoured in the pricing, and place/Petrus/holiday reviews no longer count as an "approved hours" decision.
 * **WAREHOUSE / VENUE buttons pay only the difference (v2026-09-23-1/-2)** — see Part 5b item 5. Owner rejected the full-day buttons on Givemore #10073 ("R934,38 / R1 140 is wrong — only suggest the difference"). Type-checker caught a second use-before-declaration bug before production.
-* **Givemore Thu 17 Sep** (owner instruction): 08:00–16:00 already paid R500 in payroll 12–18 Sep (shift #9705); only 06:00–08:00 + 16:00–18:00 = **4.00 h due**. #9996 reopened and re-decided 4.00 h; #9944 (the earlier R475 = 4 h + R150 rate correction) voided as superseded, old decision kept in its log; paid row #9789 stays 12 h claimed / 4 h approved → **R325** (Warehouse) or **R380** once VENUE is clicked on #10073 ("Pretoria and fnb"). Backup `docs/restore-2026-09-23-givemore/`. Fixed a bug in the area check that would have crashed the dashboard on the first area flag (caught by the type-checker before production).
+* **Givemore Thu 17 Sep** (owner instruction): 08:00–16:00 already paid R500 in payroll 12–18 Sep (shift #9705); only 06:00–08:00 + 16:00–18:00 = **4.00 h due**. #9996 reopened and re-decided 4.00 h; #9944 (the earlier R475 = 4 h + R150 rate correction) voided as superseded, old decision kept in its log. Backup `docs/restore-2026-09-23-givemore/`. Fixed a bug in the area check that would have crashed the dashboard on the first area flag (caught by the type-checker before production).
 
-# Part 8 — Payroll 12–18 Sep 2026 (paid 17 Sep) — final figures
+**23 Sep 2026 — payroll day (v2026-09-23-3 → v2026-09-23-12), tag `restore-2026-09-23-payroll-final`**
+* **v-3 Owner's one-line sum + single APPROVE** on already-paid place reviews (Part 5b item 5): "Paid last week … / 06:00–18:00 at a venue … / Less the Garden already paid / WHAT YOU SHOULD PAY THIS WEEK"; Venue offered as default when the Area names a venue. Givemore #10073 approved **R640**.
+* **v-4 Cross-check every Warehouse Team entry** against venue, area and description (`crew-pattern.ts` `wordingNamesAVenue` / `venueEvidence`; flag *WAREHOUSE CLAIMED BUT THE ENTRY NAMES "…"*). Final Submission now honours an already-approved "already paid" rand amount on the draft. John Thu 17 Sep: duplicate draft #848 deleted, #9779 corrected to 4 h × R120 = **R480**.
+* **v-5 Joshua**: Heritage Day approved; Pastdal Sat 13 Sep and Wed 23 Sep duplicate → R0. **Hours column shows paid vs clocked** ("7,50 h paid (8,00 clocked)"). **Final Submission blocked when the hours are already paid.**
+* **v-6 Holiday rule change (owner)**: warehouse meeting 07:00–07:30 deducted first on public holidays, then ×2. Heritage Day approved for Bhekizitha / Daniel / Erence / Erick; Erick Wed 23 → warehouse.
+* **v-7 Planned end time**: new table `wage_planned_hours` (2026-09-24 → 15:00, "everyone in the warehouse, no set-ups"); red **⏰ CLAIMED PAST 15:00** pill. All Heritage Day rows set to 07:00–15:00 warehouse **R1 218,75** (Patrick 06:30 R1 300; Givemore gardener 08–15 R875; Solomon → warehouse; Erick Mon → warehouse). Backups `docs/restore-2026-09-23-holiday/` (`shifts_batch1_before`, `thursday_before_1500`, `erick_9801_before`).
+* **Erick's mis-dated "Monday FNB"** → Thu 17 Sep 16–18 R190 (matches Bhekizitha); Mon 21 warehouse row entered by the office R690,63.
+* **John** Wed 16 Sep R105 rate correction; Mon 21 duplicate R0. **Solomon** Tue 22 warehouse R690,63. **Thandanani** drafts #905 / #736 deleted. Noise reviews voided.
+* **v-11** Pay-rule check UI retired (owner: only that). **Double-tap protection** — phone lock + overlay, server duplicate-save block, final-submit block (Part 3 item 7). **Public-holiday follow-up panel** + `/wages-admin/confirm-holiday-hours` (Part 4). Excel: owner corrections final (`manager_update_reason` → "OWNER CORRECTION"), DIFFERENCE ONLY rows, paid-before R0 no longer applied to a row the owner set to a positive amount. Takavaudza venue / warehouse / Sunday House R375. Petrus Heritage Day 06:30–14:00 R1 120. Lebo stale draft removed.
+* **v-12** Green "Admin approved" figure shows owner-corrected rows at the corrected amount (paid hours, R0 rows count 0 h); John #9979 noise review voided. **Verified: Excel = database, 0 mismatches, 0 open reviews** → `docs/BW_Payroll_2026-09-19_to_25_AUDITOR.xlsx` sent to the auditors (R61 933,86 + Sharleen R3 000 = **R64 933,86**). Backups `docs/restore-2026-09-23-final/`.
+* **Loans**: Erick #7 R500 and Isaac #8 R500 (both 22 Sep, WhatsApp wording, deductions start 26 Sep); Daniel #5 marked paid in full; Isaac #6 R600 deducted this week as scheduled (owner: leave as is). Backups `docs/restore-2026-09-23-loans/`.
+* Throughout: the type-checker (`npx tsc --noEmit`) is run before every deploy — it caught two use-before-declaration bugs (`hrs` in crew-pattern, `workRates` in index) that would have blanked the dashboard.
+
+# Part 8 — Payroll figures
+
+## Payroll 19–25 Sep 2026 (sent to auditors Wed 23 Sep) — final as at v2026-09-23-12
+
+| Worker | Paid rows (missed shifts) | Hours paid | Amount |
+|---|---|---|---|
+| Bhekizitha Maphosa | 7 (2) | 47,00 | R4 595,01 |
+| Daniel Motaung | 5 (0) | 44,00 | R4 474,38 |
+| Erence Mngomezulu | 8 (3) | 51,00 | R4 975,01 |
+| Erick Mpho Molefe | 6 (1) | 46,00 | R4 335,64 |
+| Givemore Chifetete Kuziwa | 7 (1) | 57,00 | R4 015,00 |
+| Isaac Mbele | 5 (0) | 44,00 | R3 981,27 |
+| John Simbarashe Mhlanga | 10 (2) | 75,00 | R6 461,26 |
+| Joshua Motsamai Nteo | 9 (3) | 63,50 | R4 737,51 |
+| Patrick Ngozo | 8 (3) | 53,50 | R5 403,75 |
+| Solomon Moyo | 7 (2) | 51,00 | R5 139,38 |
+| Takavaudza Chokuda | 7 (1) | 52,00 | R4 710,64 |
+| Thandanani Nkala | 5 (0) | 44,00 | R4 310,01 |
+| Thina Dyani | 1 (1) | 5,00 | R475,00 |
+| Tsotlego Petrus Malakoane | 6 (0) | 50,75 | R4 320,00 |
+| **Hourly staff total** | **91 (19 missed)** | **684,75** | **R61 933,86** |
+| Sharleen Ndlovu (fixed weekly) | | | R3 000,00 |
+| **Gross wages** | | | **R64 933,86** |
+
+Hours are the hours actually paid (meeting deducted where it applies; R0 duplicate rows count 0 h). Heritage Day (Thu 24 Sep) is included at the approved holiday amounts in Part 2. Deductions / loans as per the **Loans & Deductions** tab (Isaac #6 R600 + scheduled instalments on #1–#3; Petrus none; Daniel none). Full detail: `docs/BW_Payroll_2026-09-19_to_25_AUDITOR.xlsx`.
+
+**To confirm on Monday 28 Sep (follow-up panel):** Petrus really finished 14:00? · Givemore worked 08–15 (7 h) or only 4 h? · anybody in the warehouse past 15:00? Each answer creates a + / − correction row in the 26 Sep – 2 Oct payroll.
+
+## Payroll 12–18 Sep 2026 (paid 17 Sep) — final figures
 111 paid rows (24 missed) · claimed 843,50 h · R72 438,15 · **approved 793,75 h · R71 096,90** · missed 98,00 h · R8 861,25 · deductions R3 210,00 · **net R67 886,90**. Full detail: `handover-2026-09-16-complete-hardcopy.pdf`.
 
 # Part 9 — Restore points
 | Tag / folder | State |
 |---|---|
-| `restore-2026-09-23-difference` | **Live now (v2026-09-23-2)** — WAREHOUSE / VENUE buttons pay only the DIFFERENCE when part of the day was paid in an earlier payroll (4-line sum). |
+| `restore-2026-09-23-payroll-final` | **Live now (v2026-09-23-12)** — payroll 19–25 Sep as sent to the auditors; owner sentence + single APPROVE, Warehouse-Team cross-check, double-tap protection, planned end / holiday follow-up, hours column, pay-rule check retired, owner corrections final in Excel. Data backups `docs/restore-2026-09-23-{givemore,john,john2,joshua,holiday,final,loans}/`. |
+| `restore-2026-09-23-difference` | v2026-09-23-2 — WAREHOUSE / VENUE buttons pay only the DIFFERENCE when part of the day was paid in an earlier payroll (4-line sum). |
 | `restore-2026-09-23-reopen` | v2026-09-22-16 — Reopen a decided review, area-aware crew check, partial hours priced by place. |
 | `restore-2026-09-22-petrus-v5` | v2026-09-22-14 — Petrus v5 rule + rent deduction removed. To undo only the deduction removal: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2` |
 | `restore-2026-09-21-already-paid` | v2026-09-21-2 (already-paid rule, old Petrus rule, rent deduction still active) |
@@ -248,10 +361,10 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 | branch `review-logic-2026-09-18` | Crew check / duplicate catcher / proof rule — not deployed |
 
 ```
-git checkout restore-2026-09-22-petrus-v5
+git checkout restore-2026-09-23-payroll-final
 npm run build
 npx wrangler pages deploy dist --project-name bw-productions --branch main --commit-dirty=true
-curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-23-2
+curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-23-12
 ```
 To go back to before the already-paid rule: `git checkout restore-2026-09-18-rolled-back` and deploy (expect v2026-09-16-2); any `paid_before|…` reviews can then be deleted (they are the only rows it writes).
 
@@ -266,13 +379,19 @@ To go back to before the already-paid rule: `git checkout restore-2026-09-18-rol
 8. **Wednesday rule.** Auditor runs on Wednesday; Wed–Sun hours are estimates and may change the following week — the already-paid check exists for exactly this.
 9. **Restore point before anything goes live**; report old → new for any corrected figure; test on the preview with real cases first; show Bernie before deploying.
 10. Keep the CSV and old-rules Excel buttons until told otherwise.
+11. **"Warehouse Team" only means the warehouse when the place says warehouse** (23 Sep). Venue / area / description naming FNB, Riverside, a stadium, a garden or a house decides the rate — the system asks, Bernie clicks warehouse / venue / garden.
+12. **The 07:00–07:30 meeting is deducted on public holidays too** (23 Sep) — deduct first, then ×2.
+13. **When the owner sets a day's hours for everybody** (e.g. "Thursday everyone in the warehouse 07:00–15:00"), the planned end goes into `wage_planned_hours`; the next week's dashboard must ask what time each man really worked until and work out the over/under-payment. Nothing is adjusted without Bernie's Confirm.
+14. **One shift, one row.** Double presses are swallowed on the phone and refused on the server; a shift whose hours are already paid cannot be final-submitted again. A worker who worked different hours enters only the different hours.
+15. **An owner correction on a row is final** for the Excel and the green figure — no automatic check may re-price it.
 
 ## Open items (on Bernie's say-so)
-1. Re-introduce the crew check (same venue, majority hours) for the current week only.
-2. Auto-resolve the engine's self-compare reviews.
+1. **Monday 28 Sep**: answer the public-holiday follow-up panel (Petrus 14:00? Givemore 7 h or 4 h? anyone past 15:00?).
+2. Loans #7 (Erick R500) and #8 (Isaac R250 + R250) start deducting in the 26 Sep – 2 Oct payroll — check the Loans & Deductions tab.
 3. Drafts' open reviews not blocking the green figure.
-4. Rule-check panel to skip gardener-rate rows.
-5. Daniel's R3 000 loan — check.
-6. Remove CSV / old-rules export after one clean payroll.
+4. Remove CSV / old-rules export after one clean payroll.
+5. Push `main` to GitHub (118 local commits not yet pushed; all tags exist locally).
+
+Done and closed: crew check re-introduced for the current week only (22 Sep) · self-compare reviews auto-voided (22 Sep) · pay-rule panel removed altogether (23 Sep) · Daniel's R3 000 loan confirmed paid in full outside the payroll (23 Sep).
 
 *Prepared for B&W Productions — Bernie Burness — 23 September 2026.*
