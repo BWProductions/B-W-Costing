@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-23-2'
+const WAGES_UI_VERSION = 'v2026-09-23-3'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4260,44 +4260,54 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         const subj = rowToEntry(subjRow, isDraft ? 'draft' : 'shift', sub?.employee || '', staffBase[v.staff_id]?.payroll_rule || 'hourly', staffBase[v.staff_id]?.hourly_rate || 0)
         diffW = priceAgainstPaid(paidBeforeDeps, subj, earlier, 'warehouse'); diffV = priceAgainstPaid(paidBeforeDeps, subj, earlier, 'event')
       }
-      const R = fmtRand
-      // Owner 2026-09-23 — the sum must read in this order:
-      //   1. paid hours: what was paid last week (place, rate)   2. same hours at the chosen rate
-      //   3. difference (2 − 1)                                  4. + extra hours at the chosen rate  = amount to approve
-      const workingOut = (f: NonNullable<typeof diffW>, placeTxt: string, rate: number) => {
-        const ovTxt = earlier.map((p) => `${p.start}–${p.end}`).join(', ')
-        const paidPlace = Array.from(new Set(earlier.map((p) => p.work_type || p.venue || 'earlier').filter(Boolean))).join('/')
-        const paidRate = earlier.length === 1 ? earlier[0].rate_paid : (f.overlapHours ? f.alreadyPaid / f.overlapHours : 0)
-        const rr = (n: number) => Math.round(n * 100) / 100
-        const shouldHave = rr(f.alreadyPaid + f.rateCorrection)
-        const extraTxt = (diffW?.lines.find((l) => l.startsWith('• Extra hours')) || '').replace(/^• Extra hours /, '').replace(/: \d.*$/, '')
-        const rows = [
-          `<tr><td style="padding:1px 6px 1px 0;color:#111">1. ${ovTxt} — paid last week as ${escapeHtmlText(paidPlace)}</td><td style="text-align:right;white-space:nowrap;color:#111">${f.overlapHours.toFixed(2)} h × ${R(paidRate)} = <strong>${R(f.alreadyPaid)}</strong></td></tr>`,
-          `<tr><td style="padding:1px 6px 1px 0;color:#111">2. ${ovTxt} — should have been paid as ${placeTxt}</td><td style="text-align:right;white-space:nowrap;color:#111">${f.overlapHours.toFixed(2)} h × ${R(rate)} = <strong>${R(shouldHave)}</strong></td></tr>`,
-          `<tr><td style="padding:1px 6px 1px 0;color:#111">3. Difference (2 − 1)</td><td style="text-align:right;white-space:nowrap;color:#111">${R(shouldHave)} − ${R(f.alreadyPaid)} = <strong>${f.rateCorrection < 0 ? '−' : ''}${R(Math.abs(f.rateCorrection))}</strong></td></tr>`,
-          f.extraHours > 0 ? `<tr><td style="padding:1px 6px 1px 0;color:#111">4. Additional ${f.extraHours.toFixed(2)} h (${escapeHtmlText(extraTxt)}) at the ${placeTxt} rate</td><td style="text-align:right;white-space:nowrap;color:#111">${f.extraHours.toFixed(2)} h × ${R(rate)} = <strong>${R(f.extraAmount)}</strong>${f.extraAmount !== rr(f.extraHours * rate) ? `<br><span style="color:#333;font-size:10.5px">${placeTxt === 'Warehouse' && f.extraAmount < rr(f.extraHours * rate) ? 'less the unpaid 07:00–07:30 staff meeting (0,5 h = R40,63)' : 'priced by the rule (Sunday/holiday factor)'}</span>` : ''}</td></tr>` : '',
-          `<tr style="border-top:2px solid #111"><td style="padding:3px 6px 0 0;font-weight:800;color:#111">AMOUNT TO APPROVE (3 + 4)</td><td style="text-align:right;white-space:nowrap;font-weight:800;color:#111;font-size:13px">${R(f.stillDue)}</td></tr>`
-        ].filter(Boolean)
-        return `<table style="border-collapse:collapse;width:100%;font-size:11.5px;line-height:1.4;color:#111;margin-top:3px">${rows.join('')}</table>`
+      const R2 = (n: number) => Math.round(n * 100) / 100
+      const claimH = sub?.hours ? Number(sub.hours) : hoursBetween(st, en)
+      // Owner 2026-09-23 — when part of the day was ALREADY PAID in an earlier payroll, the office sees ONE sum,
+      // in the owner's words: "Paid last week … · 06:00–18:00 at a venue … · less the Garden · what I should pay",
+      // and ONE approve button. Venue is the default when the Area names a venue (crew check said so);
+      // a small link offers Warehouse instead.
+      if (earlier.length && (diffW || diffV)) {
+        const areaSaysVenue = snap?.crewKind === 'warehouse_with_area' || snap?.place === 'ambiguous_area'
+        const primaryKind: 'event' | 'warehouse' = areaSaysVenue || !diffW ? 'event' : (snap?.majorityPlace === 'warehouse' ? 'warehouse' : 'event')
+        const sumFor = (kind: 'event' | 'warehouse') => {
+          const f = kind === 'event' ? diffV! : diffW!
+          const placeWord = kind === 'event' ? 'at a venue' : 'in the warehouse'
+          const rate = kind === 'event' ? VENUE_HOURLY : WAREHOUSE_HOURLY
+          const paidLines = earlier.map((p) => `<tr><td style="padding:2px 8px 2px 0;color:#000">Paid last week &nbsp;<span style="font-weight:600;color:#1f1f1f">${escapeHtmlText(p.start)}–${escapeHtmlText(p.end)} · ${escapeHtmlText(p.venue || p.work_type || '—')} · ${p.hours.toFixed(2)} h × ${fmtRand(p.rate_paid)} · payroll ${escapeHtmlText(p.payroll_week_start || weekOfDate(p.work_date) || 'earlier')} · shift #${p.id}</span></td><td style="text-align:right;white-space:nowrap">${fmtRand(p.amount)}</td></tr>`).join('')
+          const fullTxt = kind === 'event' ? `${claimH.toFixed(2)} h × ${fmtRand(rate)}` : `${claimH.toFixed(2)} h${f.fullAmount < R2(claimH * rate) ? ' − 0,5 h staff meeting' : ''} × ${fmtRand(rate)}`
+          const paidWhat = Array.from(new Set(earlier.map((p) => p.venue || p.work_type || 'earlier'))).join('/')
+          return `<table style="border-collapse:collapse;width:100%;font-size:12.5px;line-height:1.45;color:#000;font-weight:700">
+            ${paidLines}
+            <tr><td style="padding:6px 8px 2px 0;border-top:1px solid rgba(0,0,0,.25)">${escapeHtmlText(st)}–${escapeHtmlText(en)} ${placeWord} &nbsp;<span style="font-weight:600;color:#1f1f1f">${fullTxt}</span></td><td style="text-align:right;white-space:nowrap;padding-top:6px;border-top:1px solid rgba(0,0,0,.25)">${fmtRand(f.fullAmount)}</td></tr>
+            <tr><td style="padding:2px 8px 2px 0">Less the ${escapeHtmlText(paidWhat)} already paid</td><td style="text-align:right;white-space:nowrap">− ${fmtRand(f.alreadyPaid)}</td></tr>
+            <tr><td style="padding:5px 8px 0 0;border-top:2px solid #111;font-weight:800">WHAT YOU SHOULD PAY THIS WEEK</td><td style="text-align:right;white-space:nowrap;border-top:2px solid #111;font-weight:800;font-size:15px;padding-top:5px">${fmtRand(f.stillDue)}</td></tr>
+          </table>`
+        }
+        const other: 'event' | 'warehouse' = primaryKind === 'event' ? 'warehouse' : 'event'
+        const otherF = other === 'event' ? diffV : diffW
+        return `<form method="post" action="/wages-admin/rate-choice" class="bw-review-decide" style="margin-top:6px;padding:10px;border-radius:8px;background:rgba(255,255,255,.05);font-size:12px">
+      <input type="hidden" name="review_id" value="${v.id}">
+      <input type="hidden" name="return_to" value="__RETURN__">
+      <div style="font-weight:800;color:#fca5a5;margin-bottom:6px">ALREADY PAID for part of this day — ${primaryKind === 'event' ? 'he was at a venue' : 'he was in the warehouse'}${areaSaysVenue && sub?.area ? ` (Area: “${escapeHtmlText(sub.area)}”)` : ''}. Only the difference is paid.</div>
+      <div style="background:${primaryKind === 'event' ? '#e2b93b' : '#93c5fd'};border-radius:8px;padding:8px 10px">${sumFor(primaryKind)}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+        <button type="submit" name="choice" value="${primaryKind}" style="padding:8px 16px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-weight:800;font-size:13px;cursor:pointer">✔ APPROVE ${fmtRand((primaryKind === 'event' ? diffV! : diffW!).stillDue)} — ${primaryKind === 'event' ? 'VENUE R95/h' : 'WAREHOUSE R81,25/h'}</button>
+        ${otherF ? `<button type="submit" name="choice" value="${other}" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.35);background:transparent;color:#fff;cursor:pointer;font-size:11.5px" title="Use this only if he was ${other === 'event' ? 'at a venue' : 'in the warehouse'} instead">No — he was ${other === 'event' ? 'at a venue' : 'in the warehouse'} instead (${fmtRand(otherF.stillDue)})</button>` : ''}
+      </div>
+      <div style="opacity:.6;margin-top:5px">Recorded on review #${v.id} with your name. The row is set to the amount shown; what was paid earlier is not touched.${isDraft ? ' Applied when the worker final-submits.' : ''}</div>
+    </form>`
       }
-      const alreadyBox = earlier.length ? `<div style="margin:0 0 6px;padding:6px 8px;border-radius:6px;background:rgba(248,113,113,.14);border:1px solid rgba(248,113,113,.5)">
-          <div style="font-weight:800;color:#fca5a5">ALREADY PAID for part of this day — the buttons below pay only the DIFFERENCE</div>
-          ${earlier.map((p) => `<div>Paid ${escapeHtmlText(p.start)}–${escapeHtmlText(p.end)} · ${escapeHtmlText(p.work_type || '—')} · ${escapeHtmlText(p.venue || '—')} · ${p.hours.toFixed(2)} h × ${R(p.rate_paid)} = <strong>${R(p.amount)}</strong> · shift #${p.id} · payroll ${escapeHtmlText(p.payroll_week_start || weekOfDate(p.work_date) || 'earlier')}</div>`).join('')}
-          <div>Now claims ${escapeHtmlText(st)}–${escapeHtmlText(en)} (${(sub?.hours ? Number(sub.hours) : hoursBetween(st, en)).toFixed(2)} h) — ${diffW ? `${diffW.extraHours.toFixed(2)} h of that is new (${escapeHtmlText(diffW.lines.find((l) => l.startsWith('• Extra hours'))?.replace(/^• Extra hours /, '').replace(/: \d.*$/, '') || '')})` : 'all inside what was paid'}.</div>
-        </div>` : ''
-      const btn = (val: string, bg: string, label: string, full: OwnerPriced | null, diff: typeof diffW, stripRe: RegExp, placeTxt: string, rate: number) => diff
-        ? `<button type="submit" name="choice" value="${val}" style="padding:6px 10px;border-radius:6px;border:0;background:${bg};color:#111;font-weight:800;cursor:pointer;text-align:left;min-width:300px;max-width:460px">${label} — approve <span style="font-size:14px">${R(diff.stillDue)}</span><div style="font-weight:400">${workingOut(diff, placeTxt, rate)}</div></button>`
-        : `<button type="submit" name="choice" value="${val}" style="padding:6px 10px;border-radius:6px;border:0;background:${bg};color:#111;font-weight:800;cursor:pointer;text-align:left">${label}${full ? `<br><span style="font-weight:600">${R(full.amount)}</span> <span style="font-weight:400;opacity:.8">(${escapeHtmlText(full.breakdown.replace(stripRe, ''))})</span>` : ''}</button>`
+      const btn = (val: string, bg: string, label: string, full: OwnerPriced | null, stripRe: RegExp) =>
+        `<button type="submit" name="choice" value="${val}" style="padding:6px 10px;border-radius:6px;border:0;background:${bg};color:#111;font-weight:800;cursor:pointer;text-align:left">${label}${full ? `<br><span style="font-weight:600">${fmtRand(full.amount)}</span> <span style="font-weight:400;opacity:.8">(${escapeHtmlText(full.breakdown.replace(stripRe, ''))})</span>` : ''}</button>`
       return `<form method="post" action="/wages-admin/rate-choice" class="bw-review-decide" style="margin-top:6px;padding:8px;border-radius:8px;background:rgba(255,255,255,.05);font-size:12px">
       <input type="hidden" name="review_id" value="${v.id}">
       <input type="hidden" name="return_to" value="__RETURN__">
-      ${alreadyBox}
-      <div style="margin-bottom:6px"><strong>Where was he? ${workerSaid} Your click decides the place and the rate${isDraft ? ' — applied automatically when he final-submits' : (earlier.length ? ' — the row is set to the DIFFERENCE now' : ' — the row is re-priced now')}:</strong></div>
+      <div style="margin-bottom:6px"><strong>Where was he? ${workerSaid} Your click decides the place and the rate${isDraft ? ' — applied automatically when he final-submits' : ' — the row is re-priced now'}:</strong></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        ${btn('warehouse', '#93c5fd', 'WAREHOUSE — R81,25/h', pw, diffW, /^Warehouse: /, 'Warehouse', WAREHOUSE_HOURLY)}
-        ${btn('event', '#e2b93b', 'VENUE — R95/h', pv, diffV, /^Venue\/event: /, 'Venue', VENUE_HOURLY)}
+        ${btn('warehouse', '#93c5fd', 'WAREHOUSE — R81,25/h', pw, /^Warehouse: /)}
+        ${btn('event', '#e2b93b', 'VENUE — R95/h', pv, /^Venue\/event: /)}
       </div>
-      <div style="opacity:.6;margin-top:4px">Recorded on review #${v.id} with your name and the place chosen. ${isDraft ? 'Nothing is paid until the worker final-submits; the rate you chose is then used, whatever work type he picked.' : earlier.length ? 'The shift amount is set to the difference shown (what was paid earlier is not touched). Nothing else changes.' : 'The shift amount is set to the chosen place. Nothing else changes.'}</div>
+      <div style="opacity:.6;margin-top:4px">Recorded on review #${v.id} with your name and the place chosen. ${isDraft ? 'Nothing is paid until the worker final-submits; the rate you chose is then used, whatever work type he picked.' : 'The shift amount is set to the chosen place. Nothing else changes.'}</div>
     </form>`
     }
     if (snap?.paidBefore) {
@@ -5327,7 +5337,7 @@ app.post('/wages-admin/rate-choice', async (c) => {
           const paidRate = earlier.length === 1 ? earlier[0].rate_paid : (f.overlapHours ? Math.round(f.alreadyPaid / f.overlapHours * 100) / 100 : 0)
           const shouldHave = Math.round((f.alreadyPaid + f.rateCorrection) * 100) / 100
           const rateNum = kind === 'warehouse' ? WAREHOUSE_HOURLY : VENUE_HOURLY
-          diffNote = ' DIFFERENCE ONLY: (1) ' + ovTxt + ' paid last week as ' + paidPlace + ' ' + f.overlapHours.toFixed(2) + ' h × ' + fmtRand(paidRate) + ' = ' + fmtRand(f.alreadyPaid) + ' (' + earlier.map((p) => 'shift #' + p.id + ', payroll ' + (p.payroll_week_start || 'earlier')).join('; ') + '); (2) same hours as ' + label + ' ' + f.overlapHours.toFixed(2) + ' h × ' + fmtRand(rateNum) + ' = ' + fmtRand(shouldHave) + '; (3) difference ' + fmtRand(shouldHave) + ' − ' + fmtRand(f.alreadyPaid) + ' = ' + (f.rateCorrection < 0 ? '−' : '') + fmtRand(Math.abs(f.rateCorrection)) + (f.extraHours > 0 ? '; (4) additional ' + f.extraHours.toFixed(2) + ' h × ' + fmtRand(rateNum) + ' = ' + fmtRand(f.extraAmount) : '') + '; AMOUNT TO PAY (3 + 4) = ' + fmtRand(f.stillDue)
+          diffNote = ' DIFFERENCE ONLY: Paid last week ' + ovTxt + ' ' + paidPlace + ' ' + f.overlapHours.toFixed(2) + ' h × ' + fmtRand(paidRate) + ' = ' + fmtRand(f.alreadyPaid) + ' (' + earlier.map((p) => 'shift #' + p.id + ', payroll ' + (p.payroll_week_start || 'earlier')).join('; ') + '); ' + row.start_time + '–' + row.end_time + (kind === 'event' ? ' at a venue' : ' in the warehouse') + ' = ' + fmtRand(f.fullAmount) + ' (' + fmtRand(rateNum) + '/h); less the ' + paidPlace + ' already paid ' + fmtRand(f.alreadyPaid) + '; TO PAY THIS WEEK ' + fmtRand(f.stillDue)
           priced = { ...priced, amount: f.stillDue, breakdown: priced.breakdown + ' →' + diffNote }
         }
       }
