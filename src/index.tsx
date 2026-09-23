@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-23-7'
+const WAGES_UI_VERSION = 'v2026-09-23-11'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -683,8 +683,27 @@ label[for="bw-missed-work-date"] {
     document.addEventListener('submit', (event) => {
       const form = event.target
       if (!(form instanceof HTMLFormElement)) return
+      // Owner 2026-09-23: workers press Save / Final Submission two or three times because nothing tells them it
+      // is working. One press only: the second press is swallowed, every button greys out and says "Saving… please wait".
+      if (form.__bwSubmitting) { event.preventDefault(); event.stopImmediatePropagation(); return }
+      form.__bwSubmitting = true
       rewriteFormAction(form)
       rewriteSubmitterAction(event.submitter)
+      window.setTimeout(() => {
+        Array.from(form.querySelectorAll('button, input[type=submit]')).forEach((b) => {
+          if (b.type === 'submit' || b.tagName === 'BUTTON') {
+            b.disabled = true
+            if (!b.dataset.bwLabel) { b.dataset.bwLabel = b.textContent || b.value || '' }
+            if (b.tagName === 'BUTTON') b.textContent = 'Saving… please wait'
+            else b.value = 'Saving… please wait'
+            b.style.opacity = '0.6'; b.style.cursor = 'wait'
+          }
+        })
+        let ov = document.getElementById('bw-saving-overlay')
+        if (!ov) { ov = document.createElement('div'); ov.id = 'bw-saving-overlay'; ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;color:#fff;font:700 20px/1.3 system-ui,sans-serif;text-align:center;padding:24px'; ov.textContent = 'Saving your shift… please wait. Do not press again.'; document.body.appendChild(ov) }
+      }, 0)
+      // If the page does not navigate within 20 s (network problem), re-enable so the worker is not stuck.
+      window.setTimeout(() => { form.__bwSubmitting = false; const ov = document.getElementById('bw-saving-overlay'); if (ov) ov.remove(); Array.from(form.querySelectorAll('button, input[type=submit]')).forEach((b) => { b.disabled = false; b.style.opacity = ''; b.style.cursor = ''; if (b.dataset.bwLabel) { if (b.tagName === 'BUTTON') b.textContent = b.dataset.bwLabel; else b.value = b.dataset.bwLabel } }) }, 20000)
     }, true)
 
     if (window.HTMLFormElement?.prototype) {
@@ -4509,6 +4528,45 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
 
   const ruleDetailTop = (c: RuleDayCheck) => `<div style="font-size:12px;opacity:.9">Rule: ${escapeHtmlText(ruleBreakdownText(c.rule))}${c.rule.notes.length ? ' · ' + escapeHtmlText(c.rule.notes.join('; ')) : ''}<br>Entries paid: ${c.entries.map((e) => escapeHtmlText(e)).join(' · ')}${c.priorIncluded ? ' · <em>includes what was already paid for this real day in an earlier payroll</em>' : ''}</div>`
 
+  // Owner 2026-09-23: "When we go through Monday, ask me: what did they work on the holiday?" Once the payroll has
+  // moved past a public holiday whose hours the owner SET (planned end), the next dashboard shows every holiday row
+  // and asks for the real end time, with under/over-paid worked out. Answer recorded on the row (manager correction).
+  let followUpPanel = ''
+  try {
+    const prevHol = await db.prepare(`SELECT ph.work_date, ph.planned_end, ph.note FROM wage_planned_hours ph WHERE ph.work_date < ? AND ph.work_date >= date(?, '-14 days') ORDER BY ph.work_date`).bind(weekStart, weekStart).all()
+    const holDays = (prevHol.results || []) as Array<{ work_date: string, planned_end: string, note: string }>
+    if (holDays.length) {
+      const blocks: string[] = []
+      for (const hd of holDays) {
+        const rowsRes = await db.prepare(`SELECT w.id, w.staff_id, s.display_name, s.payroll_rule, w.start_time, w.end_time, w.hours_worked, w.work_type, w.outlet_venue, w.area, w.work_description, COALESCE(w.gross_wage, w.total_amount, 0) amount, w.hourly_rate_snapshot rate, w.payroll_note FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id WHERE w.work_date = ? ORDER BY s.display_name, w.start_time`).bind(hd.work_date).all()
+        const hrows = (rowsRes.results || []) as any[]
+        if (!hrows.length) continue
+        const pending = hrows.filter((r) => !/HOLIDAY HOURS CONFIRMED/.test(r.payroll_note || ''))
+        const done = hrows.length - pending.length
+        const li = hrows.map((r) => {
+          const confirmed = /HOLIDAY HOURS CONFIRMED/.test(r.payroll_note || '')
+          const kind = ownerPayKind(r.staff_id, r.work_type, [r.outlet_venue, r.work_description].join(' '), r.payroll_rule)
+          const opts = ['12:00', '13:00', '14:00', '15:00', '16:00'].map((t) => {
+            const p = kind === 'gardener' || kind === 'fixed_weekly' ? null : ownerPayForShift(hd.work_date, r.start_time, t, kind === 'warehouse_or_event' ? 'warehouse' : kind)
+            const amt = p ? Number(p.recommendedAmount || p.amount || 0) : (kind === 'gardener' ? Math.round((hoursBetween(r.start_time, t) * 62.5 * 2) * 100) / 100 : 0)
+            return `<option value="${t}" ${t === r.end_time ? 'selected' : ''}>${t} → ${fmtRand(amt)}${t === r.end_time ? ' (as paid)' : ''}</option>`
+          }).join('')
+          return `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 0;border-top:1px solid rgba(255,255,255,.08);font-size:12.5px;${confirmed ? 'opacity:.6' : ''}">
+            <span style="flex:0 0 190px;font-weight:700">${escapeHtmlText(r.display_name)}</span>
+            <span style="flex:0 0 auto">${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)} · ${escapeHtmlText(r.outlet_venue)} · paid <strong>${fmtRand(Number(r.amount))}</strong></span>
+            ${confirmed ? `<span style="color:#86efac;font-weight:700">✔ confirmed</span>` : `<form method="post" action="/wages-admin/confirm-holiday-hours" style="display:flex;gap:6px;align-items:center;margin:0"><input type="hidden" name="shift_id" value="${r.id}"><input type="hidden" name="return_to" value="__RETURN__"><label>Really worked until <select name="actual_end" style="padding:3px 6px;border-radius:6px;background:#0f172a;color:#fff;border:1px solid rgba(255,255,255,.25)">${opts}</select></label><button type="submit" style="padding:4px 10px;border-radius:6px;border:0;background:#16a34a;color:#fff;font-weight:800;cursor:pointer">Confirm &amp; re-price</button></form>`}
+          </div>`
+        }).join('')
+        blocks.push(`<div style="margin-top:8px"><div style="font-weight:800">${escapeHtmlText(proxyLongDate(hd.work_date))} — public holiday, paid to ${escapeHtmlText(hd.planned_end)}${hd.note ? ' (' + escapeHtmlText(hd.note) + ')' : ''} — ${pending.length} to confirm, ${done} done</div>${li}</div>`)
+      }
+      if (blocks.length) followUpPanel = `<section id="bw-holiday-followup" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(127,29,29,.18);border:1px solid rgba(252,165,165,.6)">
+        <div style="font-weight:800;color:#fca5a5;font-size:14px">⏰ Bernie — what time did they REALLY work until on the public holiday?</div>
+        <div style="font-size:12.5px;opacity:.85;margin-top:2px">You set the end time before the day. Pick the real end time per person; the system re-prices the row at the holiday rule (meeting deducted first, ×2) and shows if we under- or over-paid. Nothing changes until you press Confirm.</div>
+        ${blocks.join('')}
+      </section>`
+    }
+  } catch (err) {}
+
   const sections = order.map((sid) => {
     const g = byStaff[sid]
     const rows = g.paid.slice().sort((a, b) => (a.work_date + a.start_time).localeCompare(b.work_date + b.start_time))
@@ -4560,7 +4618,6 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       const rowBg = hasRed ? 'background:rgba(127,29,29,.18)' : ruleOff ? 'background:rgba(30,58,138,.14)' : isMissed ? 'background:rgba(226,185,59,.07)' : ''
       const flags = [
         isMissed ? pill('MISSED', '#fdecec', '#7f1d1d') : '',
-        ruleOff ? `<a href="#" onclick="var b=document.getElementById('bw-person-rule-${sid}');if(b){b.style.display='block'}return false" style="text-decoration:none">${pill('⚖ RULE ' + (ruleChk.diff > 0 ? '+' : '−') + fmtRand(Math.abs(ruleChk.diff)), ruleChk.diff > 0 ? '#7f1d1d' : '#1e3a8a', '#fff')}</a>` : (ruleChk ? pill('⚖ rule ok', '#1f5f3a', '#fff') : ''),
         hasRed ? pill('⚑ REVIEW', '#7f1d1d', '#fff') : revs.some((v) => v.status === 'OPEN') ? pill('⚑ review', '#b45309', '#fff') : '',
         r.overnight_confirmed ? pill('next day', '#1e3a8a', '#fff') : '',
         r.manager_update_reason ? pill('corrected', '#1f5f3a', '#fff') : '',
@@ -4684,14 +4741,8 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
           return `<div style="padding:6px 0;border-top:1px solid rgba(255,255,255,.08)"><div style="font-size:12.5px;margin-bottom:2px"><strong>${line}</strong></div>${reviewCell([v])}</div>`
         }).join('')}</div>`
       : ''
-    const personRuleHtml = ruleDiffDays.length
-      ? `<div id="bw-person-rule-${sid}" style="display:none;margin:8px 0 4px;padding:10px 12px;border-radius:10px;background:rgba(30,58,138,.14);border:1px solid rgba(96,165,250,.5)"><div style="font-weight:800;color:#93c5fd;margin-bottom:6px">⚖ Pay-rule check for ${escapeHtmlText(g.name)} — ${ruleDiffDays.length} day${ruleDiffDays.length === 1 ? '' : 's'} differ${ruleDiffDays.length === 1 ? 's' : ''} from the rule (nothing has been changed — for your decision)</div>${ruleDiffDays.map(ruleDetail).join('')}</div>`
-      : ''
-    const ruleSummaryPill = ruleApplies(sid)
-      ? (ruleDiffDays.length
-        ? `<a href="#" onclick="var b=document.getElementById('bw-person-rule-${sid}');if(b){b.style.display=b.style.display==='none'?'block':'none'}return false" style="text-decoration:none">${pill('⚖ ' + ruleDiffDays.length + ' day' + (ruleDiffDays.length === 1 ? '' : 's') + ' differ from pay rule · ' + (ruleDiffDays.reduce((a, c) => a + c.diff, 0) > 0 ? 'paid ' + fmtRand(ruleDiffDays.reduce((a, c) => a + c.diff, 0)) + ' more' : 'paid ' + fmtRand(-ruleDiffDays.reduce((a, c) => a + c.diff, 0)) + ' less') + ' ▾', '#1e3a8a', '#fff')}</a>`
-        : pill('⚖ all days match pay rule', '#1f5f3a', '#fff'))
-      : pill('fixed weekly – rule check not applied', '#374151', '#fff')
+    const personRuleHtml = '' // Owner 2026-09-23: pay-rule check retired
+    const ruleSummaryPill = '' // Owner 2026-09-23: pay-rule check retired
     const flagsSummary = ruleSummaryPill + (openRev ? `<a href="#" onclick="var b=document.getElementById('bw-person-reviews-${sid}');if(b){b.style.display=b.style.display==='none'?'block':'none'}return false" style="text-decoration:none">${pill('⚑ ' + openRev + ' open review' + (openRev === 1 ? '' : 's') + ' ▾', '#b45309', '#fff')}</a>` : '') + (missed.length ? pill(missed.length + ' missed shift' + (missed.length === 1 ? '' : 's') + ' · ' + mH.toFixed(2) + ' h · ' + fmtRand(mA), '#fdecec', '#7f1d1d') : '') + (g.drafts.length ? pill(g.drafts.length + ' not final-submitted', '#374151', '#fff') : '')
     return `<tr><td colspan="13" style="padding:14px 10px 6px;border-top:2px solid rgba(226,185,59,.5)">
         <span style="color:#e2b93b;font-weight:800;text-transform:uppercase;font-size:11px;letter-spacing:.06em;margin-right:8px">Name</span><strong style="font-size:15px">${escapeHtmlText(g.name)}</strong>
@@ -4727,14 +4778,8 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         <div id="bw-open-reviews-list" style="margin-top:6px">${lines}</div>
       </section>`
     })()}
-    ${(() => {
-      const sorted = ruleDiffsAll.slice().sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
-      const head = `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div style="font-weight:800;color:#93c5fd">⚖ Pay-rule check — ${gRuleDays ? gRuleDays + ' day' + (gRuleDays === 1 ? '' : 's') + ' differ from the rule: paid ' + fmtRand(gRuleOver) + ' more and ' + fmtRand(gRuleUnder) + ' less than the rule (net ' + (gRuleAmount >= 0 ? '+' : '−') + fmtRand(Math.abs(gRuleAmount)) + ')' : 'every paid day matches the rule'}</div>${gRuleDays ? `<a href="#" onclick="var b=document.getElementById('bw-rule-list');b.style.display=b.style.display==='none'?'block':'none';return false" style="color:#e2b93b;font-weight:700;font-size:12px">show / hide list</a>` : ''}</div>
-        <div style="font-size:12px;opacity:.8;margin-top:3px">Rule used (B&W rate rules v10, owner 22 Sep 2026): PUBLIC HOLIDAYS (gov.za list + Election Day 4 Nov 2026) — every entry is held red for the owner: general staff ×2 (Warehouse R162,50/h with the 07:00–07:30 meeting deducted first Mon–Fri, Venue R190/h); Petrus no fixed day, R160/h (R80 × 2); Music Bus R750 fixed 07–16 + R180/h outside. General staff — hourly by place, to the hour: Warehouse Team R81,25/h (R650 ÷ 8); Venue/Event (any other work type) R95/h; Sunday ×1.2 (R97,50 / R114); Mon–Fri the 07:00–07:30 staff meeting is unpaid — warehouse entries covering it lose that time (30 min = R40,62). No fixed day; a man who moves from the warehouse to a venue is paid the warehouse hours at R81,25 and the venue hours at R95. Music Bus — Mon–Sat R750 fixed 07–16 + R120/h outside; Sunday R120/h. Petrus (from 22 Sep 2026) — R640 set day rate for 06–16 Mon–Sat; Saturday before 06:00 / after 16:00 R80/h automatically; Mon–Fri before 06:00 / after 16:00 (R55/h) is HELD and flagged red — the office approves it or sets another rate; SUNDAY is never automatic — the whole entry is held (R640 + R80/h recommended) until the owner approves or declines. No deductions for Petrus. Gardeners keep their gardener rate; on the Team block they get general-staff rates. Overlapping entries are counted once. <strong>Nothing is changed by this check</strong> — it only shows where the amount paid differs, so you can decide.</div>`
-      if (!sorted.length) return `<section id="bw-rule-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(20,83,45,.18);border:1px solid rgba(96,165,250,.35)">${head}</section>`
-      const lines = sorted.map((c) => `<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid rgba(255,255,255,.08);font-size:12.5px"><span style="flex:0 0 auto">${c.diff > 0 ? pill('OVER', '#7f1d1d', '#fff') : pill('UNDER', '#1e3a8a', '#fff')}</span><div style="flex:1"><strong>${escapeHtmlText(c.name)}</strong> · ${escapeHtmlText(c.date)} (${dayName(c.date)}) · ${escapeHtmlText(c.rule.span)} · paid <strong>${fmtRand(c.paid)}</strong> vs rule <strong>${fmtRand(c.rule.amount)}</strong> → <strong>${c.diff > 0 ? '+' : '−'}${fmtRand(Math.abs(c.diff))}</strong><a href="#" onclick="var b=document.getElementById('bw-rule-top-${c.staffId}-${c.date}');if(b){b.style.display=b.style.display==='none'?'block':'none'}return false" style="margin-left:8px;color:#e2b93b;font-weight:700">Open ▾</a><div id="bw-rule-top-${c.staffId}-${c.date}" style="display:none;margin-top:2px">${ruleDetailTop(c)}</div></div></div>`).join('')
-      return `<section id="bw-rule-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(30,58,138,.12);border:1px solid rgba(96,165,250,.5)">${head}<div id="bw-rule-list" style="margin-top:6px">${lines}</div></section>`
-    })()}
+    ${'' /* Owner 2026-09-23: pay-rule check retired — hourly/daily rules are in place; reviews carry the decisions. */}
+    ${followUpPanel}
     <div style="display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 12px;font-size:13px">
       <div><span style="opacity:.7">Paid shifts</span><br><strong style="font-size:18px">${gShifts}</strong></div>
       <div><span style="opacity:.7">Total hours</span><br><strong style="font-size:18px">${gHours.toFixed(2)}</strong></div>
@@ -4742,7 +4787,6 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       <div><span style="opacity:.7">Agreed after reviews</span><br><strong style="font-size:18px;color:${gAgreedPending ? '#fbbf24' : '#86efac'}">${gAgreedH.toFixed(2)} h · ${fmtRand(gAgreedA)}</strong>${gAgreedPending ? `<span style="font-size:12px;opacity:.85"> · ${gAgreedPending} person${gAgreedPending === 1 ? '' : 's'} with open reviews (their paid figures used meanwhile)</span>` : ''}</div>
       <div><span style="opacity:.7">of which missed shifts</span><br><strong style="font-size:18px">${gMissedH.toFixed(2)} h · ${fmtRand(gMissedA)}</strong></div>
       <div><span style="opacity:.7">Open reviews</span><br><strong style="font-size:18px;color:${gOpenReviews ? '#fca5a5' : '#86efac'}">${gOpenReviews}</strong></div>
-      <div><span style="opacity:.7">Days differing from pay rule</span><br><strong style="font-size:18px;color:${gRuleDays ? '#93c5fd' : '#86efac'}">${gRuleDays}</strong>${gRuleDays ? `<span style="font-size:12px;opacity:.8"> · net ${gRuleAmount >= 0 ? '+' : '−'}${fmtRand(Math.abs(gRuleAmount))}</span>` : ''}</div>
       <div><span style="opacity:.7">Awaiting Final Submission</span><br><strong style="font-size:18px">${gDrafts}</strong></div>
     </div>
     <div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -4988,6 +5032,25 @@ async function proxyRequest(c: any) {
         const fd = await c.req.raw.clone().formData()
         const iso = normalizeProxyFieldValue(fd.get('bw_actual_work_date')) || normalizeProxyFieldValue(fd.get('bw_visible_work_date')) || normalizeProxyFieldValue(fd.get('work_date'))
         const err = proxyWorkDateWindowError(iso)
+        // Owner 2026-09-23: a NEW draft that is the same date + start + end as a draft this worker already has (or as a
+        // paid row for those hours) is a double-tap — do not create it; send him to the existing one.
+        if (!err && !saveMatch[1]) {
+          try {
+            const staffId = await staffIdFromWageSession(c.env, c.req.raw.headers.get('cookie') || '')
+            const st = normalizeProxyFieldValue(fd.get('start_time')).slice(0, 5), en = normalizeProxyFieldValue(fd.get('end_time')).slice(0, 5)
+            if (staffId && iso && st && en) {
+              const dupD = await c.env.DB.prepare(`SELECT id, status FROM wage_shift_drafts WHERE staff_id = ? AND work_date = ? AND substr(start_time,1,5) = ? AND substr(end_time,1,5) = ? ORDER BY id DESC LIMIT 1`).bind(staffId, iso, st, en).first<{ id: number, status: string }>()
+              const dupS = dupD ? null : await c.env.DB.prepare(`SELECT id FROM wage_shifts WHERE staff_id = ? AND work_date = ? AND substr(start_time,1,5) = ? AND substr(end_time,1,5) = ? AND COALESCE(gross_wage, total_amount, 0) > 0 LIMIT 1`).bind(staffId, iso, st, en).first<{ id: number }>()
+              if (dupD || dupS) {
+                const msg = dupD && dupD.status === 'draft'
+                  ? 'This shift (' + proxyLongDate(iso) + ' ' + st + '–' + en + ') is ALREADY SAVED — it was not lost. Open it below and press Final Submission once.'
+                  : 'This shift (' + proxyLongDate(iso) + ' ' + st + '–' + en + ') has ALREADY been submitted' + (dupS ? ' and is in the payroll' : '') + '. It was not entered again. If you worked different hours that day, enter only the different hours.'
+                await captureWagesDebug(c.env, { request_path: incomingUrl.pathname, request_method: 'POST', original_payload_json: JSON.stringify({ staff_id: staffId, work_date: iso, start: st, end: en, existing_draft: dupD?.id || null, existing_shift: dupS?.id || null }), rewritten_payload_json: '{}', rewrite_applied: 1, response_status: 302, response_location: 'duplicate-save-block', response_error_text: msg })
+                return new Response(null, { status: 302, headers: { location: '/wages/me?error=' + encodeURIComponent(msg), 'cache-control': 'no-store' } })
+              }
+            }
+          } catch (e2) {}
+        }
         if (err) {
           await captureWagesDebug(c.env, { request_path: incomingUrl.pathname, request_method: 'POST', original_payload_json: JSON.stringify({ work_date: iso }), rewritten_payload_json: '{}', rewrite_applied: 1, response_status: 302, response_location: 'window-refused', response_error_text: err })
           const back = saveMatch[1] ? '/wages/drafts/' + saveMatch[1] + '/edit' : '/wages/shift/new'
@@ -5483,6 +5546,53 @@ app.post('/wages-admin/petrus-extra', async (c) => {
 })
 
 // Owner 2026-09-22: delete an unsubmitted draft. Office only. Backed up to wage_debug_capture; reviews on it voided.
+// Owner 2026-09-23: next-week confirmation of public-holiday end times. Re-prices the row at the confirmed end
+// (holiday rule: meeting deducted first, ×2; gardener day-rate ×2 pro rata; Petrus R160/h) and records
+// under / over-payment against what was paid. The difference lands in THIS payroll as the row's new amount is
+// only the correction? No — the holiday row belongs to the closed payroll; we record the correction as a NEW
+// correction row in the current payroll so the closed payroll is untouched.
+app.post('/wages-admin/confirm-holiday-hours', async (c) => {
+  const db = c.env?.DB
+  const admin = await adminUserFromCookie(c.req.raw.headers.get('cookie') || '')
+  const back = (v: string) => new Response(null, { status: 302, headers: { location: v, 'cache-control': 'no-store' } })
+  if (!db) return c.text('no database', 500)
+  if (!admin) return back('/login?next=' + encodeURIComponent('/admin/wages'))
+  let form: FormData
+  try { form = await c.req.raw.formData() } catch (err) { return back('/admin/wages?error=' + encodeURIComponent('Could not read the form.')) }
+  const shiftId = Number(normalizeProxyFieldValue(form.get('shift_id')))
+  const actualEnd = normalizeProxyFieldValue(form.get('actual_end'))
+  const returnTo = normalizeProxyFieldValue(form.get('return_to')) || '/admin/wages'
+  const safeReturn = /^\/admin\/wages(\?|$)/.test(returnTo) ? returnTo : '/admin/wages'
+  const sep = safeReturn.includes('?') ? '&' : '?'
+  if (!shiftId || !/^\d{2}:\d{2}$/.test(actualEnd)) return back(safeReturn + sep + 'error=' + encodeURIComponent('Pick a time.'))
+  try {
+    const r = await db.prepare(`SELECT w.*, s.display_name, s.payroll_rule, COALESCE(w.gross_wage, w.total_amount, 0) amount FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id WHERE w.id = ?`).bind(shiftId).first<any>()
+    if (!r) return back(safeReturn + sep + 'error=' + encodeURIComponent('Shift #' + shiftId + ' not found.'))
+    if (/HOLIDAY HOURS CONFIRMED/.test(r.payroll_note || '')) return back(safeReturn + sep + 'msg=' + encodeURIComponent('Shift #' + shiftId + ' was already confirmed.'))
+    const kind = ownerPayKind(r.staff_id, r.work_type, [r.outlet_venue, r.work_description].join(' '), r.payroll_rule)
+    let should = 0, text = ''
+    if (kind === 'gardener') { const h = Math.max(0, (timeToMinutes(actualEnd)! - timeToMinutes(r.start_time)!) / 60); should = Math.round(h * 62.5 * 2 * 100) / 100; text = `gardener ${h.toFixed(2)} h × R62,50 × 2` }
+    else { const p = ownerPayForShift(r.work_date, r.start_time, actualEnd, kind === 'warehouse_or_event' ? 'warehouse' : kind); should = Number(p?.recommendedAmount ?? p?.amount ?? 0); text = (p?.breakdown || '').replace(/^PUBLIC HOLIDAY — HELD for owner approval — recommended /, '').replace(/; R0 until approved$/, '') }
+    const paid = Number(r.amount || 0), diff = Math.round((should - paid) * 100) / 100
+    const verdict = Math.abs(diff) < 0.01 ? 'paid correctly' : diff > 0 ? 'UNDERPAID by ' + fmtRand(diff) : 'OVERPAID by ' + fmtRand(-diff)
+    const note = ' | HOLIDAY HOURS CONFIRMED by ' + admin.name + ' ' + new Date().toISOString().slice(0, 10) + ': really worked ' + r.start_time + '–' + actualEnd + ' (paid as ' + r.start_time + '–' + r.end_time + ', ' + fmtRand(paid) + '); should be ' + text + ' = ' + fmtRand(should) + ' → ' + verdict
+    await db.prepare(`UPDATE wage_shifts SET payroll_note = COALESCE(payroll_note,'') || ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(note, shiftId).run()
+    let corr = ''
+    if (Math.abs(diff) >= 0.01) {
+      // Correction row in the CURRENT payroll (the holiday payroll is closed). Negative = recovery.
+      const wk = currentProxyPayrollWeekStart()
+      await db.prepare(`INSERT INTO wage_shifts (staff_id, work_date, outlet_venue, area, event_name, work_description, start_time, end_time, hours_worked, normal_hours, hourly_rate_snapshot, base_rate_snapshot, total_amount, normal_amount, gross_wage, entered_by, entered_by_type, manager_update_reason, work_type, calculation_version, missed_previous_week, payroll_week_start, payroll_note)
+          VALUES (?, ?, ?, ?, 'Public holiday correction', ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, 'manager', ?, ?, 10, 1, ?, ?)`)
+        .bind(r.staff_id, r.work_date, r.outlet_venue, r.area, 'CORRECTION — public holiday ' + r.work_date + ': really worked until ' + actualEnd + ' (paid to ' + r.end_time + ')', r.start_time, actualEnd, Number(r.hourly_rate_snapshot || 0), Number(r.hourly_rate_snapshot || 0), diff, diff, diff, admin.name, 'Holiday hours confirmed by ' + admin.name + ': ' + verdict + ' on shift #' + shiftId, r.work_type, wk, 'Correction line for shift #' + shiftId + ' (' + r.work_date + ' public holiday). Paid ' + fmtRand(paid) + ' for ' + r.start_time + '–' + r.end_time + '; really ' + r.start_time + '–' + actualEnd + ' = ' + fmtRand(should) + '. ' + verdict + '.').run()
+      corr = ' A correction line of ' + fmtRand(diff) + ' was added to this payroll.'
+    }
+    await captureWagesDebug(c.env, { request_path: '/wages-admin/confirm-holiday-hours', request_method: 'POST', original_payload_json: JSON.stringify({ shift_id: shiftId, actual_end: actualEnd, paid, should, diff, by: admin.name }), rewritten_payload_json: '{}', rewrite_applied: 1, response_status: 302, response_location: safeReturn, response_error_text: '' })
+    return back(safeReturn + sep + 'msg=' + encodeURIComponent(r.display_name + ' ' + r.work_date + ': really worked until ' + actualEnd + ' — ' + verdict + ' (paid ' + fmtRand(paid) + ', should be ' + fmtRand(should) + ').' + corr))
+  } catch (err) {
+    return back(safeReturn + sep + 'error=' + encodeURIComponent('Could not confirm: ' + describeProxyError(err)))
+  }
+})
+
 app.post('/wages-admin/delete-draft', async (c) => {
   const db = c.env?.DB
   const admin = await adminUserFromCookie(c.req.raw.headers.get('cookie') || '')

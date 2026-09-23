@@ -22,7 +22,7 @@ export type PayrollDeps = {
   timeToMinutes: (t: string) => number | null
 }
 
-type PaidRow = { id: number, staff_id: number, display_name: string, payroll_rule: string, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, rate: number, work_type: string, outlet_venue: string, area: string, event_name: string, work_description: string, payroll_week_start: string | null, missed_previous_week: number, source_draft_id: number | null, payroll_note: string | null, calculation_version: number }
+type PaidRow = { id: number, staff_id: number, display_name: string, payroll_rule: string, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, rate: number, work_type: string, outlet_venue: string, area: string, event_name: string, work_description: string, payroll_week_start: string | null, missed_previous_week: number, source_draft_id: number | null, manager_update_reason?: string | null, payroll_note: string | null, calculation_version: number }
 type ReviewRow = { id: number, issue_key: string, status: string, severity: string, staff_id: number, staff_name: string, work_date: string, subject_source: string, subject_shift_id: number, compared_source: string, compared_shift_id: number | null, compared_payroll_week_start: string | null, warning_reason: string, issue_summary: string, original_hours: number | null, previously_paid_hours: number | null, system_proposed_payable_hours: number | null, approved_payable_hours: number | null, approved_start_time: string | null, approved_end_time: string | null, decision_type: string | null, decision_reason: string | null, reviewed_by_name: string | null, reviewed_at: string | null, system_snapshot_json: string | null, compared_snapshot_json: string | null }
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -51,7 +51,7 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
   const { db, weekStart, weekEnd } = deps
   const paidRes = await db.prepare(`SELECT w.id, w.staff_id, s.display_name, s.payroll_rule, w.work_date, w.start_time, w.end_time, w.hours_worked,
         COALESCE(w.gross_wage, w.total_amount, 0) AS amount, w.hourly_rate_snapshot AS rate, w.work_type, w.outlet_venue, w.area, w.event_name, w.work_description,
-        w.payroll_week_start, w.missed_previous_week, w.source_draft_id, w.payroll_note, w.calculation_version
+        w.payroll_week_start, w.missed_previous_week, w.source_draft_id, w.payroll_note, w.calculation_version, w.manager_update_reason
       FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id
       WHERE (w.work_date BETWEEN ? AND ? AND (w.payroll_week_start IS NULL OR w.payroll_week_start = ?))
          OR (w.payroll_week_start = ? AND w.work_date < ?)
@@ -136,7 +136,12 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     // Owner 2026-09-23: WAREHOUSE / VENUE clicked on a day partly paid earlier → the row IS the difference.
     const diffRv = reviewsForPaid(r).filter((v) => /^(rate_choice_|crew_pattern\|)/.test(v.issue_key || '') && v.status === 'RESOLVED').map((v) => ({ v, s: parseSnap(v.system_snapshot_json) })).filter((x) => x.s?.differenceOnly).sort((a, b) => b.v.id - a.v.id)[0]
     if (diffRv) pr = { amount: Number(r.amount || 0), rate: Number(r.rate || pr.rate), breakdown: `DIFFERENCE ONLY (${diffRv.s.placeDecision === 'warehouse' ? 'Warehouse R81,25/h' : 'Venue R95/h'} chosen by ${diffRv.s.placeDecidedBy || 'office'}, #${diffRv.v.id}): ${String(diffRv.s.differenceText || '').replace(/^DIFFERENCE ONLY: /, '')}` }
-    if (snap?.paidBefore && snap.approvedAmount !== undefined) pr = { amount: Number(snap.approvedAmount), rate: Number(snap.newRate || pr.rate), breakdown: `CORRECTION: already paid ${fmtR(Number(snap.alreadyPaid || 0))} earlier; ${Number(snap.rateCorrection || 0) ? 'rate correction ' + fmtR(Number(snap.rateCorrection)) + ' + ' : ''}extra ${Number(snap.extraHours || 0).toFixed(2)} h ${fmtR(Number(snap.extraAmount || 0))} = approved ${fmtR(Number(snap.approvedAmount))}` }
+    // Owner 2026-09-23: a MANAGER CORRECTION on the row (owner set the amount by hand — duplicates zeroed, dates fixed,
+    // place decided, holiday hours set) is the final word. The sheet pays the row amount and says why.
+    if (r.manager_update_reason) pr = { amount: Number(r.amount || 0), rate: Number(r.rate || pr.rate), breakdown: `OWNER CORRECTION: ${r.manager_update_reason}` }
+    // An "already paid" R0 decision is only applied when the row itself was zeroed by the office (otherwise the row's
+    // own amount is what the owner approved — e.g. the kept copy of a duplicate).
+    if (snap?.paidBefore && snap.approvedAmount !== undefined && !r.manager_update_reason && !(Number(snap.approvedAmount) === 0 && Number(r.amount || 0) > 0)) pr = { amount: Number(snap.approvedAmount), rate: Number(snap.newRate || pr.rate), breakdown: `CORRECTION: already paid ${fmtR(Number(snap.alreadyPaid || 0))} earlier; ${Number(snap.rateCorrection || 0) ? 'rate correction ' + fmtR(Number(snap.rateCorrection)) + ' + ' : ''}extra ${Number(snap.extraHours || 0).toFixed(2)} h ${fmtR(Number(snap.extraAmount || 0))} = approved ${fmtR(Number(snap.approvedAmount))}` }
     // System note: overlap/cross-check facts.
     const sameDay = prior.filter((p) => p.staff_id === r.staff_id && p.work_date === r.work_date)
     const overlap = sameDay.filter((p) => { const a = deps.timeToMinutes(r.start_time), b0 = deps.timeToMinutes(r.end_time), c = deps.timeToMinutes(p.start_time), d0 = deps.timeToMinutes(p.end_time); if (a === null || b0 === null || c === null || d0 === null) return false; const b = b0 <= a ? b0 + 1440 : b0, d = d0 <= c ? d0 + 1440 : d0; return a < d && c < b })
