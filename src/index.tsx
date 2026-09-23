@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { buildPayrollWorkbook } from './payroll-excel'
-import { runPaidBeforeCheck } from './paid-before'
+import { runPaidBeforeCheck, priceAgainstPaid, rowToEntry, rowToPaid, type Paid as PaidBeforeRow } from './paid-before'
 import { runCrewPatternCheck } from './crew-pattern'
 
 type Bindings = {
@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-22-16'
+const WAGES_UI_VERSION = 'v2026-09-23-2'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4141,6 +4141,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   const paidIds = new Set(paid.map((r) => r.id)), paidDraftIds = new Set(paid.map((r) => r.source_draft_id).filter(Boolean) as number[]), draftIds = new Set(drafts.map((d) => d.id))
   const reviews = reviewsAll.filter((v) => (v.subject_source === 'shift' && paidIds.has(v.subject_shift_id)) || (v.subject_source === 'draft' && (paidDraftIds.has(v.subject_shift_id) || draftIds.has(v.subject_shift_id))))
 
+
   // Cross-check source: everything paid to these workers on the missed real dates in EARLIER payrolls.
   const missedDates = Array.from(new Set(paid.filter((r) => r.work_date < weekStart).map((r) => r.work_date)))
   let prior: Array<{ id: number, staff_id: number, work_date: string, start_time: string, end_time: string, outlet_venue: string, payroll_week_start: string | null, work_type: string, hours_worked: number, amount: number }> = []
@@ -4157,6 +4158,27 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   const ratesRes = await db.prepare(`SELECT staff_id, work_type, hourly_rate FROM wage_work_rates WHERE active = 1 AND staff_id IN (${ph})`).bind(...staffIds).all()
   const workRates: Record<string, number> = {}
   for (const r of (ratesRes.results || []) as Array<{ staff_id: number, work_type: string, hourly_rate: number }>) workRates[r.staff_id + '|' + r.work_type] = Number(r.hourly_rate || 0)
+  // Owner 2026-09-23: the WAREHOUSE / VENUE buttons must show the DIFFERENCE when part of the day was already
+  // paid in an earlier payroll ("only suggest paying the difference"). Load the earlier-payroll rows for the
+  // days of every place-choice review, keyed by staff|date.
+  const placeRevs = reviewsAll.filter((v) => /^(rate_choice_|crew_pattern\|)/.test(v.issue_key || '') && v.status === 'OPEN')
+  const earlierPaidByDay: Record<string, PaidBeforeRow[]> = {}
+  if (placeRevs.length) {
+    const days = Array.from(new Set(placeRevs.map((v) => v.work_date)))
+    for (let i = 0; i < days.length; i += 40) {
+      const chunk = days.slice(i, i + 40)
+      try {
+        const er = await db.prepare(`SELECT w.id, w.staff_id, w.work_date, w.start_time, w.end_time, w.hours_worked, COALESCE(w.gross_wage, w.total_amount, 0) amount, COALESCE(w.hourly_rate_snapshot, 0) rate_paid, w.work_type, w.outlet_venue, w.area, w.work_description, w.payroll_week_start, w.source_draft_id, s.display_name, s.payroll_rule, s.hourly_rate
+            FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id
+            WHERE w.staff_id IN (${ph}) AND w.work_date IN (${chunk.map(() => '?').join(',')}) AND w.work_date < ? AND (w.payroll_week_start IS NULL OR w.payroll_week_start < ?)`).bind(...staffIds, ...chunk, weekStart, weekStart).all()
+        // "Earlier" = paid in a payroll BEFORE this one: the real date is before this week and the row was not
+        // carried into this payroll as a missed shift.
+        for (const r of (er.results || []) as any[]) { const k = r.staff_id + '|' + r.work_date; (earlierPaidByDay[k] ||= []).push(rowToPaid(r, String(r.display_name || ''), String(r.payroll_rule || ''), Number(workRates[r.staff_id + '|' + r.work_type] ?? r.hourly_rate ?? 0))) }
+      } catch (err) {}
+    }
+  }
+  const paidBeforeDeps = { db, weekStart, weekEnd, ownerPayKind, ownerPayForShift }
+
   // Bernie's recorded Warehouse / Event/Venue choices (review key rate_choice_warehouse_or_event|shift:ID).
   const rateChoiceByShift: Record<number, OwnerPayKind> = {}
   for (const v of reviewsAll) {
@@ -4228,15 +4250,54 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       const pw = st && en ? ownerPayForShift(wd, st, en, 'warehouse') : null
       const pv = st && en ? ownerPayForShift(wd, st, en, 'event') : null
       const workerSaid = sub?.workType ? `Worker selected “${escapeHtmlText(sub.workType)}”${sub.venue ? ` at “${escapeHtmlText(sub.venue)}”` : ''}.` : ''
+      // Owner 2026-09-23: if part of this day was ALREADY PAID in an earlier payroll, each button shows the
+      // DIFFERENCE (rate correction on the paid hours + the extra hours), with the working out — never the full day.
+      const subjLiveId = isDraft ? (cmpRowsByDraft[Number(v.subject_shift_id)]?.id ?? null) : Number(v.subject_shift_id)
+      const earlier = (earlierPaidByDay[v.staff_id + '|' + wd] || []).filter((p) => p.id !== subjLiveId && shiftsOverlap(st, en, p.start, p.end))
+      let diffW: ReturnType<typeof priceAgainstPaid> = null, diffV: ReturnType<typeof priceAgainstPaid> = null
+      if (earlier.length && st && en) {
+        const subjRow = { id: v.subject_shift_id, staff_id: v.staff_id, work_date: wd, start_time: st, end_time: en, hours_worked: sub?.hours ?? null, amount: 0, work_type: sub?.workType || '', outlet_venue: sub?.venue || '', area: sub?.area || '', work_description: sub?.workDescription || '', payroll_week_start: weekStart, source_draft_id: null }
+        const subj = rowToEntry(subjRow, isDraft ? 'draft' : 'shift', sub?.employee || '', staffBase[v.staff_id]?.payroll_rule || 'hourly', staffBase[v.staff_id]?.hourly_rate || 0)
+        diffW = priceAgainstPaid(paidBeforeDeps, subj, earlier, 'warehouse'); diffV = priceAgainstPaid(paidBeforeDeps, subj, earlier, 'event')
+      }
+      const R = fmtRand
+      // Owner 2026-09-23 — the sum must read in this order:
+      //   1. paid hours: what was paid last week (place, rate)   2. same hours at the chosen rate
+      //   3. difference (2 − 1)                                  4. + extra hours at the chosen rate  = amount to approve
+      const workingOut = (f: NonNullable<typeof diffW>, placeTxt: string, rate: number) => {
+        const ovTxt = earlier.map((p) => `${p.start}–${p.end}`).join(', ')
+        const paidPlace = Array.from(new Set(earlier.map((p) => p.work_type || p.venue || 'earlier').filter(Boolean))).join('/')
+        const paidRate = earlier.length === 1 ? earlier[0].rate_paid : (f.overlapHours ? f.alreadyPaid / f.overlapHours : 0)
+        const rr = (n: number) => Math.round(n * 100) / 100
+        const shouldHave = rr(f.alreadyPaid + f.rateCorrection)
+        const extraTxt = (diffW?.lines.find((l) => l.startsWith('• Extra hours')) || '').replace(/^• Extra hours /, '').replace(/: \d.*$/, '')
+        const rows = [
+          `<tr><td style="padding:1px 6px 1px 0;color:#111">1. ${ovTxt} — paid last week as ${escapeHtmlText(paidPlace)}</td><td style="text-align:right;white-space:nowrap;color:#111">${f.overlapHours.toFixed(2)} h × ${R(paidRate)} = <strong>${R(f.alreadyPaid)}</strong></td></tr>`,
+          `<tr><td style="padding:1px 6px 1px 0;color:#111">2. ${ovTxt} — should have been paid as ${placeTxt}</td><td style="text-align:right;white-space:nowrap;color:#111">${f.overlapHours.toFixed(2)} h × ${R(rate)} = <strong>${R(shouldHave)}</strong></td></tr>`,
+          `<tr><td style="padding:1px 6px 1px 0;color:#111">3. Difference (2 − 1)</td><td style="text-align:right;white-space:nowrap;color:#111">${R(shouldHave)} − ${R(f.alreadyPaid)} = <strong>${f.rateCorrection < 0 ? '−' : ''}${R(Math.abs(f.rateCorrection))}</strong></td></tr>`,
+          f.extraHours > 0 ? `<tr><td style="padding:1px 6px 1px 0;color:#111">4. Additional ${f.extraHours.toFixed(2)} h (${escapeHtmlText(extraTxt)}) at the ${placeTxt} rate</td><td style="text-align:right;white-space:nowrap;color:#111">${f.extraHours.toFixed(2)} h × ${R(rate)} = <strong>${R(f.extraAmount)}</strong>${f.extraAmount !== rr(f.extraHours * rate) ? `<br><span style="color:#333;font-size:10.5px">${placeTxt === 'Warehouse' && f.extraAmount < rr(f.extraHours * rate) ? 'less the unpaid 07:00–07:30 staff meeting (0,5 h = R40,63)' : 'priced by the rule (Sunday/holiday factor)'}</span>` : ''}</td></tr>` : '',
+          `<tr style="border-top:2px solid #111"><td style="padding:3px 6px 0 0;font-weight:800;color:#111">AMOUNT TO APPROVE (3 + 4)</td><td style="text-align:right;white-space:nowrap;font-weight:800;color:#111;font-size:13px">${R(f.stillDue)}</td></tr>`
+        ].filter(Boolean)
+        return `<table style="border-collapse:collapse;width:100%;font-size:11.5px;line-height:1.4;color:#111;margin-top:3px">${rows.join('')}</table>`
+      }
+      const alreadyBox = earlier.length ? `<div style="margin:0 0 6px;padding:6px 8px;border-radius:6px;background:rgba(248,113,113,.14);border:1px solid rgba(248,113,113,.5)">
+          <div style="font-weight:800;color:#fca5a5">ALREADY PAID for part of this day — the buttons below pay only the DIFFERENCE</div>
+          ${earlier.map((p) => `<div>Paid ${escapeHtmlText(p.start)}–${escapeHtmlText(p.end)} · ${escapeHtmlText(p.work_type || '—')} · ${escapeHtmlText(p.venue || '—')} · ${p.hours.toFixed(2)} h × ${R(p.rate_paid)} = <strong>${R(p.amount)}</strong> · shift #${p.id} · payroll ${escapeHtmlText(p.payroll_week_start || weekOfDate(p.work_date) || 'earlier')}</div>`).join('')}
+          <div>Now claims ${escapeHtmlText(st)}–${escapeHtmlText(en)} (${(sub?.hours ? Number(sub.hours) : hoursBetween(st, en)).toFixed(2)} h) — ${diffW ? `${diffW.extraHours.toFixed(2)} h of that is new (${escapeHtmlText(diffW.lines.find((l) => l.startsWith('• Extra hours'))?.replace(/^• Extra hours /, '').replace(/: \d.*$/, '') || '')})` : 'all inside what was paid'}.</div>
+        </div>` : ''
+      const btn = (val: string, bg: string, label: string, full: OwnerPriced | null, diff: typeof diffW, stripRe: RegExp, placeTxt: string, rate: number) => diff
+        ? `<button type="submit" name="choice" value="${val}" style="padding:6px 10px;border-radius:6px;border:0;background:${bg};color:#111;font-weight:800;cursor:pointer;text-align:left;min-width:300px;max-width:460px">${label} — approve <span style="font-size:14px">${R(diff.stillDue)}</span><div style="font-weight:400">${workingOut(diff, placeTxt, rate)}</div></button>`
+        : `<button type="submit" name="choice" value="${val}" style="padding:6px 10px;border-radius:6px;border:0;background:${bg};color:#111;font-weight:800;cursor:pointer;text-align:left">${label}${full ? `<br><span style="font-weight:600">${R(full.amount)}</span> <span style="font-weight:400;opacity:.8">(${escapeHtmlText(full.breakdown.replace(stripRe, ''))})</span>` : ''}</button>`
       return `<form method="post" action="/wages-admin/rate-choice" class="bw-review-decide" style="margin-top:6px;padding:8px;border-radius:8px;background:rgba(255,255,255,.05);font-size:12px">
       <input type="hidden" name="review_id" value="${v.id}">
       <input type="hidden" name="return_to" value="__RETURN__">
-      <div style="margin-bottom:6px"><strong>Where was he? ${workerSaid} Your click decides the place and the rate${isDraft ? ' — applied automatically when he final-submits' : ' — the row is re-priced now'}:</strong></div>
+      ${alreadyBox}
+      <div style="margin-bottom:6px"><strong>Where was he? ${workerSaid} Your click decides the place and the rate${isDraft ? ' — applied automatically when he final-submits' : (earlier.length ? ' — the row is set to the DIFFERENCE now' : ' — the row is re-priced now')}:</strong></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <button type="submit" name="choice" value="warehouse" style="padding:6px 10px;border-radius:6px;border:0;background:#93c5fd;color:#111;font-weight:800;cursor:pointer;text-align:left">WAREHOUSE — R81,25/h${pw ? `<br><span style="font-weight:600">${fmtRand(pw.amount)}</span> <span style="font-weight:400;opacity:.8">(${escapeHtmlText(pw.breakdown.replace(/^Warehouse: /, ''))})</span>` : ''}</button>
-        <button type="submit" name="choice" value="event" style="padding:6px 10px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer;text-align:left">VENUE — R95/h${pv ? `<br><span style="font-weight:600">${fmtRand(pv.amount)}</span> <span style="font-weight:400;opacity:.8">(${escapeHtmlText(pv.breakdown.replace(/^Venue\/event: /, ''))})</span>` : ''}</button>
+        ${btn('warehouse', '#93c5fd', 'WAREHOUSE — R81,25/h', pw, diffW, /^Warehouse: /, 'Warehouse', WAREHOUSE_HOURLY)}
+        ${btn('event', '#e2b93b', 'VENUE — R95/h', pv, diffV, /^Venue\/event: /, 'Venue', VENUE_HOURLY)}
       </div>
-      <div style="opacity:.6;margin-top:4px">Recorded on review #${v.id} with your name and the place chosen. ${isDraft ? 'Nothing is paid until the worker final-submits; the rate you chose is then used, whatever work type he picked.' : 'The shift amount is set to the chosen place. Nothing else changes.'}</div>
+      <div style="opacity:.6;margin-top:4px">Recorded on review #${v.id} with your name and the place chosen. ${isDraft ? 'Nothing is paid until the worker final-submits; the rate you chose is then used, whatever work type he picked.' : earlier.length ? 'The shift amount is set to the difference shown (what was paid earlier is not touched). Nothing else changes.' : 'The shift amount is set to the chosen place. Nothing else changes.'}</div>
     </form>`
     }
     if (snap?.paidBefore) {
@@ -5244,18 +5305,53 @@ app.post('/wages-admin/rate-choice', async (c) => {
     const row = await db.prepare(`SELECT id, staff_id, work_date, start_time, end_time, total_amount, gross_wage FROM wage_shifts WHERE id = ? AND staff_id = ?`).bind(rv.subject_shift_id, rv.staff_id).first<{ id: number, staff_id: number, work_date: string, start_time: string, end_time: string, total_amount: number, gross_wage: number }>()
     if (!row) return back(safeReturn + sep + 'error=' + encodeURIComponent('Paid shift #' + rv.subject_shift_id + ' for review #' + reviewId + ' no longer exists.'))
     const kind: OwnerPayKind = choice === 'warehouse' ? 'warehouse' : 'event'
-    const priced = ownerPayForShift(row.work_date, row.start_time, row.end_time, kind)
+    let priced = ownerPayForShift(row.work_date, row.start_time, row.end_time, kind)
     if (!priced) return back(safeReturn + sep + 'error=' + encodeURIComponent('Could not price shift #' + row.id + ' — times unreadable.'))
     const before = before0(row)
     const label = choice === 'warehouse' ? 'Warehouse' : 'Event/Venue'
+    // Owner 2026-09-23: if part of this day was already paid in an EARLIER payroll, the row pays only the
+    // DIFFERENCE at the chosen place (rate correction on the paid hours + the extra hours). Earlier row untouched.
+    let diffNote = ''
+    try {
+      const wk = row.payroll_week_start || currentProxyPayrollWeekStart()
+      const er = await db.prepare(`SELECT w.id, w.staff_id, w.work_date, w.start_time, w.end_time, w.hours_worked, COALESCE(w.gross_wage, w.total_amount, 0) amount, COALESCE(w.hourly_rate_snapshot, 0) rate_paid, w.work_type, w.outlet_venue, w.area, w.work_description, w.payroll_week_start, w.source_draft_id, s.display_name, s.payroll_rule, s.hourly_rate
+          FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id WHERE w.staff_id = ? AND w.work_date = ? AND w.id <> ? AND w.work_date < ? AND (w.payroll_week_start IS NULL OR w.payroll_week_start < ?)`).bind(row.staff_id, row.work_date, row.id, wk, wk).all()
+      const earlier = ((er.results || []) as any[]).filter((p) => shiftsOverlap(row.start_time, row.end_time, p.start_time, p.end_time)).map((p) => rowToPaid(p, String(p.display_name || ''), String(p.payroll_rule || ''), Number(p.hourly_rate || 0)))
+      if (earlier.length) {
+        const full = await db.prepare(`SELECT w.*, COALESCE(w.gross_wage, w.total_amount, 0) amount, s.display_name, s.payroll_rule, s.hourly_rate FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id WHERE w.id = ?`).bind(row.id).first<any>()
+        const subj = rowToEntry(full, 'shift', String(full?.display_name || ''), String(full?.payroll_rule || 'hourly'), Number(full?.hourly_rate || 0))
+        const f = priceAgainstPaid({ db, weekStart: wk, weekEnd: proxyEndOfPayrollWeek(wk), ownerPayKind, ownerPayForShift }, subj, earlier, kind)
+        if (f) {
+          const ovTxt = earlier.map((p) => p.start + '–' + p.end).join(', ')
+          const paidPlace = Array.from(new Set(earlier.map((p) => p.work_type || p.venue || 'earlier'))).join('/')
+          const paidRate = earlier.length === 1 ? earlier[0].rate_paid : (f.overlapHours ? Math.round(f.alreadyPaid / f.overlapHours * 100) / 100 : 0)
+          const shouldHave = Math.round((f.alreadyPaid + f.rateCorrection) * 100) / 100
+          const rateNum = kind === 'warehouse' ? WAREHOUSE_HOURLY : VENUE_HOURLY
+          diffNote = ' DIFFERENCE ONLY: (1) ' + ovTxt + ' paid last week as ' + paidPlace + ' ' + f.overlapHours.toFixed(2) + ' h × ' + fmtRand(paidRate) + ' = ' + fmtRand(f.alreadyPaid) + ' (' + earlier.map((p) => 'shift #' + p.id + ', payroll ' + (p.payroll_week_start || 'earlier')).join('; ') + '); (2) same hours as ' + label + ' ' + f.overlapHours.toFixed(2) + ' h × ' + fmtRand(rateNum) + ' = ' + fmtRand(shouldHave) + '; (3) difference ' + fmtRand(shouldHave) + ' − ' + fmtRand(f.alreadyPaid) + ' = ' + (f.rateCorrection < 0 ? '−' : '') + fmtRand(Math.abs(f.rateCorrection)) + (f.extraHours > 0 ? '; (4) additional ' + f.extraHours.toFixed(2) + ' h × ' + fmtRand(rateNum) + ' = ' + fmtRand(f.extraAmount) : '') + '; AMOUNT TO PAY (3 + 4) = ' + fmtRand(f.stillDue)
+          priced = { ...priced, amount: f.stillDue, breakdown: priced.breakdown + ' →' + diffNote }
+        }
+      }
+    } catch (err) {}
     const note = 'Rate rules 2026-09-15: ' + label + ' chosen by ' + admin.name + ' (review #' + reviewId + ', was ' + fmtRand(before) + '): ' + priced.breakdown
     await db.prepare(`UPDATE wage_shifts SET total_amount = ?, gross_wage = ?, hourly_rate_snapshot = ?, calculation_version = ?,
           payroll_note = CASE WHEN COALESCE(payroll_note,'') = '' THEN ? ELSE payroll_note || ' | ' || ? END, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND staff_id = ?`).bind(priced.amount, priced.amount, priced.hourlyRate, OWNER_RATE_RULES_VERSION, note, note, row.id, row.staff_id).run()
-    await db.prepare(`UPDATE wage_payroll_reviews SET status = 'RESOLVED', decision_type = 'approve_original', decision_reason = ?, reviewed_by_user_id = ?, reviewed_by_name = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'OPEN'`)
-      .bind(label + ' rate chosen — shift #' + row.id + ' ' + fmtRand(before) + ' → ' + fmtRand(priced.amount) + ' (' + priced.breakdown + ')', admin.id || null, admin.name, reviewId).run()
+    let snapS: any = {}; try { snapS = JSON.parse(rv.system_snapshot_json || '{}') } catch (err) {}
+    snapS.placeDecision = kind; snapS.placeDecidedBy = admin.name; snapS.rowAmountAfter = priced.amount; if (diffNote) { snapS.differenceOnly = 1; snapS.differenceText = diffNote.trim() }
+    // The difference already settles the overlap with the earlier payment — hour-based overlap / already-paid
+    // reviews on this same entry are superseded (kept, marked VOID with the reason).
+    if (diffNote) {
+      try {
+        await db.prepare(`UPDATE wage_payroll_reviews SET status = 'VOID', void_reason = ?, voided_by_name = ?, voided_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE id <> ? AND staff_id = ? AND status IN ('OPEN','RESOLVED') AND (issue_key LIKE 'paid_before|%' OR issue_key LIKE 'manual_overlap_review|%' OR warning_kind IN ('previous_payroll_duplicate','duplicate_shift','time_location_conflict'))
+              AND ((subject_source = 'shift' AND subject_shift_id = ?) OR (subject_source = 'draft' AND subject_shift_id = (SELECT source_draft_id FROM wage_shifts WHERE id = ?)))`)
+          .bind('Superseded by review #' + reviewId + ' (' + label + ' — difference only): shift #' + row.id + ' now pays ' + fmtRand(priced.amount) + ' =' + diffNote, admin.name, reviewId, row.staff_id, row.id, row.id).run()
+      } catch (err) {}
+    }
+    await db.prepare(`UPDATE wage_payroll_reviews SET status = 'RESOLVED', decision_type = 'approve_original', decision_reason = ?, system_snapshot_json = ?, reviewed_by_user_id = ?, reviewed_by_name = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'OPEN'`)
+      .bind(label + ' rate chosen — shift #' + row.id + ' ' + fmtRand(before) + ' → ' + fmtRand(priced.amount) + ' (' + priced.breakdown + ')', JSON.stringify(snapS), admin.id || null, admin.name, reviewId).run()
     await captureWagesDebug(c.env, { request_path: '/wages-admin/rate-choice', request_method: 'POST', original_payload_json: JSON.stringify({ review_id: reviewId, shift_id: row.id, choice, before, by: admin.name }), rewritten_payload_json: JSON.stringify({ amount: priced.amount, rate: priced.hourlyRate, breakdown: priced.breakdown }), rewrite_applied: 1, response_status: 302, response_location: safeReturn, response_error_text: '' })
-    return back(safeReturn + sep + 'msg=' + encodeURIComponent('Review #' + reviewId + ': ' + label + ' chosen by ' + admin.name + '. Shift #' + row.id + ' ' + fmtRand(before) + ' → ' + fmtRand(priced.amount) + ' (' + priced.breakdown + ').') + '#bw-review-' + reviewId)
+    return back(safeReturn + sep + 'msg=' + encodeURIComponent('Review #' + reviewId + ': ' + label + ' chosen by ' + admin.name + '. Shift #' + row.id + ' ' + fmtRand(before) + ' → ' + fmtRand(priced.amount) + (diffNote ? ' — difference only, earlier payment not touched.' : '') + ' (' + priced.breakdown + ').') + '#bw-review-' + reviewId)
   } catch (err) {
     return back(safeReturn + sep + 'error=' + encodeURIComponent('Could not record the rate choice: ' + describeProxyError(err)))
   }

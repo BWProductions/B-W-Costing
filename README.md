@@ -274,3 +274,6 @@ from→to). See `EDIT_AFTER_SIGN_EMAILS` in `src/routes/field.ts`.
 - Partial approved hours priced by place on the dashboard green figure and in `payroll-excel.ts` (honours WAREHOUSE/VENUE clicks on rate-choice AND crew-pattern reviews); place/petrus/holiday reviews excluded from "approved hours" decisions.
 - Overlap box: subject drafts that became paid rows show "final-submitted → shift #… (R… on the row)"; compared drafts looked up via `source_draft_id` (chunked by 50).
 - Givemore Thu 17 Sep: #9996 reopened → 4.00 h; #9944 voided (superseded); backup `docs/restore-2026-09-23-givemore/`.
+
+## Restore point 23 Sep 2026 (2) — `restore-2026-09-23-difference` (live v2026-09-23-2)
+- Rate-choice / crew-pattern WAREHOUSE / VENUE buttons: when the entry overlaps a row paid in an EARLIER payroll (`work_date < weekStart` and `payroll_week_start` null/earlier), each button shows the 4-line sum (paid last week → same hours at chosen rate → difference → + additional hours = amount to approve) via `priceAgainstPaid()` in `paid-before.ts` (engine forced to a place). `/wages-admin/rate-choice` sets the row to the difference, writes the sum to `payroll_note`, snapshot `differenceOnly/differenceText`, and voids superseded overlap/paid_before reviews on the same entry. `payroll-excel.ts` shows "DIFFERENCE ONLY …" for such rows.

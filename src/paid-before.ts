@@ -28,8 +28,8 @@ export type Deps = {
   ownerPayForShift: (dateIso: string, start: string, end: string, kind: PayKind) => { amount: number; hourlyRate: number; breakdown: string } | null
 }
 
-type Entry = { source: 'draft' | 'shift'; id: number; draftId: number | null; staff_id: number; name: string; payroll_rule: string; work_date: string; start: string; end: string; work_type: string; venue: string; area: string; descr: string; hours: number; amount: number; payroll_week_start: string | null; own_rate: number }
-type Paid = Entry & { rate_paid: number }
+export type Entry = { source: 'draft' | 'shift'; id: number; draftId: number | null; staff_id: number; name: string; payroll_rule: string; work_date: string; start: string; end: string; work_type: string; venue: string; area: string; descr: string; hours: number; amount: number; payroll_week_start: string | null; own_rate: number }
+export type Paid = Entry & { rate_paid: number }
 
 const toMin = (t: string) => { const m = /^(\d{1,2}):(\d{2})/.exec(t || ''); return m ? Number(m[1]) * 60 + Number(m[2]) : null }
 const hm = (m: number) => String(Math.floor(((m % 1440) + 1440) % 1440 / 60)).padStart(2, '0') + ':' + String(((m % 1440) + 1440) % 1440 % 60).padStart(2, '0')
@@ -195,3 +195,20 @@ export async function runPaidBeforeCheck(d: Deps, opts: { dryRun?: boolean } = {
 }
 
 export function fmtRand(n: number) { return R(n) }
+
+// Owner 2026-09-23: "That has already been paid for the missed shift from 8 to 4, so we should only suggest
+// paying the difference." Price ONE entry against the rows already paid for that day, at a FORCED place
+// (warehouse / event) — used by the WAREHOUSE / VENUE buttons so each shows the difference, not the full day.
+export function rowToEntry(r: any, source: 'draft' | 'shift', name: string, payrollRule: string, ownRate: number): Entry {
+  const s = span({ start: r.start_time, end: r.end_time }); const h = r.hours_worked != null && Number(r.hours_worked) > 0 ? Number(r.hours_worked) : (s ? (s[1] - s[0]) / 60 : 0)
+  return { source, id: Number(r.id), draftId: source === 'draft' ? Number(r.id) : (r.source_draft_id ? Number(r.source_draft_id) : null), staff_id: Number(r.staff_id), name, payroll_rule: payrollRule, work_date: String(r.work_date), start: String(r.start_time || ''), end: String(r.end_time || ''), work_type: String(r.work_type || ''), venue: String(r.outlet_venue || ''), area: String(r.area || ''), descr: String(r.work_description || ''), hours: h, amount: Number(r.amount || 0), payroll_week_start: r.payroll_week_start ? String(r.payroll_week_start) : null, own_rate: ownRate }
+}
+export function rowToPaid(r: any, name: string, payrollRule: string, ownRate: number): Paid {
+  const e = rowToEntry(r, 'shift', name, payrollRule, ownRate)
+  const rp = Number(r.rate_paid || r.hourly_rate_snapshot || 0) || (e.hours ? r2(e.amount / e.hours) : 0)
+  return { ...e, rate_paid: rp }
+}
+export function priceAgainstPaid(d: Deps, subject: Entry, paidRows: Paid[], forceKind: PayKind): PaidBeforeFlag | null {
+  const dd: Deps = { ...d, ownerPayKind: () => forceKind }
+  return computeFlags(dd, [subject], paidRows.filter((p) => p.id !== subject.id))[0] || null
+}

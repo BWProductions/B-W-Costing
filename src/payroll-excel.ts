@@ -133,6 +133,9 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
       else if (pex.status === 'RESOLVED') pr = { ...pr, breakdown: pr.breakdown.replace(/ HELD — office to approve.*$/, '') + ` (${Number(ps?.extraHours || 0).toFixed(2)} h outside 06–16 decided not payable, #${pex.id})` }
       else pr = { ...pr, breakdown: pr.breakdown + ` — STILL OPEN #${pex.id}: R0 paid for the extra time until the office decides` }
     }
+    // Owner 2026-09-23: WAREHOUSE / VENUE clicked on a day partly paid earlier → the row IS the difference.
+    const diffRv = reviewsForPaid(r).filter((v) => /^(rate_choice_|crew_pattern\|)/.test(v.issue_key || '') && v.status === 'RESOLVED').map((v) => ({ v, s: parseSnap(v.system_snapshot_json) })).filter((x) => x.s?.differenceOnly).sort((a, b) => b.v.id - a.v.id)[0]
+    if (diffRv) pr = { amount: Number(r.amount || 0), rate: Number(r.rate || pr.rate), breakdown: `DIFFERENCE ONLY (${diffRv.s.placeDecision === 'warehouse' ? 'Warehouse R81,25/h' : 'Venue R95/h'} chosen by ${diffRv.s.placeDecidedBy || 'office'}, #${diffRv.v.id}): ${String(diffRv.s.differenceText || '').replace(/^DIFFERENCE ONLY: /, '')}` }
     if (snap?.paidBefore && snap.approvedAmount !== undefined) pr = { amount: Number(snap.approvedAmount), rate: Number(snap.newRate || pr.rate), breakdown: `CORRECTION: already paid ${fmtR(Number(snap.alreadyPaid || 0))} earlier; ${Number(snap.rateCorrection || 0) ? 'rate correction ' + fmtR(Number(snap.rateCorrection)) + ' + ' : ''}extra ${Number(snap.extraHours || 0).toFixed(2)} h ${fmtR(Number(snap.extraAmount || 0))} = approved ${fmtR(Number(snap.approvedAmount))}` }
     // System note: overlap/cross-check facts.
     const sameDay = prior.filter((p) => p.staff_id === r.staff_id && p.work_date === r.work_date)

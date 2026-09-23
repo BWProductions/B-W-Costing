@@ -1,7 +1,7 @@
 ---
 title: "B&W Productions — Wages System: Complete Rules & Handover"
 subtitle: "Every agreed rule and regulation, everything built and changed 12–22 September 2026, how the office reviews work, and how to restore"
-date: "23 September 2026 · live version v2026-09-22-16 · restore tag restore-2026-09-23-reopen"
+date: "23 September 2026 · live version v2026-09-23-2 · restore tag restore-2026-09-23-difference"
 ---
 
 # Part 1 — Where things are
@@ -162,7 +162,14 @@ Known quirk (unchanged): the engine sometimes compares a draft with its own fina
 2. **Crew pattern — ORANGE.** On any day with 4 or more workers, if the minority place is 25 % or less of the crew, each minority entry is flagged with the names: *"CREW PATTERN: 7 of 8 workers say Warehouse on Mon 21 Sep (names) — X says venue 'FNB Stadium'. Was he really there? Confirm the venue, or re-price as Warehouse."* And the reverse: *"5 of 6 were at a venue (FNB Stadium) — X says Warehouse. Check he was not at the venue (R95/h would be due)."*
 3. **Decision — two unambiguous buttons, on paid rows AND drafts**: *"Where was he? Worker selected 'Warehouse Team' at 'Warehouse'. Your click decides the place and the rate:"* **WAREHOUSE — R81,25/h · R650,00 (8 h × R81,25)** or **VENUE — R95/h · R760,00 (8 h × R95)**. Each button shows the rate and the rand it produces. On a paid row the row is re-priced immediately. On a draft the place is recorded with your name; **when the worker final-submits, the rate you chose is used automatically, whatever work type he picked**, and the paid row's note says "Place decided by office (review #…, name): WAREHOUSE R81,25/h". Nothing is paid before Final Submission.
 4. **Area field is read too — RED (owner 22 Sep, v2026-09-22-15).** Owner: *"even though he says 'warehouse' underneath, it says 'Pretoria FNB'. You should have picked up that the team was at Pretoria and FNB."* If the worker selects Warehouse Team / venue "Warehouse" but types a real place in the **Area** box (anything that is not Meyerton / Henley / Randvaal / the warehouse address), the entry is flagged: *"WAREHOUSE CLAIMED BUT AREA SAYS 'Pretoria and fnb' … that is a venue, not the warehouse. Other workers were at Botanical garden Pretoria that day."* Same WAREHOUSE / VENUE buttons decide it. First live case: Givemore Thu 17 Sep (#10073).
-5. **Excluded**: Petrus, gardener House work, Music Bus, Sharleen (own rules). A row that already has a Rate-choice flag is not flagged twice. Decided flags never re-open; flags void themselves when the entry is corrected or deleted.
+5. **Part of the day already paid in an EARLIER payroll → the buttons pay only the DIFFERENCE (owner 23 Sep, v2026-09-23-1/-2).** Owner: *"That has already been paid for the missed shift from 8 to 4, so we should only suggest paying the difference … show me your working out."* When the entry overlaps a row paid in a previous payroll, a red box lists what was paid (times, place, hours × rate = rand, shift #, payroll) and each button shows the sum **in the owner's order**:
+   1. paid hours — what was paid last week (e.g. 08:00–16:00 as House/Garden, 8 h × R62,50 = R500,00)
+   2. the same hours at the chosen place (8 h × R95 = R760,00)
+   3. difference (2 − 1) = R260,00
+   4. additional hours not yet paid at the chosen rate (4 h × R95 = R380,00; Warehouse loses the 07:00–07:30 meeting)
+   **AMOUNT TO APPROVE (3 + 4)** — e.g. Givemore Thu 17 Sep: **Warehouse R434,38 · Venue R640,00**.
+   The click sets the row to that amount (last week's row untouched), writes the 4-line sum into the row's payroll note and the Excel breakdown ("DIFFERENCE ONLY …"), and voids the hour-based overlap / already-paid reviews on the same entry as superseded. Uses the same engine as the Already-paid rule (Part 5), forced to each place. Without an earlier payment the buttons show the full-day amounts as before.
+6. **Excluded**: Petrus, gardener House work, Music Bus, Sharleen (own rules). A row that already has a Rate-choice flag is not flagged twice. Decided flags never re-open; flags void themselves when the entry is corrected or deleted.
 
 First live run (22 Sep): one flag — #9955 Takavaudza, Mon 21 Sep, "5 of 6 at a venue (FNB Stadium), this one says Warehouse" — a genuine question for the office.
 
@@ -220,6 +227,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 **23 Sep 2026 (v2026-09-22-15, v2026-09-22-16)**
 * **↺ Reopen** on every decided review (Part 5c). **Area-aware crew check** (Part 5b). Overlap box now shows a draft that has since been final-submitted as "final-submitted → shift #… in this payroll (R… on the row)" instead of "not yet final-submitted"; compared drafts show their real hours/amount.
 * **Approved hours priced by place** on the dashboard and in the Excel; WAREHOUSE / VENUE clicks on crew-pattern flags are honoured in the pricing, and place/Petrus/holiday reviews no longer count as an "approved hours" decision.
+* **WAREHOUSE / VENUE buttons pay only the difference (v2026-09-23-1/-2)** — see Part 5b item 5. Owner rejected the full-day buttons on Givemore #10073 ("R934,38 / R1 140 is wrong — only suggest the difference"). Type-checker caught a second use-before-declaration bug before production.
 * **Givemore Thu 17 Sep** (owner instruction): 08:00–16:00 already paid R500 in payroll 12–18 Sep (shift #9705); only 06:00–08:00 + 16:00–18:00 = **4.00 h due**. #9996 reopened and re-decided 4.00 h; #9944 (the earlier R475 = 4 h + R150 rate correction) voided as superseded, old decision kept in its log; paid row #9789 stays 12 h claimed / 4 h approved → **R325** (Warehouse) or **R380** once VENUE is clicked on #10073 ("Pretoria and fnb"). Backup `docs/restore-2026-09-23-givemore/`. Fixed a bug in the area check that would have crashed the dashboard on the first area flag (caught by the type-checker before production).
 
 # Part 8 — Payroll 12–18 Sep 2026 (paid 17 Sep) — final figures
@@ -228,7 +236,8 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 # Part 9 — Restore points
 | Tag / folder | State |
 |---|---|
-| `restore-2026-09-23-reopen` | **Live now (v2026-09-22-16)** — Reopen a decided review, area-aware crew check, partial hours priced by place. |
+| `restore-2026-09-23-difference` | **Live now (v2026-09-23-2)** — WAREHOUSE / VENUE buttons pay only the DIFFERENCE when part of the day was paid in an earlier payroll (4-line sum). |
+| `restore-2026-09-23-reopen` | v2026-09-22-16 — Reopen a decided review, area-aware crew check, partial hours priced by place. |
 | `restore-2026-09-22-petrus-v5` | v2026-09-22-14 — Petrus v5 rule + rent deduction removed. To undo only the deduction removal: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2` |
 | `restore-2026-09-21-already-paid` | v2026-09-21-2 (already-paid rule, old Petrus rule, rent deduction still active) |
 | `restore-2026-09-18-rolled-back` | v2026-09-16-2 after the 18 Sep rollback |
@@ -242,7 +251,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 git checkout restore-2026-09-22-petrus-v5
 npm run build
 npx wrangler pages deploy dist --project-name bw-productions --branch main --commit-dirty=true
-curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-22-16
+curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-23-2
 ```
 To go back to before the already-paid rule: `git checkout restore-2026-09-18-rolled-back` and deploy (expect v2026-09-16-2); any `paid_before|…` reviews can then be deleted (they are the only rows it writes).
 
