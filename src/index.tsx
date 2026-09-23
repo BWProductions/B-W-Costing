@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-22-12'
+const WAGES_UI_VERSION = 'v2026-09-22-14'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4085,9 +4085,14 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
 
   const draftRes = await db.prepare(`SELECT d.id, d.staff_id, s.display_name, d.work_date, d.start_time, d.end_time, d.outlet_venue, d.work_type, d.work_description, d.status, d.missed_previous_week
       FROM wage_shift_drafts d JOIN wage_staff s ON s.id = d.staff_id
-      WHERE d.status = 'draft' AND ((d.work_date BETWEEN ? AND ?) OR d.payroll_week_start = ? OR (d.missed_previous_week = 1 AND d.work_date >= date(?, '-7 days') AND d.work_date < ?))
-      ORDER BY s.display_name, d.work_date, d.start_time`).bind(weekStart, weekEnd, weekStart, weekStart, weekStart).all()
+      WHERE d.status = 'draft' AND d.final_shift_id IS NULL AND ((d.work_date BETWEEN ? AND ?) OR d.payroll_week_start = ? OR (d.missed_previous_week = 1 AND d.work_date >= date(?, '-7 days') AND d.work_date < ?)
+        OR (? = 1 AND d.work_date < date(?, '-7 days')))
+      ORDER BY s.display_name, d.work_date, d.start_time`).bind(weekStart, weekEnd, weekStart, weekStart, weekStart, weekStart === currentProxyPayrollWeekStart() ? 1 : 0, weekStart).all()
   let drafts = (draftRes.results || []) as AdminDraftRow[]
+  // Owner 2026-09-22: a draft older than the capture window (before last Saturday) can never be
+  // final-submitted — it must not linger. Shown red with a Delete button (current week view only).
+  const captureStart = formatProxyIsoDate(new Date(parseProxyIsoDate(weekStart)!.getTime() - 7 * 86400000))
+  const isStaleDraft = (d: AdminDraftRow) => d.work_date < captureStart
 
   if (employeeFilter && /^\d+$/.test(employeeFilter)) {
     const sid = Number(employeeFilter)
@@ -4104,6 +4109,12 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     await db.prepare(`UPDATE wage_payroll_reviews SET status = 'VOID', void_reason = 'Auto: the "other overlapping entry" is this entry itself — the draft became this paid row on Final Submission. Nothing was billed twice.', voided_by_name = 'system self-compare check', voided_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
         WHERE status = 'OPEN' AND subject_source = 'draft' AND compared_source = 'shift' AND staff_id IN (${ph})
           AND EXISTS (SELECT 1 FROM wage_shift_drafts d WHERE d.id = wage_payroll_reviews.subject_shift_id AND d.final_shift_id = wage_payroll_reviews.compared_shift_id)`).bind(...staffIds).run()
+  } catch (err) {}
+  // Owner 2026-09-22: a review on a draft the worker has since deleted can never be decided — void it.
+  try {
+    await db.prepare(`UPDATE wage_payroll_reviews SET status = 'VOID', void_reason = 'Auto: the draft this review was about no longer exists (deleted by the worker or the office). Nothing to decide.', voided_by_name = 'system ghost-draft check', voided_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE status = 'OPEN' AND subject_source = 'draft' AND staff_id IN (${ph})
+          AND NOT EXISTS (SELECT 1 FROM wage_shift_drafts d WHERE d.id = wage_payroll_reviews.subject_shift_id)`).bind(...staffIds).run()
   } catch (err) {}
   const revRes = await db.prepare(`SELECT id, issue_key, status, severity, staff_id, work_date, subject_source, subject_shift_id, compared_source, compared_shift_id, compared_payroll_week_start, original_hours, compared_hours, previously_paid_hours,
         system_proposed_payable_hours, approved_payable_hours, approved_start_time, approved_end_time, decision_type, decision_reason, reviewed_by_name, issue_summary, warning_reason, system_snapshot_json, subject_snapshot_json, compared_snapshot_json
@@ -4348,6 +4359,8 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   // manager-correction form (/admin/wages/shifts/:id/edit) — nothing new in the backend.
   const editHref = (shiftId: number) => `/admin/wages/shifts/${shiftId}/edit?from=${encodeURIComponent(weekStart)}&to=${encodeURIComponent(weekEnd)}&sort=employee`
   const editBtn = (shiftId: number, label = '✎ Edit shift') => `<a href="${editHref(shiftId)}" style="display:inline-block;margin-top:6px;padding:4px 9px;border-radius:7px;border:1px solid rgba(226,185,59,.6);color:#e2b93b;font-weight:700;font-size:12px;text-decoration:none;white-space:nowrap" title="Opens the manager correction form for this paid shift (asks for a reason; keeps the audit trail)">${label}</a>`
+  // Owner 2026-09-22: office can remove an unsubmitted draft that should not be on the system (stale or wrong).
+  const deleteDraftBtn = (draftId: number, workDate: string) => `<form method="post" action="/wages-admin/delete-draft" style="display:inline" onsubmit="return confirm('Delete this unsubmitted draft (${escapeHtmlText(workDate)})? It is removed from the worker\'s app and the dashboard. A backup is kept in the log.')"><input type="hidden" name="draft_id" value="${draftId}"><input type="hidden" name="return_to" value="__RETURN__"><button type="submit" style="display:inline-block;margin-top:6px;padding:4px 9px;border-radius:7px;border:1px solid rgba(252,165,165,.7);background:transparent;color:#fca5a5;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap" title="Remove this draft from the system">🗑 Delete draft</button></form>`
   const workerAppBtn = (_staffId: number, draftId: number, label = '✎ Edit shift') => `<a href="/wages-admin/edit-draft/${draftId}" target="_blank" rel="noopener" style="display:inline-block;margin-top:6px;padding:4px 9px;border-radius:7px;border:1px solid rgba(226,185,59,.6);color:#e2b93b;font-weight:700;font-size:12px;text-decoration:none;white-space:nowrap" title="Not final-submitted yet — opens this draft's edit page (as the office) in a new tab">${label}</a>`
 
   function missedCell(r: AdminPaidRow) {
@@ -4464,7 +4477,9 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         ${(() => { const dec = revs.filter((v) => v.status === 'RESOLVED').sort((a, b) => b.id - a.id)[0]; let ds: any = null; try { ds = dec?.system_snapshot_json ? JSON.parse(dec.system_snapshot_json) : null } catch (err) {}
           if (ds?.paidBefore && ds.approvedAmount !== undefined) return td(`<span style="color:#86efac;font-weight:700">${Number(dec.approved_payable_hours || 0).toFixed(2)} h extra</span>`, 'text-align:right;white-space:nowrap') + td(`<span style="color:#86efac;font-weight:700">${fmtRand(Number(ds.approvedAmount))}</span><div style="font-size:11px;opacity:.7">approved · pays when final-submitted</div>`, 'text-align:right;white-space:nowrap')
           return td('<span style="opacity:.5">not paid</span>', 'text-align:right;white-space:nowrap') + td('<span style="opacity:.5">R0,00</span>', 'text-align:right;white-space:nowrap') })()}
-        ${td((isMissed ? pill('MISSED SHIFT – actual date ' + escapeHtmlText(proxyLongDate(d.work_date)) + ' – ' + escapeHtmlText(d.work_description || ''), '#fdecec', '#7f1d1d') + '<div style="font-size:12px;opacity:.8">Saved temporarily by the worker; will be paid in this payroll once Final Submission is pressed.</div>' : '<div style="font-size:12px;opacity:.8">Saved temporarily by the worker; not yet final-submitted, so not yet in the payroll.</div>') + `<div>${workerAppBtn(sid, d.id)}</div>`)}
+        ${td((isStaleDraft(d)
+          ? pill('STALE DRAFT – ' + escapeHtmlText(proxyLongDate(d.work_date)) + ' is before the capture window (' + escapeHtmlText(captureStart) + ')', '#7f1d1d', '#fff') + `<div style="font-size:12px;opacity:.9;margin-top:3px">Cannot be final-submitted any more. If this day was paid in an earlier payroll it must be removed; if it was genuinely never paid, tell the office and it is paid as a correction. ${deleteDraftBtn(d.id, d.work_date)}</div>`
+          : isMissed ? pill('MISSED SHIFT – actual date ' + escapeHtmlText(proxyLongDate(d.work_date)) + ' – ' + escapeHtmlText(d.work_description || ''), '#fdecec', '#7f1d1d') + '<div style="font-size:12px;opacity:.8">Saved temporarily by the worker; will be paid in this payroll once Final Submission is pressed.</div>' : '<div style="font-size:12px;opacity:.8">Saved temporarily by the worker; not yet final-submitted, so not yet in the payroll.</div>') + `<div>${workerAppBtn(sid, d.id)} ${isStaleDraft(d) ? '' : deleteDraftBtn(d.id, d.work_date)}</div>`)}
         ${td(revs.length ? reviewCell(revs, true, workerAppBtn(sid, d.id)) : workerAppBtn(sid, d.id), 'min-width:260px')}
         ${td(workerAppBtn(sid, d.id, '✎'), 'text-align:center;white-space:nowrap')}
       </tr>`
@@ -5270,6 +5285,34 @@ app.post('/wages-admin/petrus-extra', async (c) => {
     return back(safeReturn + sep + 'msg=' + encodeURIComponent('Review #' + reviewId + ': ' + label + ' by ' + admin.name + '. Shift #' + row.id + ' ' + fmtRand(before) + ' → ' + fmtRand(after) + '.') + '#bw-review-' + reviewId)
   } catch (err) {
     return back(safeReturn + sep + 'error=' + encodeURIComponent('Could not record the Petrus extra-time decision: ' + describeProxyError(err)))
+  }
+})
+
+// Owner 2026-09-22: delete an unsubmitted draft. Office only. Backed up to wage_debug_capture; reviews on it voided.
+app.post('/wages-admin/delete-draft', async (c) => {
+  const db = c.env?.DB
+  const admin = await adminUserFromCookie(c.req.raw.headers.get('cookie') || '')
+  const back = (to: string) => c.redirect(to, 303)
+  if (!db) return back('/admin/wages?error=' + encodeURIComponent('Database not available.'))
+  if (!admin) return back('/login?next=' + encodeURIComponent('/admin/wages'))
+  let form: FormData
+  try { form = await c.req.raw.formData() } catch (err) { return back('/admin/wages?error=' + encodeURIComponent('Could not read the delete form.')) }
+  const draftId = Number(normalizeProxyFieldValue(form.get('draft_id')))
+  const returnTo = normalizeProxyFieldValue(form.get('return_to')) || '/admin/wages'
+  const safeReturn = /^\/admin\/wages(\?|$)/.test(returnTo) ? returnTo : '/admin/wages'
+  const sep = safeReturn.includes('?') ? '&' : '?'
+  if (!draftId) return back(safeReturn + sep + 'error=' + encodeURIComponent('No draft id.'))
+  try {
+    const d = await db.prepare(`SELECT d.*, s.display_name FROM wage_shift_drafts d JOIN wage_staff s ON s.id = d.staff_id WHERE d.id = ?`).bind(draftId).first<any>()
+    if (!d) return back(safeReturn + sep + 'error=' + encodeURIComponent('Draft #' + draftId + ' no longer exists.'))
+    if (d.final_shift_id || d.status !== 'draft') return back(safeReturn + sep + 'error=' + encodeURIComponent('Draft #' + draftId + ' was already final-submitted (paid shift #' + d.final_shift_id + ') — use the manager correction on the paid shift instead.'))
+    await captureWagesDebug(c.env, { request_path: '/wages-admin/delete-draft', request_method: 'POST', original_payload_json: JSON.stringify(d), rewritten_payload_json: JSON.stringify({ deleted_by: admin.name }), rewrite_applied: 1, response_status: 303, response_location: safeReturn, response_error_text: '' })
+    await db.prepare(`UPDATE wage_payroll_reviews SET status = 'VOID', void_reason = ?, voided_by_name = ?, voided_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE subject_source = 'draft' AND subject_shift_id = ? AND status = 'OPEN'`).bind('Draft #' + draftId + ' (' + d.work_date + ') deleted by ' + admin.name, admin.name, draftId).run()
+    try { await db.prepare(`DELETE FROM wage_draft_real_dates WHERE draft_id = ?`).bind(draftId).run() } catch (err) {}
+    await db.prepare(`DELETE FROM wage_shift_drafts WHERE id = ? AND status = 'draft' AND final_shift_id IS NULL`).bind(draftId).run()
+    return back(safeReturn + sep + 'msg=' + encodeURIComponent('Draft #' + draftId + ' (' + d.display_name + ', ' + d.work_date + ' ' + d.start_time + '–' + d.end_time + ') deleted by ' + admin.name + '. It no longer shows for the worker or the office; a copy is kept in the log.'))
+  } catch (err) {
+    return back(safeReturn + sep + 'error=' + encodeURIComponent('Could not delete draft #' + draftId + ': ' + describeProxyError(err)))
   }
 })
 

@@ -1,0 +1,87 @@
+{
+ "draft": [
+  {
+   "id": 720,
+   "staff_id": 9,
+   "work_date": "2026-09-09",
+   "outlet_venue": "Headoffice SAB",
+   "area": "Bryanston",
+   "work_type": "Normal",
+   "work_description": "set up missed shifts",
+   "start_time": "05:00",
+   "end_time": "19:00",
+   "status": "draft",
+   "final_shift_id": null,
+   "created_at": "2026-09-14 12:45:03",
+   "updated_at": "2026-09-14 17:30:42",
+   "submitted_at": "2026-09-14 17:13:31",
+   "missed_previous_week": 1,
+   "overnight_confirmed": 0,
+   "payroll_week_start": "2026-09-19",
+   "payroll_note": "Real work date 2026-09-09; paid in current payroll 2026-09-19 to 2026-09-25; flagged for payroll cross-check.\n\nSystem review: claimed against payroll week 2026-09-19; exact work date 2026-09-09; venue Headoffice SAB; work type / role Normal; description set up missed shifts; captured time 05:00-19:00; belongs to previous payroll yes.\nConflict review: possible already-claimed or overlapping shift detected for backend review only. Do not block staff entry. Do not auto-call it duplicate. Existing entries on this date overlap the captured time 05:00-19:00. Office must review manually and correct payable hours if needed."
+  }
+ ],
+ "real_date": [
+  {
+   "draft_id": 720,
+   "staff_id": 9,
+   "real_date": "2026-09-09",
+   "updated_at": "2026-09-23 06:34:02"
+  }
+ ],
+ "reviews": [
+  {
+   "id": 10133,
+   "status": "OPEN",
+   "issue_key": "manual_overlap_review|draft:720",
+   "issue_summary": "Manual overlap review \u2014 Erick Mpho Molefe \u2014 2026-09-09"
+  }
+ ],
+ "paid_same_days": [
+  {
+   "id": 9542,
+   "work_date": "2026-09-08",
+   "start_time": "07:00",
+   "end_time": "16:00",
+   "outlet_venue": "warehouse",
+   "total_amount": 750,
+   "payroll_week_start": "2026-09-05"
+  },
+  {
+   "id": 9543,
+   "work_date": "2026-09-09",
+   "start_time": "05:00",
+   "end_time": "16:00",
+   "outlet_venue": "SAB grosgovenor",
+   "total_amount": 930,
+   "payroll_week_start": "2026-09-05"
+  },
+  {
+   "id": 9643,
+   "work_date": "2026-09-09",
+   "start_time": "05:00",
+   "end_time": "19:00",
+   "outlet_venue": "Headoffice SAB",
+   "total_amount": 1200,
+   "payroll_week_start": "2026-09-12"
+  },
+  {
+   "id": 9544,
+   "work_date": "2026-09-10",
+   "start_time": "07:00",
+   "end_time": "16:00",
+   "outlet_venue": "Warehouse",
+   "total_amount": 750,
+   "payroll_week_start": "2026-09-05"
+  },
+  {
+   "id": 9642,
+   "work_date": "2026-09-10",
+   "start_time": "07:00",
+   "end_time": "23:00",
+   "outlet_venue": "SAB Grosvenor",
+   "total_amount": 1380,
+   "payroll_week_start": "2026-09-12"
+  }
+ ]
+}

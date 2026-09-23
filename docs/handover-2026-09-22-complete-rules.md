@@ -1,7 +1,7 @@
 ---
 title: "B&W Productions — Wages System: Complete Rules & Handover"
 subtitle: "Every agreed rule and regulation, everything built and changed 12–22 September 2026, how the office reviews work, and how to restore"
-date: "22 September 2026 · live version v2026-09-22-12 · restore tag restore-2026-09-22-petrus-v5"
+date: "22 September 2026 · live version v2026-09-22-14 · restore tag restore-2026-09-22-petrus-v5"
 ---
 
 # Part 1 — Where things are
@@ -82,6 +82,8 @@ Owner's words: "Petrus — take the hourly rate, R80, or event rate, and multipl
 4. After Final Submission the card is **Submitted — locked**; locked missed shifts move into **Finally submitted shifts** with *"…do not capture them again."*
 5. A draft is **R0** until final-submitted.
 6. **Staff never see reviews or the office dashboard.** Nothing the office does can block a worker from capturing.
+
+**Stale drafts (owner 22 Sep 2026).** A draft the worker saved but never final-submitted, dated **before the capture window** (before last Saturday), can never be submitted and must not stay on the system — it confuses everyone and the day was usually paid already. The dashboard now shows every such draft in **red — "STALE DRAFT – … is before the capture window"** — with a **🗑 Delete draft** button. The office can also delete any other unsubmitted draft that should not be there. Deleting: asks for confirmation, keeps a full copy in the log (`wage_debug_capture`), voids any open review on it, removes it from the worker's app and the dashboard. A draft that was already final-submitted **cannot** be deleted this way (use the manager correction on the paid shift). 22 Sep: Erick's draft #720 (9 Sep, already paid as shift #9643 R1 200 in the 12 Sep payroll) removed; 14 "ghost" reviews on drafts the workers had already deleted were auto-voided (backups in `docs/restore-2026-09-22-stale-draft-720/`).
 
 # Part 4 — Office dashboard: colours, labels, reviews
 | What you see | Colour | Meaning |
@@ -208,6 +210,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 * **Overlap reviews show the full breakdown; self-compare reviews auto-voided (v2026-09-22-10)** — see Part 5c. Patrick #9943 / #9951 voided (draft vs its own paid row).
 * **Place decision buttons (v2026-09-22-11)**: every Rate-choice / Crew-pattern review — paid row or draft — offers WAREHOUSE R81,25/h and VENUE R95/h with the rand each produces; a draft decision is applied automatically on Final Submission (owner: "pay as claimed doesn't tell me which one is warehouse and which is venue").
 * **Public holidays (v2026-09-22-12, rate rules v10)** — see Part 2 → Public holidays. Also fixed: the closed-week dashboard view had gone blank for one deploy ("too many SQL variables" on the overlap-breakdown lookup) — chunked, verified 12–18 Sep renders with 118 reviews.
+* **Stale drafts & Delete draft button (v2026-09-22-13/-14)** — see Part 3. Erick #720 removed; ghost reviews auto-voided.
 
 # Part 8 — Payroll 12–18 Sep 2026 (paid 17 Sep) — final figures
 111 paid rows (24 missed) · claimed 843,50 h · R72 438,15 · **approved 793,75 h · R71 096,90** · missed 98,00 h · R8 861,25 · deductions R3 210,00 · **net R67 886,90**. Full detail: `handover-2026-09-16-complete-hardcopy.pdf`.
@@ -215,7 +218,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 # Part 9 — Restore points
 | Tag / folder | State |
 |---|---|
-| `restore-2026-09-22-petrus-v5` | **Live now (v2026-09-22-12)** — Petrus v5 rule + rent deduction removed. To undo only the deduction removal: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2` |
+| `restore-2026-09-22-petrus-v5` | **Live now (v2026-09-22-14)** — Petrus v5 rule + rent deduction removed. To undo only the deduction removal: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2` |
 | `restore-2026-09-21-already-paid` | v2026-09-21-2 (already-paid rule, old Petrus rule, rent deduction still active) |
 | `restore-2026-09-18-rolled-back` | v2026-09-16-2 after the 18 Sep rollback |
 | `restore-2026-09-15-approved` | 15 Sep approved state + full data snapshot (`docs/restore-2026-09-15-approved/`) |
@@ -228,7 +231,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 git checkout restore-2026-09-22-petrus-v5
 npm run build
 npx wrangler pages deploy dist --project-name bw-productions --branch main --commit-dirty=true
-curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-22-12
+curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-22-14
 ```
 To go back to before the already-paid rule: `git checkout restore-2026-09-18-rolled-back` and deploy (expect v2026-09-16-2); any `paid_before|…` reviews can then be deleted (they are the only rows it writes).
 
