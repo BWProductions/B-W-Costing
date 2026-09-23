@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-23-11'
+const WAGES_UI_VERSION = 'v2026-09-23-12'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4683,7 +4683,8 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       // Place clicks (rate choice / crew pattern) and Petrus/holiday add-ons change the ROW itself, not the hours.
       const decided = reviewsForPaid(r).filter((v) => v.status === 'RESOLVED' && v.approved_payable_hours !== null && v.approved_payable_hours !== undefined && !/^(rate_choice_|petrus_extra|public_holiday|crew_pattern\|)/.test(v.issue_key || '')).sort((a, b) => b.id - a.id)[0]
       const paidH = Number(r.hours_worked || 0), paidA = Number(r.amount || 0)
-      if (!decided) { agreedH += paidH; agreedA += paidA; return }
+      // Owner 2026-09-23: an OWNER CORRECTION on the row is the final word — the green figure shows the row as corrected.
+      if (!decided || r.manager_update_reason) { agreedH += paidA === 0 ? 0 : paidH; agreedA += paidA; return }
       const ah = Number(decided.approved_payable_hours)
       // "Already paid" review decided as a RAND amount: that amount is what this entry pays.
       let dsnap: any = null; try { dsnap = decided.system_snapshot_json ? JSON.parse(decided.system_snapshot_json) : null } catch (err) {}
