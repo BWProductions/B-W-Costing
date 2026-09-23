@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-23-6'
+const WAGES_UI_VERSION = 'v2026-09-23-7'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4113,6 +4113,22 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   // Owner 2026-09-22: a draft older than the capture window (before last Saturday) can never be
   // final-submitted — it must not linger. Shown red with a Delete button (current week view only).
   const captureStart = formatProxyIsoDate(new Date(parseProxyIsoDate(weekStart)!.getTime() - 7 * 86400000))
+  // Owner 2026-09-23: on certain days (e.g. a public holiday with no set-ups) the crew is only expected until a set
+  // time. Any entry claiming beyond it is flagged red so the office asks "what time did they really work until?".
+  type PlannedEnd = { work_date: string, planned_end: string, note: string }
+  let plannedEnds: Record<string, PlannedEnd> = {}
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS wage_planned_hours (work_date TEXT PRIMARY KEY, planned_end TEXT NOT NULL, note TEXT, set_by TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`).run()
+    const pe = await db.prepare(`SELECT work_date, planned_end, note FROM wage_planned_hours WHERE work_date BETWEEN date(?, '-7 days') AND ?`).bind(weekStart, weekEnd).all()
+    for (const r of (pe.results || []) as PlannedEnd[]) plannedEnds[r.work_date] = r
+  } catch (err) {}
+  const beyondPlanned = (r: { work_date: string, start_time: string, end_time: string }) => {
+    const p = plannedEnds[r.work_date]; if (!p) return null
+    const e = timeToMinutes(r.end_time), pe = timeToMinutes(p.planned_end), st = timeToMinutes(r.start_time)
+    if (e === null || pe === null || st === null) return null
+    const end = e <= st ? e + 1440 : e
+    return end > pe ? { ...p, overMin: end - pe } : null
+  }
   const isStaleDraft = (d: AdminDraftRow) => d.work_date < captureStart
 
   if (employeeFilter && /^\d+$/.test(employeeFilter)) {
@@ -4548,6 +4564,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         hasRed ? pill('⚑ REVIEW', '#7f1d1d', '#fff') : revs.some((v) => v.status === 'OPEN') ? pill('⚑ review', '#b45309', '#fff') : '',
         r.overnight_confirmed ? pill('next day', '#1e3a8a', '#fff') : '',
         r.manager_update_reason ? pill('corrected', '#1f5f3a', '#fff') : '',
+        (() => { const bp = beyondPlanned(r); return bp ? pill('⏰ CLAIMED PAST ' + escapeHtmlText(bp.planned_end), '#7f1d1d', '#fff') + `<div style="font-size:11.5px;color:#fca5a5;margin-top:2px">Owner set ${escapeHtmlText(bp.planned_end)} as the end of work on ${escapeHtmlText(proxyLongDate(r.work_date))}${bp.note ? ' (' + escapeHtmlText(bp.note) + ')' : ''}. This entry claims until ${escapeHtmlText(r.end_time)} — ${(bp.overMin / 60).toFixed(2)} h more. <strong>Ask: what time did he really work until?</strong> Use ✎ Edit shift to correct.</div>` : '' })(),
       ].join('')
       return `<tr style="border-top:1px solid rgba(255,255,255,.08);${rowBg}">
         ${td(escapeHtmlText(g.name), 'font-weight:700;white-space:nowrap')}
