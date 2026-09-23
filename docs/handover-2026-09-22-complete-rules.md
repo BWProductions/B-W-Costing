@@ -65,7 +65,7 @@ Official gov.za list (Public Holidays Act 36 of 1994; a holiday on a Sunday make
 
 | Who | Public-holiday rate |
 |---|---|
-| General staff — Warehouse | **R162,50 / h** (R81,25 × 2) · **no meeting deduction** |
+| General staff — Warehouse | **R162,50 / h** (R81,25 × 2) · **Mon–Fri the 07:00–07:30 meeting is deducted first** (owner 23 Sep) |
 | General staff — Venue | **R190 / h** (R95 × 2) |
 | Petrus | **No fixed day** — **R160 / h** for every hour (R80 × 2, R80 = R640 ÷ 8) |
 | Music Bus | **R750 fixed** 07–16 **+ R180 / h** outside 07–16 |

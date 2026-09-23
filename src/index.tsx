@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-23-5'
+const WAGES_UI_VERSION = 'v2026-09-23-6'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3894,7 +3894,7 @@ function subtractCovered(s: number, e: number, covered: Array<[number, number]>)
 const OWNER_RATE_RULES_VERSION = 10
 // PUBLIC HOLIDAYS (owner 2026-09-22, rate rules v10): official gov.za list (Public Holidays Act 36 of 1994,
 // Sunday → following Monday observed) + proclaimed Election Day 4 Nov 2026. Work on a public holiday:
-//   General staff  ×2 on the hourly rate — Warehouse R162,50/h · Venue R190/h · no meeting deduction
+//   General staff  ×2 on the hourly rate — Warehouse R162,50/h (Mon–Fri meeting 07:00–07:30 deducted first) · Venue R190/h
 //   Petrus         NO fixed day — hourly R80 (R640 ÷ 8) × 2 = R160/h for every hour worked
 //   Music Bus      R750 fixed for 07–16 + R180/h outside 07–16
 // Every public-holiday entry is HELD (red review) until the office approves it; nothing pays automatically.
@@ -3974,7 +3974,14 @@ function ownerPayForShift(dateIso: string, startTime: string, endTime: string, k
     let rec = 0, rate = 0, text = ''
     if (kind === 'musicbus') { rec = r2((insideMin > 0 ? 750 : 0) + outsideH * MUSICBUS_HOLIDAY_EXTRA); rate = MUSICBUS_HOLIDAY_EXTRA; text = `Music Bus public holiday (${holiday}): ${insideMin > 0 ? 'R750 fixed 07–16' : 'no 07–16 time'}${outsideH > 0 ? ` + ${h(outsideH)} h outside 07–16 × R180` : ''}` }
     else if (kind === 'petrus') { rec = r2(totalH * PETRUS_HOLIDAY_HOURLY); rate = PETRUS_HOLIDAY_HOURLY; text = `Petrus public holiday (${holiday}): no fixed day — ${h(totalH)} h × R160 (R80 × 2)` }
-    else if (kind === 'warehouse') { rate = r2(WAREHOUSE_HOURLY * HOLIDAY_FACTOR); rec = r2(totalH * rate); text = `Warehouse public holiday (${holiday}): ${h(totalH)} h × R162,50 (R81,25 × 2, no meeting deduction)` }
+    else if (kind === 'warehouse') {
+      // Owner 2026-09-23: "There's still a meeting deduction on a holiday. We always have a meeting." Mon–Fri holiday
+      // in the warehouse: the 07:00–07:30 meeting comes off first, then × 2.
+      const meetingMinH = dow >= 1 && dow <= 5 ? overlapMinutes(sMin, eMin, MEETING_START, MEETING_END) : 0
+      const paidH = r2(totalH - meetingMinH / 60)
+      rate = r2(WAREHOUSE_HOURLY * HOLIDAY_FACTOR); rec = r2(paidH * rate)
+      text = `Warehouse public holiday (${holiday}): ${h(totalH)} h${meetingMinH > 0 ? ` − ${h(meetingMinH / 60)} h staff meeting 07:00–07:30 (unpaid) = ${h(paidH)} h` : ''} × R162,50 (R81,25 × 2)`
+    }
     else { rate = r2(VENUE_HOURLY * HOLIDAY_FACTOR); rec = r2(totalH * rate); text = `Venue/event public holiday (${holiday}): ${h(totalH)} h × R190 (R95 × 2)` }
     return { amount: 0, hourlyRate: rate, breakdown: `PUBLIC HOLIDAY — HELD for owner approval — recommended ${text} = ${fmtRand(rec)}; R0 until approved`, heldHoliday: holiday, recommendedAmount: rec, heldExtraHours: r2(totalH), baseAmount: 0 }
   }
@@ -4706,7 +4713,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     ${(() => {
       const sorted = ruleDiffsAll.slice().sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
       const head = `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div style="font-weight:800;color:#93c5fd">⚖ Pay-rule check — ${gRuleDays ? gRuleDays + ' day' + (gRuleDays === 1 ? '' : 's') + ' differ from the rule: paid ' + fmtRand(gRuleOver) + ' more and ' + fmtRand(gRuleUnder) + ' less than the rule (net ' + (gRuleAmount >= 0 ? '+' : '−') + fmtRand(Math.abs(gRuleAmount)) + ')' : 'every paid day matches the rule'}</div>${gRuleDays ? `<a href="#" onclick="var b=document.getElementById('bw-rule-list');b.style.display=b.style.display==='none'?'block':'none';return false" style="color:#e2b93b;font-weight:700;font-size:12px">show / hide list</a>` : ''}</div>
-        <div style="font-size:12px;opacity:.8;margin-top:3px">Rule used (B&W rate rules v10, owner 22 Sep 2026): PUBLIC HOLIDAYS (gov.za list + Election Day 4 Nov 2026) — every entry is held red for the owner: general staff ×2 (Warehouse R162,50/h, Venue R190/h, no meeting deduction); Petrus no fixed day, R160/h (R80 × 2); Music Bus R750 fixed 07–16 + R180/h outside. General staff — hourly by place, to the hour: Warehouse Team R81,25/h (R650 ÷ 8); Venue/Event (any other work type) R95/h; Sunday ×1.2 (R97,50 / R114); Mon–Fri the 07:00–07:30 staff meeting is unpaid — warehouse entries covering it lose that time (30 min = R40,62). No fixed day; a man who moves from the warehouse to a venue is paid the warehouse hours at R81,25 and the venue hours at R95. Music Bus — Mon–Sat R750 fixed 07–16 + R120/h outside; Sunday R120/h. Petrus (from 22 Sep 2026) — R640 set day rate for 06–16 Mon–Sat; Saturday before 06:00 / after 16:00 R80/h automatically; Mon–Fri before 06:00 / after 16:00 (R55/h) is HELD and flagged red — the office approves it or sets another rate; SUNDAY is never automatic — the whole entry is held (R640 + R80/h recommended) until the owner approves or declines. No deductions for Petrus. Gardeners keep their gardener rate; on the Team block they get general-staff rates. Overlapping entries are counted once. <strong>Nothing is changed by this check</strong> — it only shows where the amount paid differs, so you can decide.</div>`
+        <div style="font-size:12px;opacity:.8;margin-top:3px">Rule used (B&W rate rules v10, owner 22 Sep 2026): PUBLIC HOLIDAYS (gov.za list + Election Day 4 Nov 2026) — every entry is held red for the owner: general staff ×2 (Warehouse R162,50/h with the 07:00–07:30 meeting deducted first Mon–Fri, Venue R190/h); Petrus no fixed day, R160/h (R80 × 2); Music Bus R750 fixed 07–16 + R180/h outside. General staff — hourly by place, to the hour: Warehouse Team R81,25/h (R650 ÷ 8); Venue/Event (any other work type) R95/h; Sunday ×1.2 (R97,50 / R114); Mon–Fri the 07:00–07:30 staff meeting is unpaid — warehouse entries covering it lose that time (30 min = R40,62). No fixed day; a man who moves from the warehouse to a venue is paid the warehouse hours at R81,25 and the venue hours at R95. Music Bus — Mon–Sat R750 fixed 07–16 + R120/h outside; Sunday R120/h. Petrus (from 22 Sep 2026) — R640 set day rate for 06–16 Mon–Sat; Saturday before 06:00 / after 16:00 R80/h automatically; Mon–Fri before 06:00 / after 16:00 (R55/h) is HELD and flagged red — the office approves it or sets another rate; SUNDAY is never automatic — the whole entry is held (R640 + R80/h recommended) until the owner approves or declines. No deductions for Petrus. Gardeners keep their gardener rate; on the Team block they get general-staff rates. Overlapping entries are counted once. <strong>Nothing is changed by this check</strong> — it only shows where the amount paid differs, so you can decide.</div>`
       if (!sorted.length) return `<section id="bw-rule-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(20,83,45,.18);border:1px solid rgba(96,165,250,.35)">${head}</section>`
       const lines = sorted.map((c) => `<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid rgba(255,255,255,.08);font-size:12.5px"><span style="flex:0 0 auto">${c.diff > 0 ? pill('OVER', '#7f1d1d', '#fff') : pill('UNDER', '#1e3a8a', '#fff')}</span><div style="flex:1"><strong>${escapeHtmlText(c.name)}</strong> · ${escapeHtmlText(c.date)} (${dayName(c.date)}) · ${escapeHtmlText(c.rule.span)} · paid <strong>${fmtRand(c.paid)}</strong> vs rule <strong>${fmtRand(c.rule.amount)}</strong> → <strong>${c.diff > 0 ? '+' : '−'}${fmtRand(Math.abs(c.diff))}</strong><a href="#" onclick="var b=document.getElementById('bw-rule-top-${c.staffId}-${c.date}');if(b){b.style.display=b.style.display==='none'?'block':'none'}return false" style="margin-left:8px;color:#e2b93b;font-weight:700">Open ▾</a><div id="bw-rule-top-${c.staffId}-${c.date}" style="display:none;margin-top:2px">${ruleDetailTop(c)}</div></div></div>`).join('')
       return `<section id="bw-rule-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(30,58,138,.12);border:1px solid rgba(96,165,250,.5)">${head}<div id="bw-rule-list" style="margin-top:6px">${lines}</div></section>`
