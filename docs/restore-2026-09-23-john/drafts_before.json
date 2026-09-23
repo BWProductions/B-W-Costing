@@ -1,0 +1,42 @@
+[
+ {
+  "id": 848,
+  "staff_id": 7,
+  "work_date": "2026-09-17",
+  "outlet_venue": "Music Bus",
+  "area": "Thembisa",
+  "work_type": "Music Bus",
+  "work_description": "Missed shifts from Thursday doing music bus in Thembisa where there was a trade visit",
+  "start_time": "15:00",
+  "end_time": "20:00",
+  "status": "draft",
+  "final_shift_id": null,
+  "created_at": "2026-09-22 13:49:52",
+  "updated_at": "2026-09-22 13:49:52",
+  "submitted_at": null,
+  "missed_previous_week": 1,
+  "overnight_confirmed": 0,
+  "payroll_week_start": "2026-09-19",
+  "payroll_note": "Real work date 2026-09-17; paid in current payroll 2026-09-19 to 2026-09-25; flagged for payroll cross-check.\n\nSystem review: claimed against payroll week 2026-09-19; exact work date 2026-09-17; venue Music Bus; work type / role Music Bus; description Missed shifts from Thursday doing music bus in Thembisa where there was a trade visit; captured time 15:00-20:00; belongs to previous payroll yes.\nConflict review: possible already-claimed or overlapping shift detected for backend review only. Do not block staff entry. Do not auto-call it duplicate. Existing entries on this date overlap the captured time 15:00-20:00. Office must review manually and correct payable hours if needed."
+ },
+ {
+  "id": 850,
+  "staff_id": 7,
+  "work_date": "2026-09-17",
+  "outlet_venue": "Music Bus",
+  "area": "Thembisa",
+  "work_type": "Music Bus",
+  "work_description": "Missed shifts from Thursday doing music bus in Thembisa where there was a trade visit",
+  "start_time": "15:00",
+  "end_time": "20:00",
+  "status": "submitted",
+  "final_shift_id": 9779,
+  "created_at": "2026-09-22 13:49:56",
+  "updated_at": "2026-09-22 13:50:14",
+  "submitted_at": "2026-09-22 13:50:14",
+  "missed_previous_week": 1,
+  "overnight_confirmed": 0,
+  "payroll_week_start": "2026-09-19",
+  "payroll_note": "Real work date 2026-09-17; paid in current payroll 2026-09-19 to 2026-09-25; flagged for payroll cross-check.\n\nSystem review: claimed against payroll week 2026-09-19; exact work date 2026-09-17; venue Music Bus; work type / role Music Bus; description Missed shifts from Thursday doing music bus in Thembisa where there was a trade visit; captured time 15:00-20:00; belongs to previous payroll yes.\nConflict review: possible already-claimed or overlapping shift detected for backend review only. Do not block staff entry. Do not auto-call it duplicate. Existing entries on this date overlap the captured time 15:00-20:00. Office must review manually and correct payable hours if needed."
+ }
+]

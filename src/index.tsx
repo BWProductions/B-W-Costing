@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-23-3'
+const WAGES_UI_VERSION = 'v2026-09-23-4'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3670,7 +3670,7 @@ async function applyOwnerRatesToFinalSubmission(env: Bindings | undefined, draft
       if (pd) { const sn = JSON.parse(pd.system_snapshot_json || '{}'); if (sn.placeDecision === 'warehouse' || sn.placeDecision === 'event') { kind = sn.placeDecision; placeNote = ' | Place decided by office (review #' + pd.id + ', ' + (sn.placeDecidedBy || 'office') + '): ' + (kind === 'warehouse' ? 'WAREHOUSE R81,25/h' : 'VENUE R95/h') } }
     } catch (err) {}
   }
-  const priced = ownerPayForShift(dateIso, row.start_time, row.end_time, kind)
+  let priced = ownerPayForShift(dateIso, row.start_time, row.end_time, kind)
   if (!priced) {
     // Owner 2026-09-15: "warehouse" only in the wording → not clearly warehouse-only.
     // Do not decide the rate; open a Review for Bernie (Warehouse or Event/Venue).
@@ -3678,10 +3678,24 @@ async function applyOwnerRatesToFinalSubmission(env: Bindings | undefined, draft
     return // gardener block / fixed weekly / undecided: engine amount stands
   }
   const before = Number(row.gross_wage ?? row.total_amount ?? 0)
+  // Owner 2026-09-23 (John #9779 / Givemore #9789): if the office already APPROVED a rand amount on this draft's
+  // "already paid" review, the paid row must carry THAT amount — not the full day — so nothing is billed twice.
+  let approvedNote = ''
+  try {
+    const pb = await db.prepare(`SELECT id, approved_payable_hours, system_snapshot_json FROM wage_payroll_reviews WHERE issue_key = ? AND status = 'RESOLVED'`).bind('paid_before|draft:' + draftId).first<{ id: number, approved_payable_hours: number | null, system_snapshot_json: string | null }>()
+    if (pb) {
+      const ps = JSON.parse(pb.system_snapshot_json || '{}')
+      if (ps.paidBefore && ps.approvedAmount !== undefined) {
+        const amt = Math.round(Number(ps.approvedAmount) * 100) / 100
+        approvedNote = ' | ALREADY-PAID CORRECTION (review #' + pb.id + ', approved ' + fmtRand(amt) + '): already paid ' + fmtRand(Number(ps.alreadyPaid || 0)) + ' earlier' + (Number(ps.rateCorrection || 0) ? '; rate correction ' + fmtRand(Number(ps.rateCorrection)) : '') + (Number(ps.extraHours || 0) ? '; extra ' + Number(ps.extraHours).toFixed(2) + ' h ' + fmtRand(Number(ps.extraAmount || 0)) : '') + ' — row set to the approved amount (full day would have been ' + fmtRand(priced.amount) + ')'
+        priced = { ...priced, amount: amt }
+      }
+    }
+  } catch (err) {}
   await db.prepare(`UPDATE wage_shifts SET total_amount = ?, gross_wage = ?, hourly_rate_snapshot = ?, calculation_version = ?,
         payroll_note = CASE WHEN COALESCE(payroll_note,'') = '' THEN ? ELSE payroll_note || ' | ' || ? END
       WHERE id = ? AND staff_id = ?`)
-    .bind(priced.amount, priced.amount, priced.hourlyRate, OWNER_RATE_RULES_VERSION, 'Rate rules 2026-09-15: ' + priced.breakdown + placeNote, 'Rate rules 2026-09-15: ' + priced.breakdown + placeNote, row.id, staffId).run()
+    .bind(priced.amount, priced.amount, priced.hourlyRate, OWNER_RATE_RULES_VERSION, 'Rate rules 2026-09-15: ' + priced.breakdown + placeNote + approvedNote, 'Rate rules 2026-09-15: ' + priced.breakdown + placeNote + approvedNote, row.id, staffId).run()
   // Owner 2026-09-22: Petrus weekday time outside 06–16 is held for an office decision on the rate.
   if (priced.heldHoliday) {
     try { await openHolidayReview(env, { id: row.id, staff_id: row.staff_id, work_date: dateIso, start_time: row.start_time, end_time: row.end_time, hours_worked: row.hours_worked, work_type: row.work_type, outlet_venue: row.outlet_venue, event_name: row.event_name, work_description: row.work_description }, priced, kind) } catch (err) {}

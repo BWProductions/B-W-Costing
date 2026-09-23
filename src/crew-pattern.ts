@@ -44,9 +44,24 @@ export function venueIsUnnamed(venue: string) { const n = norm(venue); return n.
 // The AREA field names a real place (not the warehouse's own area) — venue evidence even if the venue box says "Warehouse".
 const WAREHOUSE_AREAS = /^(meyerton|henleyonklip|henley|warehouse|w[ae]a?rehouse|office|yard|na|none|)$/
 export function areaNamesAPlace(area: string) { const n = norm(area); return n.length >= 3 && !WAREHOUSE_AREAS.test(n) && !GENERIC.has(n) }
+// Owner 2026-09-23 (Givemore): "he'll write warehouse and then put a venue name. Always cross-check that and ask me."
+// A Warehouse Team entry is ONLY trusted as warehouse when the venue box says the warehouse (or is blank) AND the area
+// box does not name a real place. A venue-like name in the venue box, a real place in the area box, or venue words in the
+// description ("strike", "set up at …", "stadium", "golf", "estate", "hall", "school", "church", "hotel", "lodge", "garden") → flag.
+const VENUE_WORDS = /(stadium|arena|golf|estate|country\s*club|club|hall|school|church|hotel|lodge|resort|farm|park|gardens?|centre|center|mall|expo|convention|theatre|theater|university|college|casino|wedding|festival|showground|racecourse|conference|pretoria|johannesburg|jhb|sandton|midrand|soweto|tembisa|thembisa|parys|vaal|vereeniging|durban|cape\s*town|bloem|polokwane|nelspruit|rustenburg|potch)/i
+export function wordingNamesAVenue(venue: string, area: string, descr: string) {
+  if (areaNamesAPlace(area)) return true
+  if (venue && !venueIsWarehouse(venue) && !venueIsUnnamed(venue)) return true
+  return VENUE_WORDS.test(descr || '')
+}
+export function venueEvidence(venue: string, area: string, descr: string): string {
+  if (areaNamesAPlace(area)) return area
+  if (venue && !venueIsWarehouse(venue) && !venueIsUnnamed(venue)) return venue
+  const m = VENUE_WORDS.exec(descr || ''); return m ? m[0] : ''
+}
 function placeOf(d: Deps, e: Entry): Place {
   const kind = d.ownerPayKind(e.staff_id, e.work_type, [e.venue, e.descr].join(' '), e.payroll_rule)
-  if (kind === 'warehouse' && venueIsWarehouse(e.venue) && areaNamesAPlace(e.area)) return 'ambiguous_area'
+  if (kind === 'warehouse' && wordingNamesAVenue(e.venue, e.area, e.descr)) return 'ambiguous_area'
   if (kind === 'warehouse') return 'warehouse'
   if (kind === 'warehouse_or_event') return venueIsWarehouse(e.venue) ? 'ambiguous' : 'ambiguous'
   if (kind !== 'event') return 'other' // Petrus, gardener block, Music Bus, fixed weekly — own rules
@@ -77,10 +92,11 @@ export function computeFlags(d: Deps, entries: Entry[]): CrewFlag[] {
       if (p === 'ambiguous') continue // already covered by the Rate-choice review
       const hrs = e.hours ? e.hours.toFixed(2) + ' h' : (e.start + '–' + e.end)
       if (p === 'ambiguous_area') {
+        const evid = venueEvidence(e.venue, e.area, e.descr) || e.area
         const venuesThatDay = Array.from(new Set(day.filter((x) => ve.has(x.staff_id)).map((x) => x.venue).filter(Boolean)))
-        const areaHit = venuesThatDay.filter((vn) => norm(vn).includes(norm(e.area).slice(0, 5)) || norm(e.area).includes(norm(vn).slice(0, 5)))
-        const reason = `WAREHOUSE CLAIMED BUT AREA SAYS “${e.area}”: ${e.name} selected Warehouse Team at “${e.venue}” for ${hrs} on ${longDate(date)}, but wrote the area as “${e.area}” — that is a venue, not the warehouse.${areaHit.length ? ` Other workers were at ${areaHit.join(', ')} that day.` : ve.size ? ` ${ve.size} worker${ve.size === 1 ? '' : 's'} were at a venue that day (${venuesThatDay.join(', ')}).` : ''} If he was at “${e.area}”, he is due the venue rate (R95/h); if he was really in the warehouse, R81,25/h. Choose below.`
-        flags.push({ subject: e, place: p, severity: 'red', kind: 'warehouse_with_area', title: `Warehouse claimed — but area says “${e.area}”`, reason, dayWarehouse: wh.size, dayVenue: ve.size, dayWorkers: workers, majorityPlace: majority, others: [...ve].map(nameOf), factsHash: fnv([e.source, e.id, e.work_date, e.start, e.end, e.venue, e.area, e.work_type, wh.size, ve.size].join('|')) })
+        const areaHit = venuesThatDay.filter((vn) => norm(vn).includes(norm(evid).slice(0, 5)) || norm(evid).includes(norm(vn).slice(0, 5)))
+        const reason = `WAREHOUSE CLAIMED BUT THE ENTRY NAMES “${evid}”: ${e.name} selected Warehouse Team at “${e.venue}” for ${hrs} on ${longDate(date)}, but wrote “${evid}” — that is a venue, not the warehouse.${areaHit.length ? ` Other workers were at ${areaHit.join(', ')} that day.` : ve.size ? ` ${ve.size} worker${ve.size === 1 ? '' : 's'} were at a venue that day (${venuesThatDay.join(', ')}).` : ''} If he was at “${evid}”, he is due the venue rate (R95/h); if he was really in the warehouse, R81,25/h. Choose below.`
+        flags.push({ subject: e, place: p, severity: 'red', kind: 'warehouse_with_area', title: `Warehouse claimed — but the entry names “${evid}”`, reason, dayWarehouse: wh.size, dayVenue: ve.size, dayWorkers: workers, majorityPlace: majority, others: [...ve].map(nameOf), factsHash: fnv([e.source, e.id, e.work_date, e.start, e.end, e.venue, e.area, e.work_type, wh.size, ve.size].join('|')) })
         continue
       }
       const others = [...(p === 'warehouse' ? ve : wh)].filter((id) => id !== e.staff_id).map(nameOf)
