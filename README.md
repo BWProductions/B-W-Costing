@@ -267,3 +267,10 @@ from→to). See `EDIT_AFTER_SIGN_EMAILS` in `src/routes/field.ts`.
 - Public holidays (rate rules v10, `SA_PUBLIC_HOLIDAYS`): every holiday entry held as red review `public_holiday|shift:ID` (approve / other amount / decline via `/wages-admin/petrus-extra`). Recommended: Warehouse R162,50/h, Venue R190/h (no meeting deduction), Petrus R160/h no fixed day, Music Bus R750 07–16 + R180/h outside. Election Day 4 Nov 2026 included.
 - Stale drafts (work_date before capture window) shown red on the current-week dashboard with 🗑 Delete draft (`POST /wages-admin/delete-draft`, office only, refuses final-submitted drafts, backup to wage_debug_capture, voids open reviews). Ghost reviews (draft deleted) auto-voided on dashboard load.
 - Handover: `docs/handover-2026-09-22-complete-rules.md` / `.pdf`.
+
+## Restore point 23 Sep 2026 — `restore-2026-09-23-reopen` (live v2026-09-22-16)
+- **↺ Reopen** button on every decided review (`POST /wages-admin/reopen-review`): back to OPEN, previous decision kept in `system_snapshot_json.decisionHistory`, Petrus/holiday rand add-ons reversed on the paid row.
+- **Area-aware crew check** (`src/crew-pattern.ts` `ambiguous_area` → RED `warehouse_with_area`): Warehouse Team + venue "Warehouse" but a real place typed in Area → flag with WAREHOUSE / VENUE buttons. TDZ bug (`hrs` used before declaration) fixed before production.
+- Partial approved hours priced by place on the dashboard green figure and in `payroll-excel.ts` (honours WAREHOUSE/VENUE clicks on rate-choice AND crew-pattern reviews); place/petrus/holiday reviews excluded from "approved hours" decisions.
+- Overlap box: subject drafts that became paid rows show "final-submitted → shift #… (R… on the row)"; compared drafts looked up via `source_draft_id` (chunked by 50).
+- Givemore Thu 17 Sep: #9996 reopened → 4.00 h; #9944 voided (superseded); backup `docs/restore-2026-09-23-givemore/`.

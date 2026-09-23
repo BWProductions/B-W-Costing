@@ -28,7 +28,7 @@ export type Deps = {
 }
 
 type Entry = { source: 'draft' | 'shift'; id: number; draftId: number | null; staff_id: number; name: string; payroll_rule: string; work_date: string; start: string; end: string; work_type: string; venue: string; area: string; descr: string; hours: number; amount: number; payroll_week_start: string | null }
-type Place = 'warehouse' | 'venue' | 'venue_unnamed' | 'ambiguous' | 'other'
+type Place = 'warehouse' | 'venue' | 'venue_unnamed' | 'ambiguous' | 'ambiguous_area' | 'other'
 
 const norm = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
 const longDate = (iso: string) => { const d = new Date(iso + 'T00:00:00Z'); return isNaN(d.getTime()) ? iso : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()] + ' ' + d.getUTCFullYear() }
@@ -41,8 +41,12 @@ const GENERIC = new Set(['', 'venue', 'venues', 'event', 'events', 'site', 'onsi
 export function venueIsWarehouse(venue: string) { return WAREHOUSE_WORDS.test(norm(venue)) }
 export function venueIsUnnamed(venue: string) { const n = norm(venue); return n.length < 3 || GENERIC.has(n) || /^\d+$/.test(n) }
 
+// The AREA field names a real place (not the warehouse's own area) — venue evidence even if the venue box says "Warehouse".
+const WAREHOUSE_AREAS = /^(meyerton|henleyonklip|henley|warehouse|w[ae]a?rehouse|office|yard|na|none|)$/
+export function areaNamesAPlace(area: string) { const n = norm(area); return n.length >= 3 && !WAREHOUSE_AREAS.test(n) && !GENERIC.has(n) }
 function placeOf(d: Deps, e: Entry): Place {
   const kind = d.ownerPayKind(e.staff_id, e.work_type, [e.venue, e.descr].join(' '), e.payroll_rule)
+  if (kind === 'warehouse' && venueIsWarehouse(e.venue) && areaNamesAPlace(e.area)) return 'ambiguous_area'
   if (kind === 'warehouse') return 'warehouse'
   if (kind === 'warehouse_or_event') return venueIsWarehouse(e.venue) ? 'ambiguous' : 'ambiguous'
   if (kind !== 'event') return 'other' // Petrus, gardener block, Music Bus, fixed weekly — own rules
@@ -50,7 +54,7 @@ function placeOf(d: Deps, e: Entry): Place {
 }
 
 export type CrewFlag = {
-  subject: Entry; place: Place; severity: 'red' | 'orange'; kind: 'unnamed_venue' | 'minority_venue' | 'minority_warehouse'
+  subject: Entry; place: Place; severity: 'red' | 'orange'; kind: 'unnamed_venue' | 'minority_venue' | 'minority_warehouse' | 'warehouse_with_area'
   title: string; reason: string; dayWarehouse: number; dayVenue: number; dayWorkers: number; majorityPlace: 'warehouse' | 'venue'; others: string[]; factsHash: string
 }
 
@@ -63,7 +67,7 @@ export function computeFlags(d: Deps, entries: Entry[]): CrewFlag[] {
     const placed = day.map((e) => ({ e, p: placeOf(d, e) })).filter((x) => x.p !== 'other')
     // Distinct workers per place (a worker with two warehouse entries counts once).
     const wh = new Set<number>(), ve = new Set<number>()
-    for (const { e, p } of placed) { if (p === 'warehouse') wh.add(e.staff_id); else if (p === 'venue' || p === 'venue_unnamed') ve.add(e.staff_id) }
+    for (const { e, p } of placed) { if (p === 'warehouse' || p === 'ambiguous_area') wh.add(e.staff_id); else if (p === 'venue' || p === 'venue_unnamed') ve.add(e.staff_id) }
     const workers = new Set<number>([...wh, ...ve]).size
     const majority: 'warehouse' | 'venue' = wh.size >= ve.size ? 'warehouse' : 'venue'
     const minorityCount = majority === 'warehouse' ? ve.size : wh.size
@@ -71,9 +75,16 @@ export function computeFlags(d: Deps, entries: Entry[]): CrewFlag[] {
     const nameOf = (id: number) => day.find((e) => e.staff_id === id)?.name || ('staff ' + id)
     for (const { e, p } of placed) {
       if (p === 'ambiguous') continue // already covered by the Rate-choice review
+      const hrs = e.hours ? e.hours.toFixed(2) + ' h' : (e.start + '–' + e.end)
+      if (p === 'ambiguous_area') {
+        const venuesThatDay = Array.from(new Set(day.filter((x) => ve.has(x.staff_id)).map((x) => x.venue).filter(Boolean)))
+        const areaHit = venuesThatDay.filter((vn) => norm(vn).includes(norm(e.area).slice(0, 5)) || norm(e.area).includes(norm(vn).slice(0, 5)))
+        const reason = `WAREHOUSE CLAIMED BUT AREA SAYS “${e.area}”: ${e.name} selected Warehouse Team at “${e.venue}” for ${hrs} on ${longDate(date)}, but wrote the area as “${e.area}” — that is a venue, not the warehouse.${areaHit.length ? ` Other workers were at ${areaHit.join(', ')} that day.` : ve.size ? ` ${ve.size} worker${ve.size === 1 ? '' : 's'} were at a venue that day (${venuesThatDay.join(', ')}).` : ''} If he was at “${e.area}”, he is due the venue rate (R95/h); if he was really in the warehouse, R81,25/h. Choose below.`
+        flags.push({ subject: e, place: p, severity: 'red', kind: 'warehouse_with_area', title: `Warehouse claimed — but area says “${e.area}”`, reason, dayWarehouse: wh.size, dayVenue: ve.size, dayWorkers: workers, majorityPlace: majority, others: [...ve].map(nameOf), factsHash: fnv([e.source, e.id, e.work_date, e.start, e.end, e.venue, e.area, e.work_type, wh.size, ve.size].join('|')) })
+        continue
+      }
       const others = [...(p === 'warehouse' ? ve : wh)].filter((id) => id !== e.staff_id).map(nameOf)
       const venueTxt = e.venue ? `“${e.venue}”` : '(blank)'
-      const hrs = e.hours ? e.hours.toFixed(2) + ' h' : (e.start + '–' + e.end)
       if (p === 'venue_unnamed') {
         const reason = `VENUE NOT NAMED: ${e.name} claims the venue rate (R95/h) for ${hrs} on ${longDate(date)} but the venue field is ${venueTxt}. Every venue entry needs a specific venue name, otherwise there is nothing to check it against.${wh.size ? ` ${wh.size} worker${wh.size === 1 ? '' : 's'} say Warehouse that day (${[...wh].map(nameOf).join(', ')}).` : ''} Ask the worker where he was; if it was the warehouse, re-price at R81,25/h.`
         flags.push({ subject: e, place: p, severity: 'red', kind: 'unnamed_venue', title: 'Venue rate claimed — no venue named', reason, dayWarehouse: wh.size, dayVenue: ve.size, dayWorkers: workers, majorityPlace: majority, others, factsHash: fnv([e.source, e.id, e.work_date, e.start, e.end, e.venue, e.work_type, wh.size, ve.size].join('|')) })

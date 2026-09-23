@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-22-14'
+const WAGES_UI_VERSION = 'v2026-09-22-16'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4121,15 +4121,23 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       FROM wage_payroll_reviews WHERE staff_id IN (${ph}) AND status <> 'VOID' AND (work_date BETWEEN date(?, '-7 days') AND ?)`).bind(...staffIds, weekStart, weekEnd).all()
   const reviewsAll = (revRes.results || []) as AdminReviewRow[]
   // Live facts for the compared paid rows (amount / payroll they were paid in), so the overlap breakdown is current.
-  const cmpIds = Array.from(new Set(reviewsAll.filter((v) => v.compared_shift_id).map((v) => Number(v.compared_shift_id))))
-  const cmpRows: Record<number, { id: number, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, work_type: string, outlet_venue: string, area: string, work_description: string, payroll_week_start: string | null, source_draft_id: number | null }> = {}
-  for (let i = 0; i < cmpIds.length; i += 50) {
-    const chunk = cmpIds.slice(i, i + 50)
-    try {
-      const cr = await db.prepare(`SELECT id, work_date, start_time, end_time, hours_worked, COALESCE(gross_wage, total_amount, 0) amount, work_type, outlet_venue, area, work_description, payroll_week_start, source_draft_id FROM wage_shifts WHERE id IN (${chunk.map(() => '?').join(',')})`).bind(...chunk).all()
-      for (const r of (cr.results || []) as any[]) cmpRows[Number(r.id)] = r
-    } catch (err) {}
+  type CmpRow = { id: number, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, work_type: string, outlet_venue: string, area: string, work_description: string, payroll_week_start: string | null, source_draft_id: number | null }
+  const cmpShiftIds = Array.from(new Set(reviewsAll.filter((v) => v.compared_shift_id && (v.compared_source || 'shift') === 'shift').map((v) => Number(v.compared_shift_id))))
+  // Subject drafts are included too, so a draft that has since been final-submitted shows as its paid row.
+  const cmpDraftIds = Array.from(new Set(reviewsAll.filter((v) => v.compared_shift_id && v.compared_source === 'draft').map((v) => Number(v.compared_shift_id)).concat(reviewsAll.filter((v) => v.subject_source === 'draft' && v.subject_shift_id).map((v) => Number(v.subject_shift_id)))))
+  const cmpRows: Record<number, CmpRow> = {}          // by paid shift id
+  const cmpRowsByDraft: Record<number, CmpRow> = {}   // by the draft id that became the paid row
+  const sel = `SELECT id, work_date, start_time, end_time, hours_worked, COALESCE(gross_wage, total_amount, 0) amount, work_type, outlet_venue, area, work_description, payroll_week_start, source_draft_id FROM wage_shifts`
+  for (let i = 0; i < cmpShiftIds.length; i += 50) {
+    const chunk = cmpShiftIds.slice(i, i + 50)
+    try { const cr = await db.prepare(`${sel} WHERE id IN (${chunk.map(() => '?').join(',')})`).bind(...chunk).all(); for (const r of (cr.results || []) as any[]) cmpRows[Number(r.id)] = r } catch (err) {}
   }
+  for (let i = 0; i < cmpDraftIds.length; i += 50) {
+    const chunk = cmpDraftIds.slice(i, i + 50)
+    try { const cr = await db.prepare(`${sel} WHERE source_draft_id IN (${chunk.map(() => '?').join(',')})`).bind(...chunk).all(); for (const r of (cr.results || []) as any[]) cmpRowsByDraft[Number(r.source_draft_id)] = r } catch (err) {}
+  }
+  const weekOfDate = (iso: string) => { const d = parseProxyIsoDate(iso); return d ? formatProxyIsoDate(proxyStartOfPayrollWeek(d)) : null }
+  const hoursBetween = (st: string, en: string) => { const a = timeToMinutes(st), b0 = timeToMinutes(en); if (a === null || b0 === null) return 0; const b = b0 <= a ? b0 + 1440 : b0; return (b - a) / 60 }
   const paidIds = new Set(paid.map((r) => r.id)), paidDraftIds = new Set(paid.map((r) => r.source_draft_id).filter(Boolean) as number[]), draftIds = new Set(drafts.map((d) => d.id))
   const reviews = reviewsAll.filter((v) => (v.subject_source === 'shift' && paidIds.has(v.subject_shift_id)) || (v.subject_source === 'draft' && (paidDraftIds.has(v.subject_shift_id) || draftIds.has(v.subject_shift_id))))
 
@@ -4291,11 +4299,13 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         ? `<div style="margin-top:3px"><strong>Recommended payable: ${Number(v.system_proposed_payable_hours).toFixed(2)} h</strong>${snap?.recommendedStart ? ' (' + escapeHtmlText(snap.recommendedStart) + '–' + escapeHtmlText(snap.recommendedEnd) + ')' : ''}${v.previously_paid_hours ? ' · already paid ' + Number(v.previously_paid_hours).toFixed(2) + ' h that day' : ''}</div>`
         : ''
       const reason = snap?.recommendedReason ? `<div style="margin-top:2px;opacity:.85">Reason to record: “${escapeHtmlText(snap.recommendedReason)}”</div>` : ''
+      // Owner 2026-09-22: a decision can be changed — Reopen puts the review back to OPEN so the buttons show again.
+      const reopenBtn = withForm && v.status === 'RESOLVED' ? `<form method="post" action="/wages-admin/reopen-review" style="display:inline" onsubmit="return confirm('Reopen review #${v.id}? Your previous decision is kept in the log and the buttons come back so you can decide again.')"><input type="hidden" name="review_id" value="${v.id}"><input type="hidden" name="return_to" value="__RETURN__"><button type="submit" style="margin-left:6px;padding:2px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.35);background:transparent;color:#fff;font-size:11px;font-weight:700;cursor:pointer" title="Change this decision">↺ Reopen</button></form>` : ''
       const decided = (snap?.rateChoice || snap?.petrusExtra) && v.status !== 'OPEN'
-        ? `<div style="margin-top:3px;color:#86efac"><strong>Decided: ${escapeHtmlText(v.decision_reason || v.status)}</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''}</div>`
+        ? `<div style="margin-top:3px;color:#86efac"><strong>Decided: ${escapeHtmlText(v.decision_reason || v.status)}</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''}${reopenBtn}</div>`
         : v.approved_payable_hours !== null && v.approved_payable_hours !== undefined
-        ? `<div style="margin-top:3px;color:#86efac"><strong>Decided: ${Number(v.approved_payable_hours).toFixed(2)} h</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''}${v.decision_reason ? ' — ' + escapeHtmlText(v.decision_reason) : ''}</div>`
-        : (v.status !== 'OPEN' && v.decision_reason ? `<div style="margin-top:3px;color:#86efac"><strong>${escapeHtmlText(v.status)}</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''} — ${escapeHtmlText(v.decision_reason)}</div>` : '')
+        ? `<div style="margin-top:3px;color:#86efac"><strong>Decided: ${Number(v.approved_payable_hours).toFixed(2)} h</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''}${v.decision_reason ? ' — ' + escapeHtmlText(v.decision_reason) : ''}${reopenBtn}</div>`
+        : (v.status !== 'OPEN' && v.decision_reason ? `<div style="margin-top:3px;color:#86efac"><strong>${escapeHtmlText(v.status)}</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''} — ${escapeHtmlText(v.decision_reason)}${reopenBtn}</div>` : '')
       // Owner 2026-09-21: "already paid" review — full story, each line on its own row, amount in bold.
       if (snap?.paidBefore) {
         const lines: string[] = Array.isArray(snap.lines) ? snap.lines : [String(snap.humanReason || '')]
@@ -4303,7 +4313,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
           <div style="font-weight:800;color:#fca5a5;margin-bottom:4px">${escapeHtmlText(snap.warningTitle || v.issue_summary || '')}</div>
           ${lines.map((l) => `<div style="margin:2px 0;${/^Still due|^Every hour|^What was paid/.test(l) ? 'font-weight:800;color:#fde68a' : /^•/.test(l) ? 'padding-left:10px' : ''}">${escapeHtmlText(l)}</div>`).join('')}
         </div>`
-        const decidedAmt = v.status !== 'OPEN' ? `<div style="margin-top:3px;color:#86efac"><strong>Decided: ${snap.approvedAmount !== undefined ? fmtRand(Number(snap.approvedAmount)) : (v.approved_payable_hours !== null && v.approved_payable_hours !== undefined ? Number(v.approved_payable_hours).toFixed(2) + ' h' : v.status)}</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''}${v.decision_reason ? ' — ' + escapeHtmlText(v.decision_reason) : ''}</div>` : ''
+        const decidedAmt = v.status !== 'OPEN' ? `<div style="margin-top:3px;color:#86efac"><strong>Decided: ${snap.approvedAmount !== undefined ? fmtRand(Number(snap.approvedAmount)) : (v.approved_payable_hours !== null && v.approved_payable_hours !== undefined ? Number(v.approved_payable_hours).toFixed(2) + ' h' : v.status)}</strong>${v.reviewed_by_name ? ' by ' + escapeHtmlText(v.reviewed_by_name) : ''}${v.decision_reason ? ' — ' + escapeHtmlText(v.decision_reason) : ''}${reopenBtn}</div>` : ''
         return `<div id="bw-review-${v.id}" style="font-size:12px;line-height:1.4;margin-bottom:6px">${head}<span style="opacity:.6">#${v.id}</span>${body}${decidedAmt}${withForm ? decisionForm(v, snap) : ''}${editHtml}</div>`
       }
       // Owner 2026-09-22: an overlap review must SHOW the two entries side by side — what was billed
@@ -4313,13 +4323,15 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         let sub: any = null, cmp: any = null
         try { sub = v.subject_snapshot_json ? JSON.parse(v.subject_snapshot_json) : null } catch (err) {}
         try { cmp = v.compared_snapshot_json ? JSON.parse(v.compared_snapshot_json) : null } catch (err) {}
-        const live = cmpRows[Number(v.compared_shift_id)]
+        const cmpIsDraft = v.compared_source === 'draft'
+        const live = cmpIsDraft ? cmpRowsByDraft[Number(v.compared_shift_id)] : cmpRows[Number(v.compared_shift_id)]
         const cStart = live?.start_time || cmp?.startTime || '', cEnd = live?.end_time || cmp?.endTime || '', cDate = live?.work_date || cmp?.workDate || v.work_date
         const cVenue = live?.outlet_venue || cmp?.venue || '', cWt = live?.work_type || cmp?.workType || 'Normal', cDesc = live?.work_description || cmp?.workDescription || ''
-        const cHours = Number(live?.hours_worked ?? cmp?.hours ?? v.compared_hours ?? 0), cAmt = live ? Number(live.amount || 0) : Number(cmp?.amount ?? 0)
-        const cWeek = live?.payroll_week_start || cmp?.payrollWeekStart || (cDate >= weekStart ? weekStart : null)
-        const cPaidIn = cWeek && cWeek < weekStart ? `PAID in payroll ${cWeek} → ${proxyEndOfPayrollWeek(cWeek)} (closed)` : `in THIS payroll (${weekStart} → ${weekEnd}, not yet paid)`
-        const sStart = sub?.startTime || '', sEnd = sub?.endTime || '', sVenue = sub?.venue || '', sWt = sub?.workType || 'Normal', sDesc = sub?.workDescription || '', sHours = Number(sub?.hours ?? v.original_hours ?? 0)
+        const cHours = Number(live?.hours_worked ?? cmp?.hours ?? v.compared_hours ?? 0) || hoursBetween(cStart, cEnd), cAmt = live ? Number(live.amount || 0) : Number(cmp?.amount ?? 0)
+        const cWeek = live?.payroll_week_start || cmp?.payrollWeekStart || (live ? (cDate >= weekStart ? weekStart : weekOfDate(cDate)) : null)
+        const cRef = live ? `shift #${live.id}` : (cmpIsDraft ? `draft #${v.compared_shift_id} (not final-submitted)` : `shift #${v.compared_shift_id}`)
+        const cPaidIn = !live ? 'not yet paid (still a draft)' : cWeek && cWeek < weekStart ? `PAID in payroll ${cWeek} → ${proxyEndOfPayrollWeek(cWeek)} (closed)` : `in THIS payroll (${weekStart} → ${weekEnd}, not yet paid)`
+        const sStart = sub?.startTime || '', sEnd = sub?.endTime || '', sVenue = sub?.venue || '', sWt = sub?.workType || 'Normal', sDesc = sub?.workDescription || '', sHours = Number(sub?.hours ?? v.original_hours ?? 0) || hoursBetween(sStart, sEnd)
         const a = timeToMinutes(sStart), b0 = timeToMinutes(sEnd), c0 = timeToMinutes(cStart), d0 = timeToMinutes(cEnd)
         let ovText = 'times unreadable', ovH = 0, extraText = ''
         if (a !== null && b0 !== null && c0 !== null && d0 !== null) {
@@ -4338,13 +4350,13 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         const verdict = isSelf ? 'This is the SAME entry (the draft became this paid row) — nothing billed twice. No decision needed.'
           : cDate !== sDate ? `DIFFERENT DAYS: the other entry is ${cDate} (${dayName(cDate)}), this one is ${sDate} (${dayName(sDate)}). Same clock times, but not the same day — nothing billed twice. Recommended: pay as claimed (${sHours.toFixed(2)} h).`
           : same ? `Identical times and place — looks like a DUPLICATE. Recommended: approve 0 h on this entry (the other one already pays ${cHours.toFixed(2)} h).`
-          : ovH > 0 ? `Recommended: approve only the hours NOT already covered — ${(sHours - ovH).toFixed(2)} h (${extraText}). The ${ovH.toFixed(2)} h overlap is already billed on shift #${v.compared_shift_id}.`
+          : ovH > 0 ? `Recommended: approve only the hours NOT already covered — ${Math.max(0, sHours - ovH).toFixed(2)} h (${extraText}). The ${ovH.toFixed(2)} h overlap is already ${live ? 'billed on shift #' + live.id : 'claimed on draft #' + v.compared_shift_id}.`
           : 'No overlapping minutes — recommended: pay as claimed.'
         const line = (label: string, color: string, date: string, st: string, en: string, hrs: number, wt: string, venue: string, desc: string, money: string) => `<div style="margin:3px 0;padding:4px 6px;border-left:3px solid ${color};background:rgba(255,255,255,.04)"><div style="font-weight:800;color:${color}">${label}</div><div>${escapeHtmlText(dayName(date))} ${escapeHtmlText(date)} · <strong>${escapeHtmlText(st)}–${escapeHtmlText(en)}</strong> · ${hrs.toFixed(2)} h</div><div style="opacity:.9">${escapeHtmlText(wt)} · ${escapeHtmlText(venue)}${desc ? ' · ' + escapeHtmlText(desc) : ''}</div><div style="opacity:.9">${money}</div></div>`
         overlapBox = `<div style="margin-top:5px;padding:7px 9px;border-radius:8px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.14)">
           <div style="font-weight:800;margin-bottom:2px">What overlaps what</div>
-          ${line('ALREADY BILLED', '#93c5fd', cDate, cStart, cEnd, cHours, cWt, cVenue, cDesc, `<strong>${fmtRand(cAmt)}</strong> · shift #${v.compared_shift_id} · ${escapeHtmlText(cPaidIn)}`)}
-          ${line('THIS ENTRY', '#e2b93b', sDate, sStart, sEnd, sHours, sWt, sVenue, sDesc, v.subject_source === 'draft' ? 'draft — not yet final-submitted' : 'shift #' + v.subject_shift_id + ' in this payroll')}
+          ${line(live ? 'ALREADY BILLED' : 'OTHER ENTRY', '#93c5fd', cDate, cStart, cEnd, cHours, cWt, cVenue, cDesc, `${live ? `<strong>${fmtRand(cAmt)}</strong> · ` : ''}${escapeHtmlText(cRef)} · ${escapeHtmlText(cPaidIn)}`)}
+          ${line('THIS ENTRY', '#e2b93b', sDate, sStart, sEnd, sHours, sWt, sVenue, sDesc, v.subject_source === 'draft' ? (cmpRowsByDraft[Number(v.subject_shift_id)] ? `final-submitted → shift #${cmpRowsByDraft[Number(v.subject_shift_id)].id} in this payroll (${fmtRand(Number(cmpRowsByDraft[Number(v.subject_shift_id)].amount || 0))} on the row)` : 'draft — not yet final-submitted') : 'shift #' + v.subject_shift_id + ' in this payroll')}
           <div style="margin-top:4px"><strong>Overlap by the clock:</strong> ${escapeHtmlText(ovText)}${ovH > 0 && cDate === sDate ? `<br><strong>Not covered by the other entry:</strong> ${escapeHtmlText(extraText)}` : ''}</div>
           <div style="margin-top:4px;padding:5px 7px;border-radius:6px;background:rgba(253,230,138,.12);color:#fde68a;font-weight:700">${escapeHtmlText(verdict)}</div>
         </div>`
@@ -4495,7 +4507,8 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     let agreedH = 0, agreedA = 0, agreedApprox = false, agreedChanged = 0
     const personHasOpen = openRev > 0
     rows.forEach((r) => {
-      const decided = reviewsForPaid(r).filter((v) => v.status === 'RESOLVED' && v.approved_payable_hours !== null && v.approved_payable_hours !== undefined).sort((a, b) => b.id - a.id)[0]
+      // Place clicks (rate choice / crew pattern) and Petrus/holiday add-ons change the ROW itself, not the hours.
+      const decided = reviewsForPaid(r).filter((v) => v.status === 'RESOLVED' && v.approved_payable_hours !== null && v.approved_payable_hours !== undefined && !/^(rate_choice_|petrus_extra|public_holiday|crew_pattern\|)/.test(v.issue_key || '')).sort((a, b) => b.id - a.id)[0]
       const paidH = Number(r.hours_worked || 0), paidA = Number(r.amount || 0)
       if (!decided) { agreedH += paidH; agreedA += paidA; return }
       const ah = Number(decided.approved_payable_hours)
@@ -4511,8 +4524,21 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       const st = (decided as any).approved_start_time || snap?.recommendedStart, en = (decided as any).approved_end_time || snap?.recommendedEnd
       if (st && en && timeToMinutes(st) !== null && timeToMinutes(en) !== null && ruleApplies(sid)) {
         agreedA += computeRuleDay(r.work_date, [ruleSegmentFor(sid, r.work_type, st, en, [r.outlet_venue, r.event_name, r.work_description].join(' '), r.id)]).amount
-      } else if (paidH > 0) {
-        agreedA += Math.round(paidA * (ah / paidH) * 100) / 100; agreedApprox = true
+      } else {
+        // Owner 2026-09-22 (Givemore 17 Sep): partial hours are priced at the row's own hourly rule —
+        // WAREHOUSE / VENUE click honoured — as the LAST `ah` hours of the entry (same as the Excel sheet).
+        const placeRv = reviewsForPaid(r).filter((v) => /^(rate_choice_|crew_pattern\|)/.test(v.issue_key || '') && v.status === 'RESOLVED' && /chosen/i.test(v.decision_reason || '')).sort((a, b) => b.id - a.id)[0]
+        const baseKind = ownerPayKind(sid, r.work_type, [r.outlet_venue, r.event_name, r.work_description].join(' '), staffBase[sid]?.payroll_rule || 'hourly')
+        const kindP: OwnerPayKind = placeRv ? (/^warehouse/i.test((placeRv.decision_reason || '').trim()) ? 'warehouse' : 'event') : (baseKind === 'warehouse_or_event' ? 'event' : baseKind)
+        const s0 = timeToMinutes(r.start_time), e0 = timeToMinutes(r.end_time)
+        let priced: OwnerPriced | null = null
+        if (s0 !== null && e0 !== null && ruleApplies(sid)) {
+          const e = e0 <= s0 ? e0 + 1440 : e0; const ns = Math.max(s0, e - Math.round(ah * 60))
+          const stP = String(Math.floor((ns % 1440) / 60)).padStart(2, '0') + ':' + String(ns % 60).padStart(2, '0')
+          priced = ownerPayForShift(r.work_date, stP, r.end_time, kindP)
+        }
+        if (priced) agreedA += priced.amount
+        else if (paidH > 0) { agreedA += Math.round(paidA * (ah / paidH) * 100) / 100; agreedApprox = true }
       }
     })
     // Owner 2026-09-22: an "already paid" review approved as a rand amount on a DRAFT (not yet
@@ -5313,6 +5339,50 @@ app.post('/wages-admin/delete-draft', async (c) => {
     return back(safeReturn + sep + 'msg=' + encodeURIComponent('Draft #' + draftId + ' (' + d.display_name + ', ' + d.work_date + ' ' + d.start_time + '–' + d.end_time + ') deleted by ' + admin.name + '. It no longer shows for the worker or the office; a copy is kept in the log.'))
   } catch (err) {
     return back(safeReturn + sep + 'error=' + encodeURIComponent('Could not delete draft #' + draftId + ': ' + describeProxyError(err)))
+  }
+})
+
+// Owner 2026-09-22: change a decision. Puts a RESOLVED review back to OPEN; the previous decision is
+// kept in the log and in the review's decision history note. If the decision had added rand to a paid
+// row (Petrus extra / public holiday / rate choice / already-paid amount), that add-on is reversed so
+// the new decision starts from the base amount.
+app.post('/wages-admin/reopen-review', async (c) => {
+  const db = c.env?.DB
+  const admin = await adminUserFromCookie(c.req.raw.headers.get('cookie') || '')
+  const back = (to: string) => c.redirect(to, 303)
+  if (!db) return back('/admin/wages?error=' + encodeURIComponent('Database not available.'))
+  if (!admin) return back('/login?next=' + encodeURIComponent('/admin/wages'))
+  let form: FormData
+  try { form = await c.req.raw.formData() } catch (err) { return back('/admin/wages?error=' + encodeURIComponent('Could not read the reopen form.')) }
+  const reviewId = Number(normalizeProxyFieldValue(form.get('review_id')))
+  const returnTo = normalizeProxyFieldValue(form.get('return_to')) || '/admin/wages'
+  const safeReturn = /^\/admin\/wages(\?|$)/.test(returnTo) ? returnTo : '/admin/wages'
+  const sep = safeReturn.includes('?') ? '&' : '?'
+  try {
+    const rv = await db.prepare(`SELECT * FROM wage_payroll_reviews WHERE id = ?`).bind(reviewId).first<any>()
+    if (!rv) return back(safeReturn + sep + 'error=' + encodeURIComponent('Review #' + reviewId + ' not found.'))
+    if (rv.status !== 'RESOLVED') return back(safeReturn + sep + 'error=' + encodeURIComponent('Review #' + reviewId + ' is ' + rv.status + ' — only a decided (RESOLVED) review can be reopened.'))
+    let snap: any = {}; try { snap = JSON.parse(rv.system_snapshot_json || '{}') } catch (err) {}
+    await captureWagesDebug(c.env, { request_path: '/wages-admin/reopen-review', request_method: 'POST', original_payload_json: JSON.stringify(rv), rewritten_payload_json: JSON.stringify({ reopened_by: admin.name }), rewrite_applied: 1, response_status: 303, response_location: safeReturn, response_error_text: '' })
+    // Reverse a rand add-on placed on the paid row by the previous decision.
+    let reversed = ''
+    if (rv.subject_source === 'shift' && (snap.petrusExtra || snap.publicHoliday) && Number(snap.approvedExtraAmount || 0) > 0) {
+      const row = await db.prepare(`SELECT id, total_amount, gross_wage FROM wage_shifts WHERE id = ?`).bind(rv.subject_shift_id).first<{ id: number, total_amount: number, gross_wage: number }>()
+      if (row) {
+        const before = Number(row.gross_wage ?? row.total_amount ?? 0), after = Math.round((before - Number(snap.approvedExtraAmount)) * 100) / 100
+        await db.prepare(`UPDATE wage_shifts SET total_amount = ?, gross_wage = ?, payroll_note = COALESCE(payroll_note,'') || ' | Review #' || ? || ' reopened by ' || ? || ': previous add-on ' || ? || ' reversed (' || ? || ' → ' || ? || ')', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(after, after, reviewId, admin.name, fmtRand(Number(snap.approvedExtraAmount)), fmtRand(before), fmtRand(after), row.id).run()
+        reversed = ' Previous ' + fmtRand(Number(snap.approvedExtraAmount)) + ' add-on reversed on shift #' + row.id + '.'
+      }
+    }
+    const history = (snap.decisionHistory || []) as any[]
+    history.push({ at: new Date().toISOString(), by: rv.reviewed_by_name, decision_type: rv.decision_type, decision_reason: rv.decision_reason, approved_payable_hours: rv.approved_payable_hours, approvedAmount: snap.approvedAmount, approvedExtraAmount: snap.approvedExtraAmount, placeDecision: snap.placeDecision, reopened_by: admin.name })
+    for (const k of ['approvedAmount', 'approvedExtraAmount', 'approvedRate', 'decidedBy', 'placeDecision', 'placeDecidedBy', 'placeAmountIfSubmitted', 'placeBreakdown', 'customHours', 'customExtraAmount', 'customIncludeCorrection']) delete snap[k]
+    snap.decisionHistory = history
+    await db.prepare(`UPDATE wage_payroll_reviews SET status = 'REOPENED', decision_type = NULL, decision_reason = NULL, approved_payable_hours = NULL, approved_start_time = NULL, approved_end_time = NULL, reviewed_by_user_id = NULL, reviewed_by_name = NULL, reviewed_at = NULL, system_snapshot_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(JSON.stringify(snap), reviewId).run()
+    await db.prepare(`UPDATE wage_payroll_reviews SET status = 'OPEN' WHERE id = ?`).bind(reviewId).run()
+    return back(safeReturn + sep + 'msg=' + encodeURIComponent('Review #' + reviewId + ' reopened by ' + admin.name + ' — decide again below. Previous decision (' + (rv.decision_reason || rv.decision_type || '') + ') is kept in the log.' + reversed) + '#bw-review-' + reviewId)
+  } catch (err) {
+    return back(safeReturn + sep + 'error=' + encodeURIComponent('Could not reopen review #' + reviewId + ': ' + describeProxyError(err)))
   }
 })
 

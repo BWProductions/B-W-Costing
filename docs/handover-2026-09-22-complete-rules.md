@@ -1,7 +1,7 @@
 ---
 title: "B&W Productions — Wages System: Complete Rules & Handover"
 subtitle: "Every agreed rule and regulation, everything built and changed 12–22 September 2026, how the office reviews work, and how to restore"
-date: "22 September 2026 · live version v2026-09-22-14 · restore tag restore-2026-09-22-petrus-v5"
+date: "23 September 2026 · live version v2026-09-22-16 · restore tag restore-2026-09-23-reopen"
 ---
 
 # Part 1 — Where things are
@@ -161,7 +161,8 @@ Known quirk (unchanged): the engine sometimes compares a draft with its own fina
 1. **Venue must be named — RED.** Any entry priced at the venue rate whose venue field is blank or generic ("venue", "event", "site", "n/a", "x" …) is flagged: *"VENUE NOT NAMED: … claims the venue rate (R95/h) … but the venue field is (blank). Ask the worker where he was; if it was the warehouse, re-price at R81,25/h."*
 2. **Crew pattern — ORANGE.** On any day with 4 or more workers, if the minority place is 25 % or less of the crew, each minority entry is flagged with the names: *"CREW PATTERN: 7 of 8 workers say Warehouse on Mon 21 Sep (names) — X says venue 'FNB Stadium'. Was he really there? Confirm the venue, or re-price as Warehouse."* And the reverse: *"5 of 6 were at a venue (FNB Stadium) — X says Warehouse. Check he was not at the venue (R95/h would be due)."*
 3. **Decision — two unambiguous buttons, on paid rows AND drafts**: *"Where was he? Worker selected 'Warehouse Team' at 'Warehouse'. Your click decides the place and the rate:"* **WAREHOUSE — R81,25/h · R650,00 (8 h × R81,25)** or **VENUE — R95/h · R760,00 (8 h × R95)**. Each button shows the rate and the rand it produces. On a paid row the row is re-priced immediately. On a draft the place is recorded with your name; **when the worker final-submits, the rate you chose is used automatically, whatever work type he picked**, and the paid row's note says "Place decided by office (review #…, name): WAREHOUSE R81,25/h". Nothing is paid before Final Submission.
-4. **Excluded**: Petrus, gardener House work, Music Bus, Sharleen (own rules). A row that already has a Rate-choice flag is not flagged twice. Decided flags never re-open; flags void themselves when the entry is corrected or deleted.
+4. **Area field is read too — RED (owner 22 Sep, v2026-09-22-15).** Owner: *"even though he says 'warehouse' underneath, it says 'Pretoria FNB'. You should have picked up that the team was at Pretoria and FNB."* If the worker selects Warehouse Team / venue "Warehouse" but types a real place in the **Area** box (anything that is not Meyerton / Henley / Randvaal / the warehouse address), the entry is flagged: *"WAREHOUSE CLAIMED BUT AREA SAYS 'Pretoria and fnb' … that is a venue, not the warehouse. Other workers were at Botanical garden Pretoria that day."* Same WAREHOUSE / VENUE buttons decide it. First live case: Givemore Thu 17 Sep (#10073).
+5. **Excluded**: Petrus, gardener House work, Music Bus, Sharleen (own rules). A row that already has a Rate-choice flag is not flagged twice. Decided flags never re-open; flags void themselves when the entry is corrected or deleted.
 
 First live run (22 Sep): one flag — #9955 Takavaudza, Mon 21 Sep, "5 of 6 at a venue (FNB Stadium), this one says Warehouse" — a genuine question for the office.
 
@@ -181,6 +182,10 @@ Every overlap / possible-duplicate review now carries a **"What overlaps what"**
   * *This is the SAME entry (the draft became this paid row) — nothing billed twice.*
 
 The Approve-hours box, reason and Record decision buttons sit directly under it.
+
+**↺ Reopen — change a decision (v2026-09-22-15).** Owner: *"I need to go back and edit the decided amount to 4 hours. It doesn't allow me to go back."* Every decided review now shows a small **↺ Reopen** button next to "Decided: …". Click it → the review goes back to OPEN with the same box and buttons; decide again. The previous decision is kept in the review's log (`decisionHistory`) with who reopened it. If the previous decision had added rand to a paid row (Petrus extra / public holiday), that add-on is reversed on the row and noted in the row's payroll note. Route `/wages-admin/reopen-review`.
+
+**Approved hours are priced by place (v2026-09-22-16).** When the office approves fewer hours than claimed (e.g. 4 of 12), the payroll pays those hours at the entry's own hourly rule — Warehouse R81,25 or Venue R95, honouring any WAREHOUSE / VENUE click on that row — as the last hours of the entry (the extra hours are usually the early/late ones). The Excel and the green "Admin approved" figure agree. Example: Givemore Thu 17 Sep, 4.00 h approved → R325 as Warehouse, R380 if VENUE is clicked on #10073.
 
 **Self-compare reviews are auto-voided.** The engine sometimes opens an overlap review comparing a draft with the very paid row it became on Final Submission (Patrick #9943 and #9951 were this). The dashboard now voids these automatically with the reason recorded — nothing was billed twice, no decision needed.
 
@@ -212,13 +217,19 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 * **Public holidays (v2026-09-22-12, rate rules v10)** — see Part 2 → Public holidays. Also fixed: the closed-week dashboard view had gone blank for one deploy ("too many SQL variables" on the overlap-breakdown lookup) — chunked, verified 12–18 Sep renders with 118 reviews.
 * **Stale drafts & Delete draft button (v2026-09-22-13/-14)** — see Part 3. Erick #720 removed; ghost reviews auto-voided.
 
+**23 Sep 2026 (v2026-09-22-15, v2026-09-22-16)**
+* **↺ Reopen** on every decided review (Part 5c). **Area-aware crew check** (Part 5b). Overlap box now shows a draft that has since been final-submitted as "final-submitted → shift #… in this payroll (R… on the row)" instead of "not yet final-submitted"; compared drafts show their real hours/amount.
+* **Approved hours priced by place** on the dashboard and in the Excel; WAREHOUSE / VENUE clicks on crew-pattern flags are honoured in the pricing, and place/Petrus/holiday reviews no longer count as an "approved hours" decision.
+* **Givemore Thu 17 Sep** (owner instruction): 08:00–16:00 already paid R500 in payroll 12–18 Sep (shift #9705); only 06:00–08:00 + 16:00–18:00 = **4.00 h due**. #9996 reopened and re-decided 4.00 h; #9944 (the earlier R475 = 4 h + R150 rate correction) voided as superseded, old decision kept in its log; paid row #9789 stays 12 h claimed / 4 h approved → **R325** (Warehouse) or **R380** once VENUE is clicked on #10073 ("Pretoria and fnb"). Backup `docs/restore-2026-09-23-givemore/`. Fixed a bug in the area check that would have crashed the dashboard on the first area flag (caught by the type-checker before production).
+
 # Part 8 — Payroll 12–18 Sep 2026 (paid 17 Sep) — final figures
 111 paid rows (24 missed) · claimed 843,50 h · R72 438,15 · **approved 793,75 h · R71 096,90** · missed 98,00 h · R8 861,25 · deductions R3 210,00 · **net R67 886,90**. Full detail: `handover-2026-09-16-complete-hardcopy.pdf`.
 
 # Part 9 — Restore points
 | Tag / folder | State |
 |---|---|
-| `restore-2026-09-22-petrus-v5` | **Live now (v2026-09-22-14)** — Petrus v5 rule + rent deduction removed. To undo only the deduction removal: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2` |
+| `restore-2026-09-23-reopen` | **Live now (v2026-09-22-16)** — Reopen a decided review, area-aware crew check, partial hours priced by place. |
+| `restore-2026-09-22-petrus-v5` | v2026-09-22-14 — Petrus v5 rule + rent deduction removed. To undo only the deduction removal: `UPDATE wage_recurring_deductions SET active = 1, effective_to = NULL WHERE id = 2` |
 | `restore-2026-09-21-already-paid` | v2026-09-21-2 (already-paid rule, old Petrus rule, rent deduction still active) |
 | `restore-2026-09-18-rolled-back` | v2026-09-16-2 after the 18 Sep rollback |
 | `restore-2026-09-15-approved` | 15 Sep approved state + full data snapshot (`docs/restore-2026-09-15-approved/`) |
@@ -231,7 +242,7 @@ Colour key: yellow editable · light-blue sub-total · pink attention · pastel 
 git checkout restore-2026-09-22-petrus-v5
 npm run build
 npx wrangler pages deploy dist --project-name bw-productions --branch main --commit-dirty=true
-curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-22-14
+curl https://bwprodsystem.co.za/wages-version      # expect v2026-09-22-16
 ```
 To go back to before the already-paid rule: `git checkout restore-2026-09-18-rolled-back` and deploy (expect v2026-09-16-2); any `paid_before|…` reviews can then be deleted (they are the only rows it writes).
 
@@ -255,4 +266,4 @@ To go back to before the already-paid rule: `git checkout restore-2026-09-18-rol
 5. Daniel's R3 000 loan — check.
 6. Remove CSV / old-rules export after one clean payroll.
 
-*Prepared for B&W Productions — Bernie Burness — 21 September 2026.*
+*Prepared for B&W Productions — Bernie Burness — 23 September 2026.*

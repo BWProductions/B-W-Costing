@@ -67,7 +67,7 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
   const reviewsAll = (revRes.results || []) as ReviewRow[]
   const paidIds = new Set(paid.map((r) => r.id)); const paidDraftIds = new Set(paid.map((r) => r.source_draft_id).filter(Boolean) as number[])
   const reviewsForPaid = (r: PaidRow) => reviewsAll.filter((v) => (v.subject_source === 'shift' && v.subject_shift_id === r.id) || (v.subject_source === 'draft' && r.source_draft_id && v.subject_shift_id === r.source_draft_id))
-  const decidedFor = (r: PaidRow) => reviewsForPaid(r).filter((v) => v.status === 'RESOLVED' && v.approved_payable_hours !== null && v.approved_payable_hours !== undefined && !/^(rate_choice_|petrus_extra|public_holiday)/.test(v.issue_key || '')).sort((a, b) => b.id - a.id)[0]
+  const decidedFor = (r: PaidRow) => reviewsForPaid(r).filter((v) => v.status === 'RESOLVED' && v.approved_payable_hours !== null && v.approved_payable_hours !== undefined && !/^(rate_choice_|petrus_extra|public_holiday|crew_pattern\|)/.test(v.issue_key || '')).sort((a, b) => b.id - a.id)[0]
 
   // Prior payroll rows on the same real day (for the system note on missed shifts).
   const missedDates = Array.from(new Set(paid.filter((r) => r.work_date < weekStart).map((r) => r.work_date)))
@@ -90,8 +90,11 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
   type Priced = { row: PaidRow, missed: boolean, claimedH: number, approvedH: number, amount: number, rate: number, breakdown: string, review?: ReviewRow, systemNote: string, reviewNote: string, rateChoice?: ReviewRow }
   const priceHours = (r: PaidRow, hours: number, startHint?: string | null, endHint?: string | null) => {
     const kind = deps.ownerPayKind(r.staff_id, r.work_type, [r.outlet_venue, r.event_name, r.work_description].join(' '), r.payroll_rule)
-    const rateChoice = reviewsForPaid(r).find((v) => /^rate_choice_/.test(v.issue_key || '') && v.status === 'RESOLVED')
-    const effKind = kind === 'warehouse_or_event' ? (rateChoice ? (/warehouse/i.test(rateChoice.decision_reason || '') ? 'warehouse' : 'event') : 'event') : kind
+    // Owner 2026-09-22: a WAREHOUSE / VENUE click on either a rate-choice review OR a crew-pattern flag
+    // decides the place for this row — partial-hour pricing must follow that click too.
+    const rateChoice = reviewsForPaid(r).filter((v) => /^(rate_choice_|crew_pattern\|)/.test(v.issue_key || '') && v.status === 'RESOLVED' && /chosen/i.test(v.decision_reason || '')).sort((a, b) => b.id - a.id)[0]
+    const chosenKind = rateChoice ? (/^warehouse/i.test((rateChoice.decision_reason || '').trim()) ? 'warehouse' : 'event') : null
+    const effKind = chosenKind && (kind === 'warehouse_or_event' || kind === 'warehouse' || kind === 'event') ? chosenKind : (kind === 'warehouse_or_event' ? 'event' : kind)
     const full = Number(r.hours_worked || 0)
     if (Math.abs(hours - full) < 0.001 || hours <= 0) {
       const p = hours <= 0 ? { amount: 0, hourlyRate: Number(r.rate || 0), breakdown: 'Approved 0 h — nothing payable' } : deps.ownerPayForShift(r.work_date, r.start_time, r.end_time, effKind)
