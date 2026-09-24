@@ -343,6 +343,16 @@ Both new loans carry the worker's WhatsApp wording in the reason and start deduc
 
 Hours are the hours actually paid (meeting deducted where it applies; R0 duplicate rows count 0 h). Heritage Day (Thu 24 Sep) is included at the approved holiday amounts in Part 2. Deductions / loans as per the **Loans & Deductions** tab (Isaac #6 R600 + scheduled instalments on #1–#3; Petrus none; Daniel none). Full detail: `docs/BW_Payroll_2026-09-19_to_25_AUDITOR.xlsx`.
 
+**Fixed (recurring) deductions in force this payroll** (`wage_recurring_deductions`, active):
+
+| # | Worker | Type | Weekly | From | Note |
+|---|---|---|---|---|---|
+| 3 | Erick Mpho Molefe | Car Payment | R1 000 | 1 Aug 2026 | ongoing |
+| 1 | Isaac Mbele | Eggs | R260 | 1 Aug 2026 | ongoing |
+| 5 | Joshua Motsamai Nteo | Car Payment | R1 000 | **19 Sep 2026** | **Added 24 Sep 2026 on owner instruction.** Deducted weekly from wages; the accumulated weekly amounts are paid over to Joshua on the 25th of every month. Ongoing until Bernie ends it (set `effective_to`). Starts with this 19–25 Sep payroll; Joshua's net this week = R4 737,51 − R1 000. Backup: `docs/restore-2026-09-24-joshua-car/`. |
+
+Retired: #2 Petrus Rent R450 (ended 18 Sep) · #4 Isaac Car R500 (ended 23 Aug).
+
 **To confirm on Monday 28 Sep (follow-up panel):** Petrus really finished 14:00? · Givemore worked 08–15 (7 h) or only 4 h? · anybody in the warehouse past 15:00? Only an answer that shows an **under**payment creates a top-up row in the 26 Sep – 2 Oct payroll; worked-less answers are recorded and nothing is recovered (owner rule).
 
 ## Payroll 12–18 Sep 2026 (paid 17 Sep) — final figures
@@ -395,6 +405,6 @@ To go back to before the already-paid rule: `git checkout restore-2026-09-18-rol
 4. Remove CSV / old-rules export after one clean payroll.
 5. Push `main` to GitHub (118 local commits not yet pushed; all tags exist locally).
 
-Done and closed: crew check re-introduced for the current week only (22 Sep) · self-compare reviews auto-voided (22 Sep) · pay-rule panel removed altogether (23 Sep) · Daniel's R3 000 loan confirmed paid in full outside the payroll (23 Sep).
+Done and closed: crew check re-introduced for the current week only (22 Sep) · self-compare reviews auto-voided (22 Sep) · pay-rule panel removed altogether (23 Sep) · Daniel's R3 000 loan confirmed paid in full outside the payroll (23 Sep) · Joshua Car Payment R1 000/week fixed deduction added from 19 Sep (24 Sep).
 
-*Prepared for B&W Productions — Bernie Burness — 23 September 2026.*
+*Prepared for B&W Productions — Bernie Burness — 23 September 2026 (updated 24 Sep 2026).*

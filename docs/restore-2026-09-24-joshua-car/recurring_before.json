@@ -1,0 +1,54 @@
+[
+ {
+  "id": 1,
+  "staff_id": 6,
+  "deduction_type": "Eggs",
+  "reason": "Eggs",
+  "amount": 260,
+  "effective_from": "2026-08-01",
+  "effective_to": null,
+  "active": 1,
+  "created_by_user_id": null,
+  "created_at": "2026-08-07 04:48:33",
+  "updated_at": "2026-08-07 04:48:33"
+ },
+ {
+  "id": 2,
+  "staff_id": 4,
+  "deduction_type": "Rent",
+  "reason": "Rent",
+  "amount": 450,
+  "effective_from": "2026-08-01",
+  "effective_to": "2026-09-18",
+  "active": 0,
+  "created_by_user_id": null,
+  "created_at": "2026-08-07 04:48:33",
+  "updated_at": "2026-09-22 06:43:07"
+ },
+ {
+  "id": 3,
+  "staff_id": 9,
+  "deduction_type": "Car Payment",
+  "reason": "Car Payments",
+  "amount": 1000,
+  "effective_from": "2026-08-01",
+  "effective_to": null,
+  "active": 1,
+  "created_by_user_id": null,
+  "created_at": "2026-08-07 04:48:33",
+  "updated_at": "2026-08-07 04:48:33"
+ },
+ {
+  "id": 4,
+  "staff_id": 6,
+  "deduction_type": "Car Payment",
+  "reason": "Car",
+  "amount": 500,
+  "effective_from": "2026-08-01",
+  "effective_to": "2026-08-23",
+  "active": 0,
+  "created_by_user_id": 1,
+  "created_at": "2026-08-26 11:59:30",
+  "updated_at": "2026-08-26 11:59:30"
+ }
+]
