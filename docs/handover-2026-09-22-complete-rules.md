@@ -343,13 +343,13 @@ Both new loans carry the worker's WhatsApp wording in the reason and start deduc
 
 Hours are the hours actually paid (meeting deducted where it applies; R0 duplicate rows count 0 h). Heritage Day (Thu 24 Sep) is included at the approved holiday amounts in Part 2. Deductions / loans as per the **Loans & Deductions** tab (Isaac #6 R600 + scheduled instalments on #1–#3; Petrus none; Daniel none). Full detail: `docs/BW_Payroll_2026-09-19_to_25_AUDITOR.xlsx`.
 
-**Fixed (recurring) deductions in force this payroll** (`wage_recurring_deductions`, active):
+**Fixed (recurring) deductions on the books** (`wage_recurring_deductions`, active):
 
 | # | Worker | Type | Weekly | From | Note |
 |---|---|---|---|---|---|
 | 3 | Erick Mpho Molefe | Car Payment | R1 000 | 1 Aug 2026 | ongoing |
 | 1 | Isaac Mbele | Eggs | R260 | 1 Aug 2026 | ongoing |
-| 5 | Joshua Motsamai Nteo | Car Payment | R1 000 | **19 Sep 2026** | **Added 24 Sep 2026 on owner instruction.** Deducted weekly from wages; the accumulated weekly amounts are paid over to Joshua on the 25th of every month. Ongoing until Bernie ends it (set `effective_to`). Starts with this 19–25 Sep payroll; Joshua's net this week = R4 737,51 − R1 000. Backup: `docs/restore-2026-09-24-joshua-car/`. |
+| 5 | Joshua Motsamai Nteo | Car Payment | R1 000 | **26 Sep 2026** | **Added 24 Sep 2026 on owner instruction.** Deducted weekly from wages; the accumulated weekly amounts are paid over to Joshua on the 25th of every month. Ongoing until Bernie ends it (set `effective_to`). **Starts with the 26 Sep – 2 Oct payroll — nothing deducted in 19–25 Sep** (Joshua's 19–25 Sep net stays R4 737,51). Backup: `docs/restore-2026-09-24-joshua-car/`. |
 
 Retired: #2 Petrus Rent R450 (ended 18 Sep) · #4 Isaac Car R500 (ended 23 Aug).
 
@@ -400,11 +400,11 @@ To go back to before the already-paid rule: `git checkout restore-2026-09-18-rol
 
 ## Open items (on Bernie's say-so)
 1. **Monday 28 Sep**: answer the public-holiday follow-up panel (Petrus 14:00? Givemore 7 h or 4 h? anyone past 15:00?).
-2. Loans #7 (Erick R500) and #8 (Isaac R250 + R250) start deducting in the 26 Sep – 2 Oct payroll — check the Loans & Deductions tab.
+2. Loans #7 (Erick R500) and #8 (Isaac R250 + R250) and Joshua's new fixed Car Payment R1 000/week all start deducting in the 26 Sep – 2 Oct payroll — check the Loans & Deductions tab.
 3. Drafts' open reviews not blocking the green figure.
 4. Remove CSV / old-rules export after one clean payroll.
 5. Push `main` to GitHub (118 local commits not yet pushed; all tags exist locally).
 
-Done and closed: crew check re-introduced for the current week only (22 Sep) · self-compare reviews auto-voided (22 Sep) · pay-rule panel removed altogether (23 Sep) · Daniel's R3 000 loan confirmed paid in full outside the payroll (23 Sep) · Joshua Car Payment R1 000/week fixed deduction added from 19 Sep (24 Sep).
+Done and closed: crew check re-introduced for the current week only (22 Sep) · self-compare reviews auto-voided (22 Sep) · pay-rule panel removed altogether (23 Sep) · Daniel's R3 000 loan confirmed paid in full outside the payroll (23 Sep) · Joshua Car Payment R1 000/week fixed deduction added, first deduction in the 26 Sep – 2 Oct payroll (24 Sep).
 
 *Prepared for B&W Productions — Bernie Burness — 23 September 2026 (updated 24 Sep 2026).*
