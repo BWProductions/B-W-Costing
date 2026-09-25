@@ -2,6 +2,9 @@
 
 Internal ops platform for B&W Productions CC. Built on Cloudflare Pages + Hono + D1.
 
+## If the chat is lost — start here
+- **REBUILD PACK (24 Sep 2026)**: `docs/REBUILD-PACK-2026-09-24.md` / `.pdf` — weekly triple-check list, how to go back (tags + data snapshots), complete rule book, architecture, routes, tables, look & feel, rebuild order. Start here if the chat is lost.
+
 ## Live URLs
 - **Production**: https://bwprodsystem.co.za
 - **Pages alias**: https://bw-productions.pages.dev
