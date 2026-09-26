@@ -28,7 +28,7 @@ export type Deps = {
 }
 
 type Entry = { source: 'draft' | 'shift'; id: number; draftId: number | null; staff_id: number; name: string; payroll_rule: string; work_date: string; start: string; end: string; work_type: string; venue: string; area: string; descr: string; hours: number; amount: number; payroll_week_start: string | null }
-type Place = 'warehouse' | 'venue' | 'venue_unnamed' | 'ambiguous' | 'ambiguous_area' | 'other'
+type Place = 'warehouse' | 'venue' | 'venue_unnamed' | 'ambiguous' | 'ambiguous_area' | 'garden_event_words' | 'other'
 
 const norm = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
 const longDate = (iso: string) => { const d = new Date(iso + 'T00:00:00Z'); return isNaN(d.getTime()) ? iso : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()] + ' ' + d.getUTCFullYear() }
@@ -54,6 +54,12 @@ export function wordingNamesAVenue(venue: string, area: string, descr: string) {
   if (venue && !venueIsWarehouse(venue) && !venueIsUnnamed(venue)) return true
   return VENUE_WORDS.test(descr || '')
 }
+// Owner 24 Sep 2026 (Takavaudza Sun 20 Sep "Installing lights and garden work" at the House): a gardener's
+// House / Garden entry whose wording describes EVENT work — lights, set-up, strike, rigging, stage, sound,
+// décor, a function — could be a venue job (R95/h) rather than garden work (R62,50/h). The office must be asked.
+export const EVENT_WORK_WORDS = /(light(s|ing)?|install|set[\s-]*up|setup|strike|break[\s-]*down|rig|stage|sound|speaker|décor|decor|draping|marquee|tent|function|wedding|party|event|table|chair|dance\s*floor|festoon|fairy)/i
+export function gardenWordingSoundsLikeEvent(descr: string, venue: string): boolean { return EVENT_WORK_WORDS.test(descr || '') || EVENT_WORK_WORDS.test(venue || '') }
+export function eventWordEvidence(descr: string, venue: string): string { const m = EVENT_WORK_WORDS.exec(descr || '') || EVENT_WORK_WORDS.exec(venue || ''); return m ? m[0] : '' }
 export function venueEvidence(venue: string, area: string, descr: string): string {
   if (areaNamesAPlace(area)) return area
   if (venue && !venueIsWarehouse(venue) && !venueIsUnnamed(venue)) return venue
@@ -64,12 +70,13 @@ function placeOf(d: Deps, e: Entry): Place {
   if (kind === 'warehouse' && wordingNamesAVenue(e.venue, e.area, e.descr)) return 'ambiguous_area'
   if (kind === 'warehouse') return 'warehouse'
   if (kind === 'warehouse_or_event') return venueIsWarehouse(e.venue) ? 'ambiguous' : 'ambiguous'
+  if (kind === 'gardener' && gardenWordingSoundsLikeEvent(e.descr, e.venue)) return 'garden_event_words'
   if (kind !== 'event') return 'other' // Petrus, gardener block, Music Bus, fixed weekly — own rules
   return venueIsUnnamed(e.venue) ? 'venue_unnamed' : 'venue'
 }
 
 export type CrewFlag = {
-  subject: Entry; place: Place; severity: 'red' | 'orange'; kind: 'unnamed_venue' | 'minority_venue' | 'minority_warehouse' | 'warehouse_with_area'
+  subject: Entry; place: Place; severity: 'red' | 'orange'; kind: 'unnamed_venue' | 'minority_venue' | 'minority_warehouse' | 'warehouse_with_area' | 'garden_event_words'
   title: string; reason: string; dayWarehouse: number; dayVenue: number; dayWorkers: number; majorityPlace: 'warehouse' | 'venue'; others: string[]; factsHash: string
 }
 
@@ -91,6 +98,12 @@ export function computeFlags(d: Deps, entries: Entry[]): CrewFlag[] {
     for (const { e, p } of placed) {
       if (p === 'ambiguous') continue // already covered by the Rate-choice review
       const hrs = e.hours ? e.hours.toFixed(2) + ' h' : (e.start + '–' + e.end)
+      if (p === 'garden_event_words') {
+        const evid = eventWordEvidence(e.descr, e.venue)
+        const reason = `GARDEN CLAIMED BUT THE WORK SOUNDS LIKE A VENUE JOB: ${e.name} selected “${e.work_type}” at “${e.venue || '(blank)'}” for ${hrs} on ${longDate(date)} and wrote “${e.descr}”. “${evid}” is event work — was this a function/venue set-up (venue rate R95/h${/^0/.test(String(new Date(date + 'T00:00:00Z').getUTCDay())) ? ', Sunday R114/h' : ''}) or ordinary garden work (R62,50/h${new Date(date + 'T00:00:00Z').getUTCDay() === 0 ? ', Sunday R75/h' : ''})? Choose below.`
+        flags.push({ subject: e, place: p, severity: 'red', kind: 'garden_event_words', title: `Garden claimed — but the work sounds like a venue job (“${evid}”)`, reason, dayWarehouse: wh.size, dayVenue: ve.size, dayWorkers: workers, majorityPlace: majority, others: [...ve].map(nameOf), factsHash: fnv([e.source, e.id, e.work_date, e.start, e.end, e.venue, e.descr, e.work_type].join('|')) })
+        continue
+      }
       if (p === 'ambiguous_area') {
         const evid = venueEvidence(e.venue, e.area, e.descr) || e.area
         const venuesThatDay = Array.from(new Set(day.filter((x) => ve.has(x.staff_id)).map((x) => x.venue).filter(Boolean)))

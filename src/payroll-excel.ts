@@ -93,8 +93,8 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     // Owner 2026-09-22: a WAREHOUSE / VENUE click on either a rate-choice review OR a crew-pattern flag
     // decides the place for this row — partial-hour pricing must follow that click too.
     const rateChoice = reviewsForPaid(r).filter((v) => /^(rate_choice_|crew_pattern\|)/.test(v.issue_key || '') && v.status === 'RESOLVED' && /chosen/i.test(v.decision_reason || '')).sort((a, b) => b.id - a.id)[0]
-    const chosenKind = rateChoice ? (/^warehouse/i.test((rateChoice.decision_reason || '').trim()) ? 'warehouse' : 'event') : null
-    const effKind = chosenKind && (kind === 'warehouse_or_event' || kind === 'warehouse' || kind === 'event') ? chosenKind : (kind === 'warehouse_or_event' ? 'event' : kind)
+    const chosenKind = rateChoice ? (/^warehouse/i.test((rateChoice.decision_reason || '').trim()) ? 'warehouse' : /^garden/i.test((rateChoice.decision_reason || '').trim()) ? 'gardener' : 'event') : null
+    const effKind = chosenKind && (kind === 'warehouse_or_event' || kind === 'warehouse' || kind === 'event' || kind === 'gardener') ? chosenKind : (kind === 'warehouse_or_event' ? 'event' : kind)
     const full = Number(r.hours_worked || 0)
     if (Math.abs(hours - full) < 0.001 || hours <= 0) {
       const p = hours <= 0 ? { amount: 0, hourlyRate: Number(r.rate || 0), breakdown: 'Approved 0 h — nothing payable' } : deps.ownerPayForShift(r.work_date, r.start_time, r.end_time, effKind)

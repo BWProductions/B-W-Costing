@@ -203,7 +203,10 @@ Known quirk (unchanged): the engine sometimes compares a draft with its own fina
    > **WHAT YOU SHOULD PAY THIS WEEK &nbsp; R640,00**
    > **[ APPROVE — R640,00 ]** &nbsp; *(or: this was the warehouse — R434,38)*
    The green APPROVE pays the difference on the row (last week's row untouched), writes the sum into the row's payroll note and the Excel breakdown ("DIFFERENCE ONLY …"), and voids the hour-based overlap / already-paid reviews on the same entry as superseded. Uses the same engine as the Already-paid rule (Part 5), forced to each place. Without an earlier payment the buttons show the full-day amounts as before. **Approved on 23 Sep: Givemore Thu 17 Sep → Venue R640,00** (row #9789).
-6. **Excluded**: Petrus, gardener House work, Music Bus, Sharleen (own rules). A row that already has a Rate-choice flag is not flagged twice. Decided flags never re-open; flags void themselves when the entry is corrected or deleted.
+6. **Excluded from the crew majority**: Petrus, gardener House work, Music Bus, Sharleen (own rules) — but see the next paragraph for gardeners.
+
+**Garden entry whose wording sounds like EVENT work — the office is asked (owner 24 Sep 2026, v2026-09-24-2).** Owner: *"Installing lights in a garden — you should have asked me if that's a warehouse or a venue, because installing the lights could be a venue or garden work."* Every gardener House / House-Garden entry (Givemore, Takavaudza) is now read for event words — lights/lighting, install, set-up, strike/breakdown, rig, stage, sound, décor, draping, marquee/tent, function, wedding, party, event, tables/chairs, dance floor, festoon/fairy — and flagged red **GARDEN CLAIMED BUT THE WORK SOUNDS LIKE A VENUE JOB** with two buttons: **GARDEN — R62,50/h (Sunday R75)** or **VENUE / FUNCTION — R95/h (Sunday R114)**, each showing the rand. Works on paid rows (re-prices now) and drafts (applied at Final Submission). First case: Takavaudza Sun 20 Sep #9821 "Installing lights and garden work" — awaiting Bernie's answer (R450 as garden, R684 as venue).
+ A row that already has a Rate-choice flag is not flagged twice. Decided flags never re-open; flags void themselves when the entry is corrected or deleted.
 
 First live run (22 Sep): one flag — #9955 Takavaudza, Mon 21 Sep, "5 of 6 at a venue (FNB Stadium), this one says Warehouse" — a genuine question for the office.
 

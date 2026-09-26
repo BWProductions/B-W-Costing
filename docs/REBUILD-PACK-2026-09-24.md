@@ -124,6 +124,8 @@ When a current-payroll entry overlaps a **paid** row from an earlier payroll, on
 
 Approve pays the difference **on this week's row** (last week's row never touched), writes "DIFFERENCE ONLY: …" into the payroll note and Excel, voids the hour-based overlap reviews as superseded. Nothing due → R0. "Change the hours" fold-out re-prices live at the same rate; **Bernie never types a rate**. Guard rails: current unpaid payroll only, only against paid rows, dashboard/Excel only, never the staff app.
 
+**Garden entry whose wording sounds like EVENT work — the office is asked (owner 24 Sep 2026, v2026-09-24-2).** Owner: *"Installing lights in a garden — you should have asked me if that's a warehouse or a venue, because installing the lights could be a venue or garden work."* Every gardener House / House-Garden entry (Givemore, Takavaudza) is now read for event words — lights/lighting, install, set-up, strike/breakdown, rig, stage, sound, décor, draping, marquee/tent, function, wedding, party, event, tables/chairs, dance floor, festoon/fairy — and flagged red **GARDEN CLAIMED BUT THE WORK SOUNDS LIKE A VENUE JOB** with two buttons: **GARDEN — R62,50/h (Sunday R75)** or **VENUE / FUNCTION — R95/h (Sunday R114)**, each showing the rand. Works on paid rows (re-prices now) and drafts (applied at Final Submission). First case: Takavaudza Sun 20 Sep #9821 "Installing lights and garden work" — awaiting Bernie's answer (R450 as garden, R684 as venue).
+
 ## C6 — Duplicates / double-tap (v-11, 23 Sep)
 1. **Phone lock**: first press greys all buttons → "Saving… please wait", full-screen overlay "Do not press again"; further presses swallowed; unlocks after 20 s.
 2. **Save block**: new draft with same date + start + end as an existing draft or paid row is refused: *"This shift (…) is ALREADY SAVED — it was not lost. Open it below and press Final Submission once."* Editing an existing draft is never blocked.
@@ -139,6 +141,7 @@ Every refusal is logged in `wage_debug_capture`.
 | **WAREHOUSE CLAIMED BUT THE ENTRY NAMES "…"** (crew_pattern, area-aware) | red | WAREHOUSE R81,25 / VENUE R95 (each shows the rand) |
 | **CREW PATTERN: 7 of 8 say Warehouse … X says venue** | orange | WAREHOUSE / VENUE |
 | **VENUE NOT NAMED** | red | ask the worker; WAREHOUSE / VENUE |
+| **GARDEN CLAIMED BUT THE WORK SOUNDS LIKE A VENUE JOB** (gardener entry mentions lights / install / set-up / strike / function …) — owner 24 Sep | red | GARDEN R62,50 (Sun R75) / VENUE R95 (Sun R114) |
 | **Rate choice: Warehouse or Event/Venue** ("warehouse"/"wearhouse" wording, other work type) | red | Warehouse / Event-Venue |
 | **Public holiday — …** | red | Approve R… / Other amount / Decline |
 | **Petrus: time outside 06–16 on a weekday** / **Petrus: Sunday entry** | red | Approve R55/h · other rate · R0 / Approve Sunday · other · Decline |
