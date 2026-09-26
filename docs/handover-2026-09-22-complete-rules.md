@@ -29,7 +29,7 @@ General staff are paid **by the hour, to the hour, at the rate of the place they
 | **Venue / event** (any other work type) | **R95 / h** | **R114 / h** |
 
 * **Staff meeting 07:00–07:30, Mon–Fri, is not paid.** A warehouse entry covering that time loses the overlap (max 30 min = R40,63 at R81,25; 15 min if he arrives 07:15). Venue entries are not touched (he is not at the office). Saturday has no meeting. Petrus's R640 set day is not touched. **Owner 23 Sep: the meeting is deducted on public holidays too** (Heritage Day 07:00–15:00 warehouse = 7,5 h, not 8).
-* **"Warehouse Team" only means the warehouse when the PLACE says warehouse (owner 23 Sep, Takavaudza rule).** Work type Warehouse Team with venue/area/description naming FNB, Riverside, a stadium, a garden, a client's house etc. is priced by the place named: venue → R95/h, House → gardener R62,50/h. The system cross-checks every Warehouse Team entry against venue, area and description and asks the office warehouse / venue / garden (Part 5b item 4). Example: Takavaudza Sun 20 Sep "Warehouse Team" at the House, 6 h = 6 × R62,50 = **R375** (gardener rate, no Sunday ×1.2).
+* **"Warehouse Team" only means the warehouse when the PLACE says warehouse (owner 23 Sep, Takavaudza rule).** Work type Warehouse Team with venue/area/description naming FNB, Riverside, a stadium, a garden, a client's house etc. is priced by the place named: venue → R95/h, House → gardener R62,50/h. The system cross-checks every Warehouse Team entry against venue, area and description and asks the office warehouse / venue / garden (Part 5b item 4). Example: Takavaudza Sun 20 Sep "Warehouse Team" at the House, 6 h = 6 × R62,50 × 1.2 = **R450** (gardener rate with Sunday ×1.2 — corrected 24 Sep).
 * A man who moves from the warehouse to a venue is paid the warehouse hours at R81,25 and the venue hours at R95, each as its own entry. Gaps (travel) are not paid. Overlapping entries are counted once.
 * Midnight: hours before 00:00 at that day's rate, after 00:00 at the next day's (Sat 22:00–Sun 02:00 = 2 × R95 + 2 × R114 = R418).
 
@@ -49,7 +49,7 @@ Owner's reasoning (22 Sep): "R650 ÷ 8 = R81,25. Take the time worked at the war
   Examples: Mon 06:30–16:00 = R640 · Mon 06:30–16:30 = R640 paid + 0,5 h held (R27,50 if approved at R55) · Wed 04:50–16:00 = R640 paid + 1,17 h held · Fri 18:00–22:00 (no day time) = R0 paid + 4 h held · Sat 06:45–13:00 = R640 · **Sat 05:00–17:00 = R800 (day + 2 h × R80)** · Sun 07:00–12:00 = R0 until approved (R640 recommended) · Sun 04:00–18:00 = R0 until approved (R960 recommended) · Sat 20:00–01:00 = R320 paid (Saturday 4 h × R80) + Sunday 1 h held (R80 recommended).
   Rows paid before 22 Sep under the old Petrus rule (R650 for 07–16 + R81,25/h; Sat/Sun R95/h) are **not** recalculated (closed payrolls are closed).
 * **Petrus — NO DEDUCTIONS from 22 Sep 2026.** Owner: "All deductions are removed. We no longer deduct anything from him going forward … unless an additional loan is made, but for now it's zero." The R450 "Rent" weekly deduction (#2) is ended (`active = 0`, effective to 2026-09-18) and he has **no loans**. Nothing is deducted on the dashboard, Loans & Deductions tab or Auditor Trail. Backup: `docs/restore-2026-09-22-petrus/rent_deduction_before.json`.
-* **Gardeners (Givemore, Takavaudza)**: House / House-Garden work at **R62,50/h**. Their Warehouse Team / Team Assistance work is priced as general staff.
+* **Gardeners (Givemore, Takavaudza)**: House / House-Garden work at **R62,50/h Mon–Sat, Sunday ×1.2 = R75/h** (owner 24 Sep: Takavaudza Sun 20 Sep 6 h = **R450**, not R375 — code fixed v2026-09-24-1). Their Warehouse Team / Team Assistance work is priced as general staff.
 * **Sharleen Ndlovu**: fixed weekly **R3 000**.
 * **Midnight rule**: one row; hours before 00:00 at the start day's rate, after 00:00 at the next day's.
 * **"Warehouse" only in the wording** (work type not Warehouse): red **Rate-choice** review; Bernie clicks Warehouse (R81,25/h, meeting time unpaid, Sun R97,50) or Venue/Event (R95/h, Sun R114). Also catches the "Wearhouse" misspelling.
@@ -333,13 +333,13 @@ Both new loans carry the worker's WhatsApp wording in the reason and start deduc
 | Joshua Motsamai Nteo | 9 (3) | 63,50 | R4 737,51 |
 | Patrick Ngozo | 8 (3) | 53,50 | R5 403,75 |
 | Solomon Moyo | 7 (2) | 51,00 | R5 139,38 |
-| Takavaudza Chokuda | 7 (1) | 52,00 | R4 710,64 |
+| Takavaudza Chokuda | 7 (1) | 52,00 | R4 785,64 (Sun 20 Sep corrected R375 → R450 on 24 Sep) |
 | Thandanani Nkala | 5 (0) | 44,00 | R4 310,01 |
 | Thina Dyani | 1 (1) | 5,00 | R475,00 |
 | Tsotlego Petrus Malakoane | 6 (0) | 50,75 | R4 320,00 |
-| **Hourly staff total** | **91 (19 missed)** | **684,75** | **R61 933,86** |
+| **Hourly staff total** | **91 (19 missed)** | **684,75** | **R62 008,86** (was R61 933,86 before the Takavaudza Sunday correction of 24 Sep) |
 | Sharleen Ndlovu (fixed weekly) | | | R3 000,00 |
-| **Gross wages** | | | **R64 933,86** |
+| **Gross wages** | | | **R65 008,86** |
 
 Hours are the hours actually paid (meeting deducted where it applies; R0 duplicate rows count 0 h). Heritage Day (Thu 24 Sep) is included at the approved holiday amounts in Part 2. Deductions / loans as per the **Loans & Deductions** tab (Isaac #6 R600 + scheduled instalments on #1–#3; Petrus none; Daniel none). Full detail: `docs/BW_Payroll_2026-09-19_to_25_AUDITOR.xlsx`.
 
@@ -392,7 +392,7 @@ To go back to before the already-paid rule: `git checkout restore-2026-09-18-rol
 8. **Wednesday rule.** Auditor runs on Wednesday; Wed–Sun hours are estimates and may change the following week — the already-paid check exists for exactly this.
 9. **Restore point before anything goes live**; report old → new for any corrected figure; test on the preview with real cases first; show Bernie before deploying.
 10. Keep the CSV and old-rules Excel buttons until told otherwise.
-11. **"Warehouse Team" only means the warehouse when the place says warehouse** (23 Sep). Venue / area / description naming FNB, Riverside, a stadium, a garden or a house decides the rate — the system asks, Bernie clicks warehouse / venue / garden.
+11. **"Warehouse Team" only means the warehouse when the place says warehouse** (23 Sep). Venue / area / description naming FNB, Riverside, a stadium, a garden or a house decides the rate — the system asks, Bernie clicks warehouse / venue / garden. **Sunday ×1.2 applies to every hourly rate, gardener House work included (R75/h) — owner 24 Sep.**
 12. **The 07:00–07:30 meeting is deducted on public holidays too** (23 Sep) — deduct first, then ×2.
 13. **When the owner sets a day's hours for everybody** (e.g. "Thursday everyone in the warehouse 07:00–15:00"), the planned end goes into `wage_planned_hours`; the next week's dashboard must ask what time each man really worked until. **Only an underpayment is corrected (top-up line); if he worked less, nothing is done** — owner 23 Sep. Nothing is adjusted without Bernie's Confirm.
 14. **One shift, one row.** Double presses are swallowed on the phone and refused on the server; a shift whose hours are already paid cannot be final-submitted again. A worker who worked different hours enters only the different hours.

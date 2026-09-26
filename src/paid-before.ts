@@ -55,7 +55,8 @@ export type PaidBeforeFlag = {
 
 // Price a window at the entry's own rule. Gardener / unpriced kinds fall back to the flat own-rate.
 function price(d: Deps, e: Entry, kind: PayKind, start: string, end: string): { amount: number; rate: number; text: string } {
-  const p = kind === 'gardener' || kind === 'fixed_weekly' ? null : d.ownerPayForShift(e.work_date, start, end, kind === 'warehouse_or_event' ? 'event' : kind)
+  // Owner 24 Sep 2026: gardener House work is priced by the engine too (Sunday ×1.2 = R75/h).
+  const p = kind === 'fixed_weekly' ? null : d.ownerPayForShift(e.work_date, start, end, kind === 'warehouse_or_event' ? 'event' : kind)
   if (p) return { amount: p.amount, rate: p.hourlyRate, text: p.breakdown }
   const s = span({ start, end }); const h = s ? (s[1] - s[0]) / 60 : 0
   return { amount: r2(h * e.own_rate), rate: e.own_rate, text: `${h.toFixed(2)} h × ${R(e.own_rate)}` }

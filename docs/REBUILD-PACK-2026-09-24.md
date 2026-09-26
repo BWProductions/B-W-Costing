@@ -17,7 +17,7 @@ Work **alphabetically, one worker at a time**, on `/admin/wages`. For each worke
 3. **Already paid last week?** — any row marked **MISSED SHIFT – actual date …** (a date before last Saturday): was that date already in last week's payroll? The **ALREADY PAID** review will say so with the paid row as proof. Only the **difference** is paid (C5).
 4. **Place = rate** — every "Warehouse Team" row: does the venue / area / description name a place that is *not* the warehouse (FNB, Riverside, Pretoria, a stadium, a house/garden)? Then it is a **venue** (R95/h) or **garden** (R62,50/h), not warehouse. The system flags it (**WAREHOUSE CLAIMED BUT THE ENTRY NAMES "…"**); click WAREHOUSE / VENUE.
 5. **Meeting deducted** — Mon–Fri warehouse rows that start at or before 07:00 must show *"7,50 h paid (8,00 clocked)"* in the hours column. Applies on public holidays too. Petrus too.
-6. **Sunday** — warehouse R97,50/h, venue R114/h (×1.2). Gardener House work stays R62,50 (no ×1.2). Petrus Sunday is **held** until you approve.
+6. **Sunday** — warehouse R97,50/h, venue R114/h (×1.2). Gardener House work R75/h (R62,50 × 1.2). Petrus Sunday is **held** until you approve.
 7. **Public holiday** — every entry is a red review; approve at the holiday rule (C4). If you set everyone's hours for the day (e.g. "07–15 warehouse"), the next Monday's **follow-up panel** asks the real end time per person; **only underpayments** get a top-up.
 8. **Green figure** — the green *Admin approved: N hours · R…* must equal what you intend to pay. Yellow = claimed, green = approved.
 9. **Deductions & loans** — the **Fixed deductions** and **Additional loans** panels near the bottom: is what is due this week right? (Erick car R1 000 · Isaac eggs R260 · Joshua car R1 000 from 26 Sep · loan instalments per C9.)
@@ -101,7 +101,7 @@ Bhekizitha, Brian, Daniel, Erence, Erick, Isaac, John, Joshua, Patrick, Solomon,
 |---|---|
 | **Music Bus** (work type, usually John) | Mon–Sat **R750 fixed** for 07–16 **+ R120/h** outside · Sunday **R120/h** · Holiday R750 + **R180/h** outside. Sat 08–22 = R750 + 6×120 = R1 470. |
 | **Petrus** (Tsotlego Petrus Malakoane, staff 4) | **R640 set day** for 06:00–16:00 Mon–Sat, whatever time he arrives. Mon–Fri outside 06–16: **R55/h held** (red review: approve / other rate / R0). Saturday outside: **R80/h automatic**. **Sunday: whole entry HELD** (recommend R640 + R80/h outside; approve / other / decline). Holiday: **R160/h** every hour, meeting deducted, no fixed day (06:30–14:00 = 7 h = R1 120). **No deductions, no loans** (rent R450 ended 18 Sep). |
-| **Gardeners** (Givemore staff 1, Takavaudza staff 2, Lebo staff 16) | House / House-Garden work **R62,50/h**, no Sunday ×1.2. Holiday **R125/h**. Their Warehouse Team / Team Assistance work = general staff by place. Takavaudza Sun 20 Sep House 6 h = **R375**. |
+| **Gardeners** (Givemore staff 1, Takavaudza staff 2, Lebo staff 16) | House / House-Garden work **R62,50/h Mon–Sat; Sunday ×1.2 = R75/h** (owner 24 Sep). Holiday **R125/h** (held). Their Warehouse Team / Team Assistance work = general staff by place. Takavaudza Sun 20 Sep House 6 h = **R450** (corrected 24 Sep from R375; row #9821). |
 | **Sharleen Ndlovu** (staff 17) | **Fixed weekly R3 000** (`payroll_rule = fixed_weekly`). |
 | **John** Wed 16 Sep | one-off owner correction R105/h (historic). |
 
