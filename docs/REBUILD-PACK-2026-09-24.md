@@ -124,6 +124,8 @@ Official gov.za list + Election Day **Wed 4 Nov 2026** (in `SA_PUBLIC_HOLIDAYS` 
 * **Owner rule (23 Sep, verbatim): "Even if they worked less, I don't want anything to be done. I only want something to be done if we underpaid them."** Top-up row only; never a recovery; answer written on the row (*HOLIDAY HOURS CONFIRMED*).
 * Heritage Day 24 Sep 2026 as approved: 9 men 07–15 wh **R1 218,75** · Patrick 06:30 **R1 300** · Petrus 06:30–14:00 **R1 120** · Givemore garden 08–15 **R875** · John wh 07–12 R731,25 + Music Bus 12–18 R1 110.
 
+**📌 Owner's note panel (v2026-09-24-3, owner 24 Sep).** Any planned end time set for a day in the CURRENT payroll week (`wage_planned_hours`) shows at the top of the dashboard as a yellow note — *"Sat 26 Sep 2026 — work ended 13:00 (everyone at the warehouse …)"* — with a live count of entries in so far and how many claim past the time. Entries past it carry the red ⏰ CLAIMED PAST pill. To add a note for a day, the assistant inserts a row into `wage_planned_hours` (work_date, planned_end, note, set_by). First use: Sat 26 Sep 2026 → 13:00.
+
 ## C5 — Already paid → pay only the DIFFERENCE (rule of 21 Sep, wording of 23 Sep)
 When a current-payroll entry overlaps a **paid** row from an earlier payroll, one red review with proof and one sum, in the owner's words:
 

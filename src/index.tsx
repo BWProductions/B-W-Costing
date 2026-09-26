@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-24-2'
+const WAGES_UI_VERSION = 'v2026-09-24-3'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4816,6 +4816,24 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       </section>`
     })()}
     ${'' /* Owner 2026-09-23: pay-rule check retired — hourly/daily rules are in place; reviews carry the decisions. */}
+    ${(() => {
+      // Owner 24 Sep 2026: "Put a note in the system that everyone at the warehouse worked until 13:00 on Saturday
+      // 26 Sep, so when they start putting their hours in we can triple-check it." Every planned end for a day in
+      // THIS payroll week is shown here as a standing reminder; entries past it carry the red ⏰ pill on the row.
+      const days = Object.values(plannedEnds).filter((p) => p.work_date >= weekStart && p.work_date <= weekEnd).sort((a, b) => a.work_date.localeCompare(b.work_date))
+      if (!days.length) return ''
+      const li = days.map((p) => {
+        const rowsThatDay = paid.filter((r: AdminPaidRow) => r.work_date === p.work_date)
+        const over = rowsThatDay.filter((r: AdminPaidRow) => beyondPlanned(r))
+        const state = rowsThatDay.length ? `${rowsThatDay.length} entr${rowsThatDay.length === 1 ? 'y' : 'ies'} in so far · <strong style="color:${over.length ? '#fca5a5' : '#86efac'}">${over.length ? over.length + ' claim past ' + escapeHtmlText(p.planned_end) + ' — see the ⏰ pill on the row' : 'none past ' + escapeHtmlText(p.planned_end)}</strong>` : 'no entries in yet'
+        return `<li style="margin:3px 0"><strong>${escapeHtmlText(proxyLongDate(p.work_date))} — work ended ${escapeHtmlText(p.planned_end)}</strong>${p.note ? ` <span style="opacity:.8">(${escapeHtmlText(p.note)})</span>` : ''}<br><span style="font-size:12px">${state}</span></li>`
+      }).join('')
+      return `<section id="bw-planned-end-note" style="margin:6px 0 12px;padding:9px 14px;border-radius:12px;background:rgba(202,138,4,.15);border:1px solid rgba(253,224,71,.55)">
+        <div style="font-weight:800;color:#fde68a;font-size:13.5px">📌 Owner's note — end of work set for this week</div>
+        <ul style="margin:4px 0 0 16px;padding:0;font-size:12.5px">${li}</ul>
+        <div style="font-size:11.5px;opacity:.7;margin-top:4px">Any entry that runs past the set time is flagged red <strong>⏰ CLAIMED PAST</strong> on the row. Ask the worker what time he really finished and use ✎ Edit shift to correct.</div>
+      </section>`
+    })()}
     ${followUpPanel}
     <div style="display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 12px;font-size:13px">
       <div><span style="opacity:.7">Paid shifts</span><br><strong style="font-size:18px">${gShifts}</strong></div>

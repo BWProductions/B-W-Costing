@@ -150,6 +150,8 @@ Owner's words: "Petrus — take the hourly rate, R80, or event rate, and multipl
 
 Known quirk (unchanged): the engine sometimes compares a draft with its own final-submitted shift and raises a "manual overlap" review — not a double charge; click *No issue – pay as claimed*.
 
+**📌 Owner's note panel (v2026-09-24-3, owner 24 Sep).** Any planned end time set for a day in the CURRENT payroll week (`wage_planned_hours`) shows at the top of the dashboard as a yellow note — *"Sat 26 Sep 2026 — work ended 13:00 (everyone at the warehouse …)"* — with a live count of entries in so far and how many claim past the time. Entries past it carry the red ⏰ CLAIMED PAST pill. To add a note for a day, the assistant inserts a row into `wage_planned_hours` (work_date, planned_end, note, set_by). First use: Sat 26 Sep 2026 → 13:00.
+
 # Part 5 — THE "ALREADY PAID" RULE (agreed 21 Sep 2026) — LIVE
 **Why**: wages go to the auditor on Wednesday; Wed–Sun hours are a guess. The next week staff enter what really happened — sometimes different hours, sometimes a different job (Garden → Team, Warehouse → Event, Event → Music Bus). The system must find what was paid, compare it with what is now claimed, and work out **in rand** what is still owed.
 
