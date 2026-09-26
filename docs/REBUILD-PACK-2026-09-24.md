@@ -96,12 +96,23 @@ Bhekizitha, Brian, Daniel, Erence, Erick, Isaac, John, Joshua, Patrick, Solomon,
 * **"Warehouse Team" only means warehouse when the PLACE says warehouse.** Venue/area/description naming FNB, Riverside, Pretoria, a stadium, botanical garden, a client's house → venue (or garden). Anything that is not Meyerton / Henley / Randvaal / the warehouse address is "a place". System flags; Bernie clicks.
 * Examples: Wh Mon 06–16 = 9,5 h × 81,25 = **R771,88** · Wh Mon 07–16 = 8,5 h = **R690,63** · Wh Mon 08–16 = **R650** · Wh Sat 06–16 = **R812,50** · Wh Sun 06–14 = 8 × 97,50 = **R780** · Venue Mon 06–16 = **R950** · Venue Sun 08–16 = **R912** · Wh 06–12 + Venue 12–20 = R446,88 + R760 = **R1 206,88**.
 
+**Sunday ×1.2 and public holiday ×2 apply to EVERY place — confirmed by the owner 24 Sep 2026:**
+
+| Place | Mon–Sat | Sunday (×1.2) | Public holiday (×2, held for approval) |
+|---|---|---|---|
+| Garden / House (gardeners) | R62,50/h | **R75/h** | **R125/h** |
+| Warehouse | R81,25/h (Mon–Fri meeting 07:00–07:30 unpaid) | **R97,50/h** | **R162,50/h** (Mon–Fri meeting deducted first) |
+| Venue / event | R95/h | **R114/h** | **R190/h** |
+| Petrus | R640 set day 06–16 (+R55/h held Mon–Fri, +R80/h Sat) | held: R640 + R80/h outside | **R160/h** every hour, meeting deducted |
+| Music Bus | R750 fixed 07–16 + R120/h outside | R120/h | R750 fixed 07–16 + R180/h outside |
+A public holiday that falls on a Sunday is priced as a public holiday (×2), not ×2 × 1.2.
+
 ## C3 — Special people
 | Who | Rule |
 |---|---|
 | **Music Bus** (work type, usually John) | Mon–Sat **R750 fixed** for 07–16 **+ R120/h** outside · Sunday **R120/h** · Holiday R750 + **R180/h** outside. Sat 08–22 = R750 + 6×120 = R1 470. |
 | **Petrus** (Tsotlego Petrus Malakoane, staff 4) | **R640 set day** for 06:00–16:00 Mon–Sat, whatever time he arrives. Mon–Fri outside 06–16: **R55/h held** (red review: approve / other rate / R0). Saturday outside: **R80/h automatic**. **Sunday: whole entry HELD** (recommend R640 + R80/h outside; approve / other / decline). Holiday: **R160/h** every hour, meeting deducted, no fixed day (06:30–14:00 = 7 h = R1 120). **No deductions, no loans** (rent R450 ended 18 Sep). |
-| **Gardeners** (Givemore staff 1, Takavaudza staff 2, Lebo staff 16) | House / House-Garden work **R62,50/h Mon–Sat; Sunday ×1.2 = R75/h** (owner 24 Sep). Holiday **R125/h** (held). Their Warehouse Team / Team Assistance work = general staff by place. Takavaudza Sun 20 Sep House 6 h = **R450** (corrected 24 Sep from R375; row #9821). |
+| **Gardeners** (Givemore staff 1, Takavaudza staff 2, Lebo staff 16) | House / House-Garden work **R62,50/h Mon–Sat; Sunday ×1.2 = R75/h** (owner 24 Sep). Holiday **R125/h** (held). Their Warehouse Team / Team Assistance work = general staff by place. Takavaudza Sun 20 Sep #9821 "Installing lights and garden work" → **VENUE R684** (6 h × R114; owner 24 Sep — was R375 garden flat, then R450 garden Sunday). |
 | **Sharleen Ndlovu** (staff 17) | **Fixed weekly R3 000** (`payroll_rule = fixed_weekly`). |
 | **John** Wed 16 Sep | one-off owner correction R105/h (historic). |
 
@@ -124,7 +135,7 @@ When a current-payroll entry overlaps a **paid** row from an earlier payroll, on
 
 Approve pays the difference **on this week's row** (last week's row never touched), writes "DIFFERENCE ONLY: …" into the payroll note and Excel, voids the hour-based overlap reviews as superseded. Nothing due → R0. "Change the hours" fold-out re-prices live at the same rate; **Bernie never types a rate**. Guard rails: current unpaid payroll only, only against paid rows, dashboard/Excel only, never the staff app.
 
-**Garden entry whose wording sounds like EVENT work — the office is asked (owner 24 Sep 2026, v2026-09-24-2).** Owner: *"Installing lights in a garden — you should have asked me if that's a warehouse or a venue, because installing the lights could be a venue or garden work."* Every gardener House / House-Garden entry (Givemore, Takavaudza) is now read for event words — lights/lighting, install, set-up, strike/breakdown, rig, stage, sound, décor, draping, marquee/tent, function, wedding, party, event, tables/chairs, dance floor, festoon/fairy — and flagged red **GARDEN CLAIMED BUT THE WORK SOUNDS LIKE A VENUE JOB** with two buttons: **GARDEN — R62,50/h (Sunday R75)** or **VENUE / FUNCTION — R95/h (Sunday R114)**, each showing the rand. Works on paid rows (re-prices now) and drafts (applied at Final Submission). First case: Takavaudza Sun 20 Sep #9821 "Installing lights and garden work" — awaiting Bernie's answer (R450 as garden, R684 as venue).
+**Garden entry whose wording sounds like EVENT work — the office is asked (owner 24 Sep 2026, v2026-09-24-2).** Owner: *"Installing lights in a garden — you should have asked me if that's a warehouse or a venue, because installing the lights could be a venue or garden work."* Every gardener House / House-Garden entry (Givemore, Takavaudza) is now read for event words — lights/lighting, install, set-up, strike/breakdown, rig, stage, sound, décor, draping, marquee/tent, function, wedding, party, event, tables/chairs, dance floor, festoon/fairy — and flagged red **GARDEN CLAIMED BUT THE WORK SOUNDS LIKE A VENUE JOB** with two buttons: **GARDEN — R62,50/h (Sunday R75)** or **VENUE / FUNCTION — R95/h (Sunday R114)**, each showing the rand. Works on paid rows (re-prices now) and drafts (applied at Final Submission). First case: Takavaudza Sun 20 Sep #9821 "Installing lights and garden work" — **owner decided VENUE: R684,00** (6 h × R95 × 1.2). Paid R375 on 23 Sep → shortfall R309 corrected on the same row.
 
 ## C6 — Duplicates / double-tap (v-11, 23 Sep)
 1. **Phone lock**: first press greys all buttons → "Saving… please wait", full-screen overlay "Do not press again"; further presses swallowed; unlocks after 20 s.

@@ -29,7 +29,7 @@ General staff are paid **by the hour, to the hour, at the rate of the place they
 | **Venue / event** (any other work type) | **R95 / h** | **R114 / h** |
 
 * **Staff meeting 07:00–07:30, Mon–Fri, is not paid.** A warehouse entry covering that time loses the overlap (max 30 min = R40,63 at R81,25; 15 min if he arrives 07:15). Venue entries are not touched (he is not at the office). Saturday has no meeting. Petrus's R640 set day is not touched. **Owner 23 Sep: the meeting is deducted on public holidays too** (Heritage Day 07:00–15:00 warehouse = 7,5 h, not 8).
-* **"Warehouse Team" only means the warehouse when the PLACE says warehouse (owner 23 Sep, Takavaudza rule).** Work type Warehouse Team with venue/area/description naming FNB, Riverside, a stadium, a garden, a client's house etc. is priced by the place named: venue → R95/h, House → gardener R62,50/h. The system cross-checks every Warehouse Team entry against venue, area and description and asks the office warehouse / venue / garden (Part 5b item 4). Example: Takavaudza Sun 20 Sep "Warehouse Team" at the House, 6 h = 6 × R62,50 × 1.2 = **R450** (gardener rate with Sunday ×1.2 — corrected 24 Sep).
+* **"Warehouse Team" only means the warehouse when the PLACE says warehouse (owner 23 Sep, Takavaudza rule).** Work type Warehouse Team with venue/area/description naming FNB, Riverside, a stadium, a garden, a client's house etc. is priced by the place named: venue → R95/h, House → gardener R62,50/h. The system cross-checks every Warehouse Team entry against venue, area and description and asks the office warehouse / venue / garden (Part 5b item 4). Example: Takavaudza Sun 20 Sep at the House "Installing lights and garden work", 6 h — owner decided VENUE: 6 × R95 × 1.2 = **R684** (24 Sep).
 * A man who moves from the warehouse to a venue is paid the warehouse hours at R81,25 and the venue hours at R95, each as its own entry. Gaps (travel) are not paid. Overlapping entries are counted once.
 * Midnight: hours before 00:00 at that day's rate, after 00:00 at the next day's (Sat 22:00–Sun 02:00 = 2 × R95 + 2 × R114 = R418).
 
@@ -58,6 +58,17 @@ Owner's reasoning (22 Sep): "R650 ÷ 8 = R81,25. Take the time worked at the war
 Music Bus example: Sat 08–22 = R750 + 6 h × R120 = R1 470 · Sun 07–12 = R600.
 
 **Staff**: Bhekizitha, Brian, Daniel, Erence, Erick, Isaac, John, Joshua, Patrick, Solomon, Thandanani, Thina — general R90 base. Givemore — House R62,50 / Team Assistance R90. Takavaudza — House-Garden R62,50 / Warehouse Team R90. Lebo — R62,50. Petrus — R640 set day rate (see above). Sharleen — fixed weekly.
+
+**Sunday ×1.2 and public holiday ×2 apply to EVERY place — confirmed by the owner 24 Sep 2026:**
+
+| Place | Mon–Sat | Sunday (×1.2) | Public holiday (×2, held for approval) |
+|---|---|---|---|
+| Garden / House (gardeners) | R62,50/h | **R75/h** | **R125/h** |
+| Warehouse | R81,25/h (Mon–Fri meeting 07:00–07:30 unpaid) | **R97,50/h** | **R162,50/h** (Mon–Fri meeting deducted first) |
+| Venue / event | R95/h | **R114/h** | **R190/h** |
+| Petrus | R640 set day 06–16 (+R55/h held Mon–Fri, +R80/h Sat) | held: R640 + R80/h outside | **R160/h** every hour, meeting deducted |
+| Music Bus | R750 fixed 07–16 + R120/h outside | R120/h | R750 fixed 07–16 + R180/h outside |
+A public holiday that falls on a Sunday is priced as a public holiday (×2), not ×2 × 1.2.
 
 ## Public holidays (owner 22 Sep 2026, rate rules v10) — LIVE
 
@@ -205,7 +216,7 @@ Known quirk (unchanged): the engine sometimes compares a draft with its own fina
    The green APPROVE pays the difference on the row (last week's row untouched), writes the sum into the row's payroll note and the Excel breakdown ("DIFFERENCE ONLY …"), and voids the hour-based overlap / already-paid reviews on the same entry as superseded. Uses the same engine as the Already-paid rule (Part 5), forced to each place. Without an earlier payment the buttons show the full-day amounts as before. **Approved on 23 Sep: Givemore Thu 17 Sep → Venue R640,00** (row #9789).
 6. **Excluded from the crew majority**: Petrus, gardener House work, Music Bus, Sharleen (own rules) — but see the next paragraph for gardeners.
 
-**Garden entry whose wording sounds like EVENT work — the office is asked (owner 24 Sep 2026, v2026-09-24-2).** Owner: *"Installing lights in a garden — you should have asked me if that's a warehouse or a venue, because installing the lights could be a venue or garden work."* Every gardener House / House-Garden entry (Givemore, Takavaudza) is now read for event words — lights/lighting, install, set-up, strike/breakdown, rig, stage, sound, décor, draping, marquee/tent, function, wedding, party, event, tables/chairs, dance floor, festoon/fairy — and flagged red **GARDEN CLAIMED BUT THE WORK SOUNDS LIKE A VENUE JOB** with two buttons: **GARDEN — R62,50/h (Sunday R75)** or **VENUE / FUNCTION — R95/h (Sunday R114)**, each showing the rand. Works on paid rows (re-prices now) and drafts (applied at Final Submission). First case: Takavaudza Sun 20 Sep #9821 "Installing lights and garden work" — awaiting Bernie's answer (R450 as garden, R684 as venue).
+**Garden entry whose wording sounds like EVENT work — the office is asked (owner 24 Sep 2026, v2026-09-24-2).** Owner: *"Installing lights in a garden — you should have asked me if that's a warehouse or a venue, because installing the lights could be a venue or garden work."* Every gardener House / House-Garden entry (Givemore, Takavaudza) is now read for event words — lights/lighting, install, set-up, strike/breakdown, rig, stage, sound, décor, draping, marquee/tent, function, wedding, party, event, tables/chairs, dance floor, festoon/fairy — and flagged red **GARDEN CLAIMED BUT THE WORK SOUNDS LIKE A VENUE JOB** with two buttons: **GARDEN — R62,50/h (Sunday R75)** or **VENUE / FUNCTION — R95/h (Sunday R114)**, each showing the rand. Works on paid rows (re-prices now) and drafts (applied at Final Submission). First case: Takavaudza Sun 20 Sep #9821 "Installing lights and garden work" — **owner decided VENUE: R684,00** (6 h × R95 × 1.2). Paid R375 on 23 Sep → shortfall R309 corrected on the same row.
  A row that already has a Rate-choice flag is not flagged twice. Decided flags never re-open; flags void themselves when the entry is corrected or deleted.
 
 First live run (22 Sep): one flag — #9955 Takavaudza, Mon 21 Sep, "5 of 6 at a venue (FNB Stadium), this one says Warehouse" — a genuine question for the office.
@@ -336,13 +347,13 @@ Both new loans carry the worker's WhatsApp wording in the reason and start deduc
 | Joshua Motsamai Nteo | 9 (3) | 63,50 | R4 737,51 |
 | Patrick Ngozo | 8 (3) | 53,50 | R5 403,75 |
 | Solomon Moyo | 7 (2) | 51,00 | R5 139,38 |
-| Takavaudza Chokuda | 7 (1) | 52,00 | R4 785,64 (Sun 20 Sep corrected R375 → R450 on 24 Sep) |
+| Takavaudza Chokuda | 7 (1) | 52,00 | R5 019,64 (Sun 20 Sep corrected R375 → R684 venue on 24 Sep) |
 | Thandanani Nkala | 5 (0) | 44,00 | R4 310,01 |
 | Thina Dyani | 1 (1) | 5,00 | R475,00 |
 | Tsotlego Petrus Malakoane | 6 (0) | 50,75 | R4 320,00 |
-| **Hourly staff total** | **91 (19 missed)** | **684,75** | **R62 008,86** (was R61 933,86 before the Takavaudza Sunday correction of 24 Sep) |
+| **Hourly staff total** | **91 (19 missed)** | **684,75** | **R62 242,86** (was R61 933,86 before the Takavaudza Sunday correction of 24 Sep: +R309) |
 | Sharleen Ndlovu (fixed weekly) | | | R3 000,00 |
-| **Gross wages** | | | **R65 008,86** |
+| **Gross wages** | | | **R65 242,86** |
 
 Hours are the hours actually paid (meeting deducted where it applies; R0 duplicate rows count 0 h). Heritage Day (Thu 24 Sep) is included at the approved holiday amounts in Part 2. Deductions / loans as per the **Loans & Deductions** tab (Isaac #6 R600 + scheduled instalments on #1–#3; Petrus none; Daniel none). Full detail: `docs/BW_Payroll_2026-09-19_to_25_AUDITOR.xlsx`.
 
