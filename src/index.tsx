@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-24-3'
+const WAGES_UI_VERSION = 'v2026-09-24-4'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4603,6 +4603,52 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     }
   } catch (err) {}
 
+  // Owner 24 Sep 2026: "Lebo works differently as he's a student … keep showing me his wages from Thursday the
+  // 24th going forward, with a Paid button at the bottom so I can push it when he's been paid and it disappears.
+  // Sometimes he gets paid weekly, other times fortnightly or monthly." A running ledger of every Lebo shift from
+  // 2026-09-24 that the owner has not yet marked PAID — across payroll weeks — with a Paid button per line and
+  // one for the lot. Marking paid stamps the row (own_schedule_paid_at / by) and it drops off the list.
+  let ownSchedulePanel = ''
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS wage_own_schedule_staff (staff_id INTEGER PRIMARY KEY, from_date TEXT NOT NULL, note TEXT, set_by TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`).run()
+    try { await db.prepare(`ALTER TABLE wage_shifts ADD COLUMN own_schedule_paid_at DATETIME`).run() } catch (err) {}
+    try { await db.prepare(`ALTER TABLE wage_shifts ADD COLUMN own_schedule_paid_by TEXT`).run() } catch (err) {}
+    const os = await db.prepare(`SELECT o.staff_id, o.from_date, o.note, s.display_name FROM wage_own_schedule_staff o JOIN wage_staff s ON s.id = o.staff_id ORDER BY s.display_name`).all()
+    const blocks: string[] = []
+    for (const o of (os.results || []) as Array<{ staff_id: number, from_date: string, note: string | null, display_name: string }>) {
+      const rs = await db.prepare(`SELECT id, work_date, start_time, end_time, hours_worked, COALESCE(gross_wage, total_amount, 0) amount, work_type, outlet_venue, work_description, payroll_week_start, manager_update_reason, own_schedule_paid_at
+          FROM wage_shifts WHERE staff_id = ? AND work_date >= ? ORDER BY work_date, start_time, id`).bind(o.staff_id, o.from_date).all()
+      const rows = (rs.results || []) as Array<{ id: number, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, work_type: string, outlet_venue: string, work_description: string, payroll_week_start: string | null, manager_update_reason: string | null, own_schedule_paid_at: string | null }>
+      const unpaid = rows.filter((r) => !r.own_schedule_paid_at)
+      const paidCount = rows.length - unpaid.length
+      const total = unpaid.reduce((a, r) => a + Number(r.amount || 0), 0)
+      const firstName = escapeHtmlText(o.display_name.split(' ')[0])
+      const openHold = (r: { id: number, amount: number, manager_update_reason: string | null }) => Number(r.amount) === 0 && !r.manager_update_reason
+      const li = unpaid.length ? unpaid.map((r) => {
+        const held = openHold(r)
+        return `<tr style="border-top:1px solid rgba(255,255,255,.08)">
+          <td style="padding:4px 8px;white-space:nowrap"><strong>${escapeHtmlText(proxyLongDate(r.work_date))}</strong></td>
+          <td style="padding:4px 8px;white-space:nowrap">${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)} · ${Number(r.hours_worked || 0).toFixed(2)} h</td>
+          <td style="padding:4px 8px">${escapeHtmlText(r.work_type || '')}${r.outlet_venue ? ' · ' + escapeHtmlText(r.outlet_venue) : ''}${r.work_description ? ' · <span style="opacity:.75">' + escapeHtmlText(r.work_description.slice(0, 60)) + '</span>' : ''}</td>
+          <td style="padding:4px 8px;text-align:right;white-space:nowrap;font-weight:800;color:${held ? '#fca5a5' : '#fde68a'}">${fmtRand(Number(r.amount || 0))}${held ? '<br><span style="font-size:10.5px;font-weight:600">held — decide the review first</span>' : ''}</td>
+          <td style="padding:4px 8px;white-space:nowrap">${held ? '' : `<form method="post" action="/wages-admin/own-schedule-paid" style="margin:0" onsubmit="return confirm('Mark ${firstName} ${escapeHtmlText(proxyLongDate(r.work_date))} ${fmtRand(Number(r.amount || 0))} as PAID? It will leave this list.')"><input type="hidden" name="shift_id" value="${r.id}"><input type="hidden" name="return_to" value="__RETURN__"><button type="submit" style="padding:4px 12px;border-radius:6px;border:0;background:#16a34a;color:#fff;font-weight:800;cursor:pointer">✔ Paid</button></form>`}</td>
+        </tr>`
+      }).join('') : `<tr><td colspan="5" style="padding:6px 8px;opacity:.75">Nothing unpaid — everything from ${escapeHtmlText(proxyLongDate(o.from_date))} has been marked paid.</td></tr>`
+      const payable = unpaid.filter((r) => !openHold(r))
+      const payAll = payable.length > 1 ? `<form method="post" action="/wages-admin/own-schedule-paid" style="margin:0" onsubmit="return confirm('Mark ALL ${payable.length} unpaid ${firstName} shifts (${fmtRand(payable.reduce((a, r) => a + Number(r.amount || 0), 0))}) as PAID?')"><input type="hidden" name="shift_id" value="${payable.map((r) => r.id).join(',')}"><input type="hidden" name="return_to" value="__RETURN__"><button type="submit" style="padding:6px 14px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-weight:800;cursor:pointer">✔ Paid — all ${payable.length} shifts ${fmtRand(payable.reduce((a, r) => a + Number(r.amount || 0), 0))}</button></form>` : ''
+      blocks.push(`<div style="margin-top:6px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div style="font-weight:800">${escapeHtmlText(o.display_name)} — unpaid since ${escapeHtmlText(proxyLongDate(o.from_date))}${o.note ? ` <span style="opacity:.75;font-weight:500">(${escapeHtmlText(o.note)})</span>` : ''}</div><div style="font-size:12px;opacity:.75">${unpaid.length} unpaid · ${paidCount} already marked paid</div></div>
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:4px"><tbody>${li}</tbody>
+        <tfoot><tr style="border-top:2px solid rgba(253,224,71,.5)"><td colspan="3" style="padding:6px 8px;font-weight:800">TOTAL STILL TO PAY ${firstName}</td><td style="padding:6px 8px;text-align:right;font-weight:900;font-size:15px;color:#fde68a">${fmtRand(total)}</td><td style="padding:6px 8px">${payAll}</td></tr></tfoot></table>
+      </div>`)
+    }
+    if (blocks.length) ownSchedulePanel = `<section id="bw-own-schedule" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(30,64,175,.18);border:1px solid rgba(147,197,253,.55)">
+      <div style="font-weight:800;color:#bfdbfe;font-size:14px">🎓 Paid on his own schedule — running total until you press Paid</div>
+      <div style="font-size:12px;opacity:.8;margin-top:2px">These shifts stay here across payroll weeks (weekly, fortnightly or monthly — whenever he is paid). Press <strong>✔ Paid</strong> on a line when the money has gone to him; it leaves the list and the row is stamped with your name and the date. Nothing here changes the shift amounts — corrections still go through ✎ Edit shift and the reviews.</div>
+      ${blocks.join('')}
+    </section>`
+  } catch (err) {}
+
   const sections = order.map((sid) => {
     const g = byStaff[sid]
     const rows = g.paid.slice().sort((a, b) => (a.work_date + a.start_time).localeCompare(b.work_date + b.start_time))
@@ -4835,6 +4881,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       </section>`
     })()}
     ${followUpPanel}
+    ${ownSchedulePanel}
     <div style="display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 12px;font-size:13px">
       <div><span style="opacity:.7">Paid shifts</span><br><strong style="font-size:18px">${gShifts}</strong></div>
       <div><span style="opacity:.7">Total hours</span><br><strong style="font-size:18px">${gHours.toFixed(2)}</strong></div>
@@ -5606,6 +5653,39 @@ app.post('/wages-admin/petrus-extra', async (c) => {
 // under / over-payment against what was paid. The difference lands in THIS payroll as the row's new amount is
 // only the correction? No — the holiday row belongs to the closed payroll; we record the correction as a NEW
 // correction row in the current payroll so the closed payroll is untouched.
+// Owner 24 Sep 2026: mark a shift (or several) of an own-schedule worker (Lebo) as PAID by the owner. Stamps
+// own_schedule_paid_at / by on wage_shifts; the line leaves the running ledger on the dashboard. Nothing else
+// changes — amounts, reviews and the payroll Excel are untouched. Logged in wage_debug_capture.
+app.post('/wages-admin/own-schedule-paid', async (c) => {
+  const db = c.env?.DB
+  const admin = await adminUserFromCookie(c.req.raw.headers.get('cookie') || '')
+  const back = (v: string) => new Response(null, { status: 302, headers: { location: v, 'cache-control': 'no-store' } })
+  if (!db) return c.text('no database', 500)
+  if (!admin) return back('/login?next=' + encodeURIComponent('/admin/wages'))
+  let form: FormData
+  try { form = await c.req.raw.formData() } catch (err) { return back('/admin/wages?error=' + encodeURIComponent('Could not read the form.')) }
+  const ids = String(normalizeProxyFieldValue(form.get('shift_id')) || '').split(',').map((x) => Number(x.trim())).filter((n) => n > 0)
+  const returnTo = normalizeProxyFieldValue(form.get('return_to')) || '/admin/wages'
+  const safeReturn = /^\/admin\/wages(\?|$)/.test(returnTo) ? returnTo : '/admin/wages'
+  const sep = safeReturn.includes('?') ? '&' : '?'
+  if (!ids.length) return back(safeReturn + sep + 'error=' + encodeURIComponent('No shift selected.'))
+  try {
+    const done: string[] = []; let total = 0
+    for (const id of ids) {
+      const r = await db.prepare(`SELECT w.id, w.staff_id, w.work_date, w.start_time, w.end_time, COALESCE(w.gross_wage, w.total_amount, 0) amount, w.own_schedule_paid_at, s.display_name FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id WHERE w.id = ? AND w.staff_id IN (SELECT staff_id FROM wage_own_schedule_staff)`).bind(id).first<{ id: number, staff_id: number, work_date: string, start_time: string, end_time: string, amount: number, own_schedule_paid_at: string | null, display_name: string }>()
+      if (!r || r.own_schedule_paid_at) continue
+      const stamp = ' | PAID to worker (own schedule) by ' + admin.name + ' on ' + new Date().toISOString().slice(0, 10) + ' — ' + fmtRand(Number(r.amount || 0))
+      await db.prepare(`UPDATE wage_shifts SET own_schedule_paid_at = CURRENT_TIMESTAMP, own_schedule_paid_by = ?, payroll_note = COALESCE(payroll_note,'') || ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(admin.name, stamp, id).run()
+      done.push('#' + id + ' ' + r.work_date + ' ' + fmtRand(Number(r.amount || 0))); total += Number(r.amount || 0)
+      await captureWagesDebug(c.env, { request_path: '/wages-admin/own-schedule-paid', request_method: 'POST', original_payload_json: JSON.stringify({ shift_id: id, staff_id: r.staff_id, by: admin.name }), rewritten_payload_json: JSON.stringify({ amount: r.amount, work_date: r.work_date }), rewrite_applied: 1, response_status: 302, response_location: safeReturn, response_error_text: '' })
+    }
+    if (!done.length) return back(safeReturn + sep + 'msg=' + encodeURIComponent('Nothing to mark — already paid or not an own-schedule worker.') + '#bw-own-schedule')
+    return back(safeReturn + sep + 'msg=' + encodeURIComponent('Marked PAID by ' + admin.name + ': ' + done.join('; ') + (done.length > 1 ? ' — total ' + fmtRand(total) : '')) + '#bw-own-schedule')
+  } catch (err) {
+    return back(safeReturn + sep + 'error=' + encodeURIComponent('Could not mark paid: ' + String((err as Error)?.message || err)))
+  }
+})
+
 app.post('/wages-admin/confirm-holiday-hours', async (c) => {
   const db = c.env?.DB
   const admin = await adminUserFromCookie(c.req.raw.headers.get('cookie') || '')
