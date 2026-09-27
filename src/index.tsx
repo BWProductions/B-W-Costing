@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-27-3'
+const WAGES_UI_VERSION = 'v2026-09-27-4'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4685,7 +4685,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     if (holDays.length) {
       const blocks: string[] = []
       for (const hd of holDays) {
-        const rowsRes = await db.prepare(`SELECT w.id, w.staff_id, s.display_name, s.payroll_rule, w.start_time, w.end_time, w.hours_worked, w.work_type, w.outlet_venue, w.area, w.work_description, COALESCE(w.gross_wage, w.total_amount, 0) amount, w.hourly_rate_snapshot rate, w.payroll_note FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id WHERE w.work_date = ? ORDER BY s.display_name, w.start_time`).bind(hd.work_date).all()
+        const rowsRes = await db.prepare(`SELECT w.id, w.staff_id, s.display_name, s.payroll_rule, w.start_time, w.end_time, w.hours_worked, w.work_type, w.outlet_venue, w.area, w.work_description, COALESCE(w.gross_wage, w.total_amount, 0) amount, w.hourly_rate_snapshot rate, w.payroll_note FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id WHERE w.work_date = ? AND COALESCE(w.event_name,'') <> 'Public holiday correction' AND COALESCE(w.work_description,'') NOT LIKE 'CORRECTION — public holiday%' ORDER BY s.display_name, w.start_time`).bind(hd.work_date).all()
         const hrows = (rowsRes.results || []) as any[]
         if (!hrows.length) continue
         const pending = hrows.filter((r) => !/HOLIDAY HOURS CONFIRMED/.test(r.payroll_note || ''))
@@ -5845,6 +5845,7 @@ app.post('/wages-admin/confirm-holiday-hours', async (c) => {
     const r = await db.prepare(`SELECT w.*, s.display_name, s.payroll_rule, COALESCE(w.gross_wage, w.total_amount, 0) amount FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id WHERE w.id = ?`).bind(shiftId).first<any>()
     if (!r) return back(safeReturn + sep + 'error=' + encodeURIComponent('Shift #' + shiftId + ' not found.'))
     if (/HOLIDAY HOURS CONFIRMED/.test(r.payroll_note || '')) return back(safeReturn + sep + 'msg=' + encodeURIComponent('Shift #' + shiftId + ' was already confirmed.'))
+    if (/^CORRECTION — public holiday/.test(String((r as any).work_description || ''))) return back(safeReturn + sep + 'msg=' + encodeURIComponent('Shift #' + shiftId + ' is itself a holiday top-up line — confirm the original row, not the correction.'))
     const kind = ownerPayKind(r.staff_id, r.work_type, [r.outlet_venue, r.work_description].join(' '), r.payroll_rule)
     let should = 0, text = ''
     if (kind === 'gardener') { const h = Math.max(0, (timeToMinutes(actualEnd)! - timeToMinutes(r.start_time)!) / 60); should = Math.round(h * 62.5 * 2 * 100) / 100; text = `gardener ${h.toFixed(2)} h × R62,50 × 2` }
