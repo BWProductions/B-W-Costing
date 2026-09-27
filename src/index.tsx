@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-24-5'
+const WAGES_UI_VERSION = 'v2026-09-24-6'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4632,10 +4632,11 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     await db.prepare(`CREATE TABLE IF NOT EXISTS wage_own_schedule_staff (staff_id INTEGER PRIMARY KEY, from_date TEXT NOT NULL, note TEXT, set_by TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`).run()
     try { await db.prepare(`ALTER TABLE wage_shifts ADD COLUMN own_schedule_paid_at DATETIME`).run() } catch (err) {}
     try { await db.prepare(`ALTER TABLE wage_shifts ADD COLUMN own_schedule_paid_by TEXT`).run() } catch (err) {}
-    const os = await db.prepare(`SELECT o.staff_id, o.from_date, o.note, s.display_name FROM wage_own_schedule_staff o JOIN wage_staff s ON s.id = o.staff_id ORDER BY s.display_name`).all()
+    try { await db.prepare(`ALTER TABLE wage_own_schedule_staff ADD COLUMN next_pay_date TEXT`).run() } catch (err) {}
+    const os = await db.prepare(`SELECT o.staff_id, o.from_date, o.note, o.next_pay_date, s.display_name FROM wage_own_schedule_staff o JOIN wage_staff s ON s.id = o.staff_id ORDER BY s.display_name`).all()
     const blocks: string[] = []
-    for (const o of (os.results || []) as Array<{ staff_id: number, from_date: string, note: string | null, display_name: string }>) {
-      const rs = await db.prepare(`SELECT id, work_date, start_time, end_time, hours_worked, COALESCE(gross_wage, total_amount, 0) amount, work_type, outlet_venue, work_description, payroll_week_start, manager_update_reason, own_schedule_paid_at
+    for (const o of (os.results || []) as Array<{ staff_id: number, from_date: string, note: string | null, next_pay_date: string | null, display_name: string }>) {
+      const rs = await db.prepare(`SELECT id, work_date, start_time, end_time, hours_worked, hourly_rate_snapshot, COALESCE(gross_wage, total_amount, 0) amount, work_type, outlet_venue, work_description, payroll_week_start, manager_update_reason, own_schedule_paid_at
           FROM wage_shifts WHERE staff_id = ? AND work_date >= ? ORDER BY work_date, start_time, id`).bind(o.staff_id, o.from_date).all()
       const rows = (rs.results || []) as Array<{ id: number, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, work_type: string, outlet_venue: string, work_description: string, payroll_week_start: string | null, manager_update_reason: string | null, own_schedule_paid_at: string | null }>
       const unpaid = rows.filter((r) => !r.own_schedule_paid_at)
@@ -4645,9 +4646,16 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       const openHold = (r: { id: number, amount: number, manager_update_reason: string | null }) => Number(r.amount) === 0 && !r.manager_update_reason
       const li = unpaid.length ? unpaid.map((r) => {
         const held = openHold(r)
+        // Owner 24 Sep: show the hours actually PAID next to the hours clocked — the Mon–Fri 07:00–07:30 meeting is
+        // not paid (warehouse), Saturday and Sunday have no meeting.
+        const clocked = Number(r.hours_worked || 0)
+        const rate = Number((r as any).hourly_rate_snapshot || 0)
+        const paidH = rate > 0 && Number(r.amount) > 0 ? Math.round(Number(r.amount) / rate * 100) / 100 : clocked
+        const meetingOff = paidH > 0 && clocked - paidH >= 0.24
+        const hoursTxt = meetingOff ? `<strong>${paidH.toFixed(2)} h paid</strong><br><span style="font-size:11px;opacity:.75">${clocked.toFixed(2)} h clocked − ${(clocked - paidH).toFixed(2)} h meeting 07:00–07:30</span>` : `${clocked.toFixed(2)} h${rate ? ` × ${fmtRand(rate)}` : ''}`
         return `<tr style="border-top:1px solid rgba(255,255,255,.08)">
           <td style="padding:4px 8px;white-space:nowrap"><strong>${escapeHtmlText(proxyLongDate(r.work_date))}</strong></td>
-          <td style="padding:4px 8px;white-space:nowrap">${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)} · ${Number(r.hours_worked || 0).toFixed(2)} h</td>
+          <td style="padding:4px 8px;white-space:nowrap">${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)} · ${hoursTxt}</td>
           <td style="padding:4px 8px">${escapeHtmlText(r.work_type || '')}${r.outlet_venue ? ' · ' + escapeHtmlText(r.outlet_venue) : ''}${r.work_description ? ' · <span style="opacity:.75">' + escapeHtmlText(r.work_description.slice(0, 60)) + '</span>' : ''}</td>
           <td style="padding:4px 8px;text-align:right;white-space:nowrap;font-weight:800;color:${held ? '#fca5a5' : '#fde68a'}">${fmtRand(Number(r.amount || 0))}${held ? '<br><span style="font-size:10.5px;font-weight:600">held — decide the review first</span>' : ''}</td>
           <td style="padding:4px 8px;white-space:nowrap">${held ? '' : `<form method="post" action="/wages-admin/own-schedule-paid" style="margin:0" onsubmit="return confirm('Mark ${firstName} ${escapeHtmlText(proxyLongDate(r.work_date))} ${fmtRand(Number(r.amount || 0))} as PAID? It will leave this list.')"><input type="hidden" name="shift_id" value="${r.id}"><input type="hidden" name="return_to" value="__RETURN__"><button type="submit" style="padding:4px 12px;border-radius:6px;border:0;background:#16a34a;color:#fff;font-weight:800;cursor:pointer">✔ Paid</button></form>`}</td>
@@ -4657,6 +4665,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       const payAll = payable.length > 1 ? `<form method="post" action="/wages-admin/own-schedule-paid" style="margin:0" onsubmit="return confirm('Mark ALL ${payable.length} unpaid ${firstName} shifts (${fmtRand(payable.reduce((a, r) => a + Number(r.amount || 0), 0))}) as PAID?')"><input type="hidden" name="shift_id" value="${payable.map((r) => r.id).join(',')}"><input type="hidden" name="return_to" value="__RETURN__"><button type="submit" style="padding:6px 14px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-weight:800;cursor:pointer">✔ Paid — all ${payable.length} shifts ${fmtRand(payable.reduce((a, r) => a + Number(r.amount || 0), 0))}</button></form>` : ''
       blocks.push(`<div style="margin-top:6px">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div style="font-weight:800">${escapeHtmlText(o.display_name)} — unpaid since ${escapeHtmlText(proxyLongDate(o.from_date))}${o.note ? ` <span style="opacity:.75;font-weight:500">(${escapeHtmlText(o.note)})</span>` : ''}</div><div style="font-size:12px;opacity:.75">${unpaid.length} unpaid · ${paidCount} already marked paid</div></div>
+        ${o.next_pay_date ? `<div style="margin-top:4px;padding:6px 10px;border-radius:8px;background:rgba(22,163,74,.18);border:1px solid rgba(134,239,172,.5);font-size:12.5px"><strong>💰 ONE PAYMENT DUE ${escapeHtmlText(proxyLongDate(o.next_pay_date).toUpperCase())}</strong> — everything he works until then accumulates here; on that day pay the TOTAL below and press <strong>✔ Paid — all</strong>. Meeting rule: Mon–Fri 07:00–07:30 is not paid when he is in the warehouse (shown per line as "h paid" vs "h clocked"); Saturday and Sunday have no meeting deduction.</div>` : ''}
         <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:4px"><tbody>${li}</tbody>
         <tfoot><tr style="border-top:2px solid rgba(253,224,71,.5)"><td colspan="3" style="padding:6px 8px;font-weight:800">TOTAL STILL TO PAY ${firstName}</td><td style="padding:6px 8px;text-align:right;font-weight:900;font-size:15px;color:#fde68a">${fmtRand(total)}</td><td style="padding:6px 8px">${payAll}</td></tr></tfoot></table>
       </div>`)
