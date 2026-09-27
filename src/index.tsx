@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-24-4'
+const WAGES_UI_VERSION = 'v2026-09-24-5'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3866,7 +3866,7 @@ function shiftsOverlap(aStart: string, aEnd: string, bStart: string, bEnd: strin
 //   4. Own-rate work (House / House/Garden R62,50; Tsotlego R81,25 …): hours × rate.
 // Read-only: the checker only compares; it never changes a paid record.
 const RULE_WINDOW_START = 7 * 60, RULE_WINDOW_END = 16 * 60, RULE_FULL_DAY = 750, RULE_HALF_DAY = 375, RULE_HALF_MAX_MIN = 4 * 60, RULE_SUNDAY_FACTOR = 1.2
-type RuleSegment = { start: string, end: string, rate: number, kind: 'event' | 'warehouse' | 'musicbus' | 'petrus' | 'ownrate' | 'standard', label: string, addAmount?: number, addLabel?: string }
+type RuleSegment = { start: string, end: string, rate: number, kind: 'event' | 'warehouse' | 'musicbus' | 'petrus' | 'ownrate' | 'student' | 'student_warehouse' | 'standard', label: string, addAmount?: number, addLabel?: string }
 type RuleDayResult = { amount: number, insideMin: number, outsideStdMin: number, outsideMbMin: number, ownRateAmount: number, dayPart: number, overtime: number, sunday: boolean, span: string, notes: string[] }
 
 function ruleSegmentMinutes(seg: { start: string, end: string }) {
@@ -3937,18 +3937,23 @@ const WAREHOUSE_HOURLY = 81.25, VENUE_HOURLY = 95, SUNDAY_FACTOR = 1.2, MEETING_
 // Gardeners' House / House-Garden work (Givemore, Takavaudza): R62,50/h Mon–Sat; SUNDAY ×1.2 = R75/h
 // (owner 24 Sep 2026 — Takavaudza Sun 20 Sep 6 h = R450, not R375); public holiday ×2 = R125/h, held.
 const GARDENER_HOURLY = 62.5
+// Student (Lebo, staff 16) — owner 24 Sep 2026: R50/h at any place; Sunday ×1.2 = R60/h; public holiday ×2 = R100/h (held).
+const STUDENT_STAFF_ID = 16, STUDENT_HOURLY = 50
 // Petrus (staff 4), owner 2026-09-22 (amended later the same day): SET DAY RATE R640,00 for 06:00–16:00 every day;
 // Mon–Fri time before 06:00 / after 16:00 R55/h (held for office approval); Sat & Sun before 06:00 / after 16:00 R80/h (automatic).
 const PETRUS_DAY = 640, PETRUS_WINDOW_START = 6 * 60, PETRUS_WINDOW_END = 16 * 60, PETRUS_EXTRA_RATE = 55, PETRUS_WEEKEND_EXTRA_RATE = 80
 // 'warehouse_or_event' (owner 2026-09-15): the work TYPE is not Warehouse but the wording
 // mentions "warehouse" — not clearly warehouse-only, so Bernie must choose Warehouse or
 // Event/Venue in Review before the weekday rate is decided (engine amount stands meanwhile).
-type OwnerPayKind = 'event' | 'warehouse' | 'warehouse_or_event' | 'musicbus' | 'petrus' | 'gardener' | 'fixed_weekly'
+type OwnerPayKind = 'event' | 'warehouse' | 'warehouse_or_event' | 'musicbus' | 'petrus' | 'gardener' | 'student' | 'student_warehouse' | 'fixed_weekly'
 function ownerPayKind(staffId: number, workType: string, wording: string, payrollRule: string): OwnerPayKind {
   if ((payrollRule || '') === 'fixed_weekly') return 'fixed_weekly'
   const wt = (workType || '').trim()
   if (/music\s*bus/i.test(wt)) return 'musicbus'
   if (staffId === 4) return 'petrus'
+  // Owner 24 Sep 2026: Lebo (staff 16) is a student — R50/h whatever the place, Sunday ×1.2, public holiday ×2,
+  // Mon–Fri 07:00–07:30 meeting unpaid when he is in the warehouse (same as the guys).
+  if (staffId === STUDENT_STAFF_ID) return (/warehouse/i.test(wt) || /w[ae]a?re?\s?house/i.test(wording || '')) ? 'student_warehouse' : 'student'
   // Gardeners: only their House / House/Garden block keeps the gardener rate; the Team
   // block (Warehouse Team / Team Assistance) is general staff for that day.
   if ((staffId === 1 || staffId === 2) && /house|garden/i.test(wt) && !/team/i.test(wt)) return 'gardener'
@@ -4012,8 +4017,21 @@ function ownerPayForShift(dateIso: string, startTime: string, endTime: string, k
       text = `Warehouse public holiday (${holiday}): ${h(totalH)} h${meetingMinH > 0 ? ` − ${h(meetingMinH / 60)} h staff meeting 07:00–07:30 (unpaid) = ${h(paidH)} h` : ''} × R162,50 (R81,25 × 2)`
     }
     else if (kind === 'gardener') { rate = r2(GARDENER_HOURLY * HOLIDAY_FACTOR); rec = r2(totalH * rate); text = `Gardener House work public holiday (${holiday}): ${h(totalH)} h × R125 (R62,50 × 2)` }
+    else if (kind === 'student' || kind === 'student_warehouse') {
+      const meetingMinS = kind === 'student_warehouse' && dow >= 1 && dow <= 5 ? overlapMinutes(sMin, eMin, MEETING_START, MEETING_END) : 0
+      const paidHS = r2(totalH - meetingMinS / 60)
+      rate = r2(STUDENT_HOURLY * HOLIDAY_FACTOR); rec = r2(paidHS * rate)
+      text = `Student public holiday (${holiday}): ${h(totalH)} h${meetingMinS > 0 ? ` − ${h(meetingMinS / 60)} h staff meeting 07:00–07:30 (unpaid) = ${h(paidHS)} h` : ''} × R100 (R50 × 2)`
+    }
     else { rate = r2(VENUE_HOURLY * HOLIDAY_FACTOR); rec = r2(totalH * rate); text = `Venue/event public holiday (${holiday}): ${h(totalH)} h × R190 (R95 × 2)` }
     return { amount: 0, hourlyRate: rate, breakdown: `PUBLIC HOLIDAY — HELD for owner approval — recommended ${text} = ${fmtRand(rec)}; R0 until approved`, heldHoliday: holiday, recommendedAmount: rec, heldExtraHours: r2(totalH), baseAmount: 0 }
+  }
+  if (kind === 'student' || kind === 'student_warehouse') {
+    // Owner 24 Sep 2026: Lebo R50/h any place; Sunday ×1.2; Mon–Fri meeting 07:00–07:30 unpaid when in the warehouse (like the guys).
+    const meetingMinS = kind === 'student_warehouse' && dow >= 1 && dow <= 5 ? overlapMinutes(sMin, eMin, MEETING_START, MEETING_END) : 0
+    const paidHS = totalH - meetingMinS / 60
+    if (dow === 0) return { amount: r2(totalH * STUDENT_HOURLY * SUNDAY_FACTOR), hourlyRate: r2(STUDENT_HOURLY * SUNDAY_FACTOR), breakdown: `Student Sunday: ${h(totalH)} h × R60 (R50 × 1.2)` }
+    return { amount: r2(paidHS * STUDENT_HOURLY), hourlyRate: STUDENT_HOURLY, breakdown: `Student: ${h(totalH)} h${meetingMinS > 0 ? ` − ${h(meetingMinS / 60)} h staff meeting 07:00–07:30 (unpaid, ${fmtRand(r2(meetingMinS / 60 * STUDENT_HOURLY))}) = ${h(paidHS)} h` : ''} × R50` }
   }
   if (kind === 'gardener') {
     // Owner 24 Sep 2026: gardener House work is hourly R62,50; Sunday ×1.2 = R75/h like everyone else.
@@ -4086,7 +4104,7 @@ function computeRuleDay(dateIso: string, segments: RuleSegment[]): RuleDayResult
     for (const [ps, pe] of pieces) {
       // Owner 24 Sep 2026: own-rate (gardener House) hours are ×1.2 on a Sunday like everyone else (R62,50 → R75).
       if (seg.kind === 'ownrate') { ownRateAmount += ((pe - ps) / 60) * seg.rate * (sunday ? SUNDAY_FACTOR : 1); if (sunday && !notes.includes('Sunday ×1.2 on own-rate hours')) notes.push('Sunday ×1.2 on own-rate hours'); continue }
-      const kind: OwnerPayKind = seg.kind === 'musicbus' ? 'musicbus' : seg.kind === 'petrus' ? 'petrus' : seg.kind === 'warehouse' ? 'warehouse' : 'event'
+      const kind: OwnerPayKind = seg.kind === 'musicbus' ? 'musicbus' : seg.kind === 'petrus' ? 'petrus' : seg.kind === 'warehouse' ? 'warehouse' : seg.kind === 'student' || seg.kind === 'student_warehouse' ? seg.kind : 'event'
       const priced = ownerPayForShift(dateIso, fmtT(ps), fmtT(pe), kind)
       if (!priced) continue
       const inside = overlapMinutes(ps, pe, RULE_WINDOW_START, RULE_WINDOW_END)
@@ -4270,6 +4288,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     let kind = ownerPayKind(staffId, wt, wording, staffBase[staffId]?.payroll_rule || 'hourly')
     if ((kind === 'warehouse_or_event' || kind === 'gardener' || kind === 'event' || kind === 'warehouse') && shiftId && rateChoiceByShift[shiftId]) kind = rateChoiceByShift[shiftId]
     if (kind === 'gardener') return { start, end, rate: workRates[staffId + '|' + wt] ?? GARDENER_HOURLY, kind: 'ownrate', label: wt }
+    if (kind === 'student' || kind === 'student_warehouse') return { start, end, rate: STUDENT_HOURLY, kind, label: wt + ' (student R50/h)' }
     if (kind === 'musicbus') return { start, end, rate: 120, kind: 'musicbus', label: wt, ...(shiftId && petrusExtraByShift[shiftId] ? { addAmount: petrusExtraByShift[shiftId].amount, addLabel: petrusExtraByShift[shiftId].label } : {}) }
     if (kind === 'petrus') return { start, end, rate: PETRUS_EXTRA_RATE, kind: 'petrus', label: wt, ...(shiftId && petrusExtraByShift[shiftId] ? { addAmount: petrusExtraByShift[shiftId].amount, addLabel: petrusExtraByShift[shiftId].label } : {}) }
     const add = shiftId && petrusExtraByShift[shiftId] ? { addAmount: petrusExtraByShift[shiftId].amount, addLabel: petrusExtraByShift[shiftId].label } : {}

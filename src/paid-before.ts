@@ -20,7 +20,7 @@
 
 export const PAID_BEFORE_PREFIX = 'paid_before|'
 type Db = { prepare: (sql: string) => any }
-export type PayKind = 'event' | 'warehouse' | 'warehouse_or_event' | 'musicbus' | 'petrus' | 'gardener' | 'fixed_weekly'
+export type PayKind = 'event' | 'warehouse' | 'warehouse_or_event' | 'musicbus' | 'petrus' | 'gardener' | 'student' | 'student_warehouse' | 'fixed_weekly'
 export type Deps = {
   db: Db
   weekStart: string; weekEnd: string
