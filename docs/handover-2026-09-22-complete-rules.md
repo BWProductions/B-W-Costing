@@ -434,3 +434,13 @@ To go back to before the already-paid rule: `git checkout restore-2026-09-18-rol
 Done and closed: crew check re-introduced for the current week only (22 Sep) · self-compare reviews auto-voided (22 Sep) · pay-rule panel removed altogether (23 Sep) · Daniel's R3 000 loan confirmed paid in full outside the payroll (23 Sep) · Joshua Car Payment R1 000/week fixed deduction added, first deduction in the 26 Sep – 2 Oct payroll (24 Sep).
 
 *Prepared for B&W Productions — Bernie Burness — 23 September 2026 (updated 24 Sep 2026).*
+
+### Owner notes ON EVERY ROW (v2026-09-27-6, 27 Sep 2026)
+Bernie: "I asked you to show notes for me for Sundays… the warehouse doesn't show the message… it doesn't give me the times."
+Every owner note for a day is printed **on the row itself** (paid rows AND not-final-submitted drafts), not only in the panel at the top:
+- 📌 forced place (e.g. "everyone at the VENUE rate today — this Warehouse entry is priced as venue, Sunday R114/h");
+- ⛔ worker marked OFF that day (held at R0 with red review when final-submitted);
+- 🕧 per-person window (e.g. Taka 12:30–14:14): green "inside your window ✔", red "starts before / ends after" (trimmed to the window at final submission);
+- 🚫 entry ENTIRELY outside the per-person window (e.g. Taka draft 931 Warehouse 07:00–12:00 vs 12:30–14:14): **held at R0** at final submission with the staff-off style red review (approve if he did work / decline). Not merely trimmed.
+- ⏰ general finish time for the day (Sat 26 Sep 13:00, Sun 27 Sep 11:40): green within / red "x h past your time — ask what time he really finished". A per-person window overrides the general finish time for that person.
+Helper: `ownerNotesForRow()` in src/index.tsx; final-submission rule `outsideWindowNote` in `applyOwnerRatesToFinalSubmission`.

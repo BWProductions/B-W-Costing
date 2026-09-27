@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-27-4'
+const WAGES_UI_VERSION = 'v2026-09-27-6'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3728,7 +3728,8 @@ async function applyOwnerRatesToFinalSubmission(env: Bindings | undefined, draft
   let dayRuleNote = ''
   if (dayRule?.force_kind === 'event' && (kind === 'warehouse' || kind === 'warehouse_or_event')) { kind = 'event'; dayRuleNote = ' | OWNER DAY RULE ' + dateIso + ': all Warehouse entries paid at the VENUE rate' + (dayRule.note ? ' (' + dayRule.note + ')' : '') }
   if (dayRule?.force_kind === 'warehouse' && (kind === 'event' || kind === 'warehouse_or_event')) { kind = 'warehouse'; dayRuleNote = ' | OWNER DAY RULE ' + dateIso + ': all entries paid at the WAREHOUSE rate' + (dayRule.note ? ' (' + dayRule.note + ')' : '') }
-  const staffIsOff = !!dayRule && dayRule.staff_off.includes(Number(row.staff_id))
+  let staffIsOff = !!dayRule && dayRule.staff_off.includes(Number(row.staff_id))
+  let outsideWindowNote = ''
   // Owner 27 Sep 2026 (Takavaudza Sunday garden): "he only arrived at 12:30 — can only claim from that time onwards."
   // Price from the owner's start time when the worker claims earlier; the row keeps his clocked times, the note
   // says why, and a red review lets the owner override.
@@ -3739,7 +3740,14 @@ async function applyOwnerRatesToFinalSubmission(env: Bindings | undefined, draft
   const eM = sM !== null && eM0 !== null && eM0 <= sM ? eM0 + 1440 : eM0
   if (ownerStart && timeToMinutes(ownerStart) !== null && sM !== null && eM !== null && timeToMinutes(ownerStart)! > sM && timeToMinutes(ownerStart)! < eM) priceFrom = ownerStart
   if (ownerEnd && timeToMinutes(ownerEnd) !== null && sM !== null && eM !== null && timeToMinutes(ownerEnd)! < eM && timeToMinutes(ownerEnd)! > timeToMinutes(priceFrom)!) priceTo = ownerEnd
-  if (priceFrom !== row.start_time || priceTo !== row.end_time) {
+  // Owner 27 Sep 2026 (Taka draft 931, Warehouse 07:00–12:00 while the owner recorded him garden 12:30–14:14 only):
+  // an entry that lies COMPLETELY outside the owner's window is not trimmed — it is held at R0 like an OFF day,
+  // with a red review for the owner to approve or decline.
+  const wsM = ownerStart ? timeToMinutes(ownerStart) : null, weM = ownerEnd ? timeToMinutes(ownerEnd) : null
+  if (sM !== null && eM !== null && ((wsM !== null && eM <= wsM) || (weM !== null && sM >= weM))) {
+    staffIsOff = true
+    outsideWindowNote = ' | OUTSIDE OWNER TIMES ' + dateIso + ': owner recorded him ' + (ownerStart || '…') + '–' + (ownerEnd || '…') + ', this entry ' + row.start_time + '–' + row.end_time + ' is entirely outside that window' + (dayRule?.note ? ' (' + dayRule.note + ')' : '')
+  } else if (priceFrom !== row.start_time || priceTo !== row.end_time) {
     startNote = ' | OWNER TIMES ' + dateIso + ': paid ' + priceFrom + '–' + priceTo + ' only (worker entered ' + row.start_time + '–' + row.end_time + ') — ' + (dayRule?.note || 'owner instruction')
   }
   let priced = ownerPayForShift(dateIso, priceFrom, priceTo, kind)
@@ -3767,8 +3775,8 @@ async function applyOwnerRatesToFinalSubmission(env: Bindings | undefined, draft
   let offNote = ''
   if (staffIsOff && priced.amount > 0) {
     // Owner 27 Sep 2026: he was marked OFF this day — hold the whole entry at R0 for the owner's decision.
-    offNote = ' | STAFF OFF ' + dateIso + (dayRule?.note ? ' (' + dayRule.note + ')' : '') + ' — HELD at R0 for owner approval; would be ' + fmtRand(priced.amount)
-    try { await openStaffOffReview(env, { id: row.id, staff_id: row.staff_id, work_date: dateIso, start_time: row.start_time, end_time: row.end_time, hours_worked: row.hours_worked, work_type: row.work_type, outlet_venue: row.outlet_venue, event_name: row.event_name, work_description: row.work_description }, priced, kind, dayRule?.note || '') } catch (err) {}
+    offNote = (outsideWindowNote ? outsideWindowNote : ' | STAFF OFF ' + dateIso + (dayRule?.note ? ' (' + dayRule.note + ')' : '')) + ' — HELD at R0 for owner approval; would be ' + fmtRand(priced.amount)
+    try { await openStaffOffReview(env, { id: row.id, staff_id: row.staff_id, work_date: dateIso, start_time: row.start_time, end_time: row.end_time, hours_worked: row.hours_worked, work_type: row.work_type, outlet_venue: row.outlet_venue, event_name: row.event_name, work_description: row.work_description }, priced, kind, outsideWindowNote ? 'owner recorded him there ' + (ownerStart || '…') + '–' + (ownerEnd || '…') + ' only' + (dayRule?.note ? '; ' + dayRule.note : '') : (dayRule?.note || '')) } catch (err) {}
     priced = { ...priced, amount: 0, baseAmount: 0 }
   }
   if (startNote) {
@@ -3793,7 +3801,7 @@ async function applyOwnerRatesToFinalSubmission(env: Bindings | undefined, draft
   // A capped start (owner start time) or a held OFF day is an OWNER decision on the row — mark it so the green figure
   // and the Excel keep the row amount instead of re-pricing from the clocked hours.
   if (startNote || offNote) {
-    try { await db.prepare(`UPDATE wage_shifts SET manager_update_reason = ? WHERE id = ? AND staff_id = ?`).bind((startNote ? 'Owner times ' + priceFrom + '–' + priceTo + ' applied at Final Submission: ' + priced.breakdown + ' = ' + fmtRand(priced.amount) + ' (worker entered ' + row.start_time + '–' + row.end_time + ')' : '') + (offNote ? (startNote ? ' | ' : '') + 'Marked OFF by the owner on ' + dateIso + ' — held at R0 pending the owner\'s decision' : ''), row.id, staffId).run() } catch (err) {}
+    try { await db.prepare(`UPDATE wage_shifts SET manager_update_reason = ? WHERE id = ? AND staff_id = ?`).bind((startNote ? 'Owner times ' + priceFrom + '–' + priceTo + ' applied at Final Submission: ' + priced.breakdown + ' = ' + fmtRand(priced.amount) + ' (worker entered ' + row.start_time + '–' + row.end_time + ')' : '') + (offNote ? (startNote ? ' | ' : '') + (outsideWindowNote ? 'Entirely outside the owner\'s times ' + (ownerStart || '…') + '–' + (ownerEnd || '…') + ' on ' + dateIso : 'Marked OFF by the owner on ' + dateIso) + ' — held at R0 pending the owner\'s decision' : ''), row.id, staffId).run() } catch (err) {}
   }
   // Owner 2026-09-22: Petrus weekday time outside 06–16 is held for an office decision on the rate.
   if (priced.heldHoliday) {
@@ -4279,6 +4287,31 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     return end > pe ? { ...p, overMin: end - pe } : null
   }
   const isStaleDraft = (d: AdminDraftRow) => d.work_date < captureStart
+  // Owner 27 Sep: "I asked you to show notes for me for Sundays … the warehouse doesn't show the message." Every
+  // owner note for the day — end time, forced place, staff off, per-person window — is shown ON THE ROW, for paid
+  // rows AND drafts, with the clash against what the worker entered spelled out.
+  const ownerNotesForRow = (r: { staff_id: number, work_date: string, start_time: string, end_time: string, work_type: string, outlet_venue?: string }, isDraft: boolean) => {
+    const out: string[] = []
+    const d = dayRules[r.work_date]; const pe = plannedEnds[r.work_date]
+    const sM = timeToMinutes(r.start_time), eM = timeToMinutes(r.end_time)
+    const box = (bg: string, fg: string, text: string) => `<div style="margin-top:3px;padding:4px 7px;border-radius:6px;background:${bg};color:${fg};font-size:11.5px;line-height:1.35">${text}</div>`
+    if (d?.force_kind === 'event' && /warehouse/i.test((r.work_type || '') + ' ' + (r.outlet_venue || ''))) out.push(box('rgba(202,138,4,.22)', '#fde68a', `📌 <strong>OWNER NOTE ${escapeHtmlText(proxyLongDate(r.work_date))}:</strong> everyone at the <strong>VENUE rate</strong> today — this Warehouse entry ${isDraft ? 'will be' : 'is'} priced as venue (Sunday R114/h).`))
+    if (d?.staff_off?.includes(r.staff_id)) out.push(box('rgba(127,29,29,.35)', '#fecaca', `⛔ <strong>OWNER NOTE:</strong> this worker was marked <strong>OFF</strong> on ${escapeHtmlText(proxyLongDate(r.work_date))} — not allowed to claim. ${isDraft ? 'If he final-submits it is held at R0 for your decision.' : 'Held at R0 — see the red review.'}`))
+    const st = d?.staff_start?.[r.staff_id] || '', en = d?.staff_end?.[r.staff_id] || ''
+    if (st || en) {
+      const early = st && sM !== null && sM < timeToMinutes(st)!, late = en && eM !== null && eM > timeToMinutes(en)!
+      const clash = early || late
+      const wholly = (st && eM !== null && eM <= timeToMinutes(st)!) || (en && sM !== null && sM >= timeToMinutes(en)!)
+      if (wholly) out.push(box('rgba(127,29,29,.5)', '#fee2e2', `🚫 <strong>OWNER NOTE — ENTIRELY OUTSIDE YOUR TIMES:</strong> you recorded him there <strong>${escapeHtmlText(st || '…')}–${escapeHtmlText(en || '…')}</strong> on ${escapeHtmlText(proxyLongDate(r.work_date))}. This entry (${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)}${r.work_type ? ', ' + escapeHtmlText(r.work_type) : ''}) falls <strong>completely outside</strong> that window — nothing of it is payable under your note. ${isDraft ? 'If he final-submits it is held at R0 with a red review for your decision.' : 'Check the red review.'}`))
+      else out.push(box(clash ? 'rgba(127,29,29,.35)' : 'rgba(22,163,74,.2)', clash ? '#fecaca' : '#bbf7d0', `🕧 <strong>OWNER NOTE:</strong> you recorded him as there <strong>${escapeHtmlText(st || '…')}–${escapeHtmlText(en || '…')}</strong> on ${escapeHtmlText(proxyLongDate(r.work_date))}. He entered ${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)}${clash ? ` — <strong>${early ? 'starts before ' + escapeHtmlText(st) : ''}${early && late ? ' and ' : ''}${late ? 'ends after ' + escapeHtmlText(en) : ''}</strong>. ${isDraft ? 'When he final-submits it is paid inside your window only, with a red review to override.' : 'Paid inside your window only — red review to override.'}` : ' — inside your window ✔'}`))
+    }
+    // A per-person window (e.g. Taka garden 12:30–14:14) overrides the general finish time (e.g. warehouse 11:40).
+    if (pe && !st && !en && eM !== null && timeToMinutes(pe.planned_end) !== null) {
+      const over = eM > timeToMinutes(pe.planned_end)!
+      out.push(box(over ? 'rgba(127,29,29,.35)' : 'rgba(22,163,74,.2)', over ? '#fecaca' : '#bbf7d0', `⏰ <strong>OWNER NOTE:</strong> work ended <strong>${escapeHtmlText(pe.planned_end)}</strong> on ${escapeHtmlText(proxyLongDate(r.work_date))}${pe.note ? ' (' + escapeHtmlText(pe.note) + ')' : ''}. He entered until ${escapeHtmlText(r.end_time)}${over ? ` — <strong>${((eM - timeToMinutes(pe.planned_end)!) / 60).toFixed(2)} h past your time</strong>. Ask what time he really finished.` : ' — within your time ✔'}`))
+    }
+    return out.join('')
+  }
 
   if (employeeFilter && /^\d+$/.test(employeeFilter)) {
     const sid = Number(employeeFilter)
@@ -4827,7 +4860,8 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         hasRed ? pill('⚑ REVIEW', '#7f1d1d', '#fff') : revs.some((v) => v.status === 'OPEN') ? pill('⚑ review', '#b45309', '#fff') : '',
         r.overnight_confirmed ? pill('next day', '#1e3a8a', '#fff') : '',
         r.manager_update_reason ? pill('corrected', '#1f5f3a', '#fff') : '',
-        (() => { const bp = beyondPlanned(r); return bp ? pill('⏰ CLAIMED PAST ' + escapeHtmlText(bp.planned_end), '#7f1d1d', '#fff') + `<div style="font-size:11.5px;color:#fca5a5;margin-top:2px">Owner set ${escapeHtmlText(bp.planned_end)} as the end of work on ${escapeHtmlText(proxyLongDate(r.work_date))}${bp.note ? ' (' + escapeHtmlText(bp.note) + ')' : ''}. This entry claims until ${escapeHtmlText(r.end_time)} — ${(bp.overMin / 60).toFixed(2)} h more. <strong>Ask: what time did he really work until?</strong> Use ✎ Edit shift to correct.</div>` : '' })(),
+        (() => { const bp = beyondPlanned(r); return bp ? pill('⏰ CLAIMED PAST ' + escapeHtmlText(bp.planned_end), '#7f1d1d', '#fff') : '' })(),
+        ownerNotesForRow(r, false),
       ].join('')
       return `<tr style="border-top:1px solid rgba(255,255,255,.08);${rowBg}">
         ${td(escapeHtmlText(g.name), 'font-weight:700;white-space:nowrap')}
@@ -4859,7 +4893,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       return `<tr style="border-top:1px dashed rgba(255,255,255,.12);opacity:.85">
         ${td(escapeHtmlText(g.name), 'font-weight:700;white-space:nowrap')}
         ${td(`<strong>${escapeHtmlText(d.work_date)}</strong><br><span style="opacity:.75">${escapeHtmlText(dayName(d.work_date))}</span>`, 'white-space:nowrap')}
-        ${td(pill('NOT FINAL-SUBMITTED', '#374151', '#fff') + (isMissed ? pill('MISSED', '#fdecec', '#7f1d1d') : '') + (revs.some((v) => v.status === 'OPEN') ? pill('⚑ review', '#b45309', '#fff') : ''))}
+        ${td(pill('NOT FINAL-SUBMITTED', '#374151', '#fff') + (isMissed ? pill('MISSED', '#fdecec', '#7f1d1d') : '') + (revs.some((v) => v.status === 'OPEN') ? pill('⚑ review', '#b45309', '#fff') : '') + ownerNotesForRow({ staff_id: sid, work_date: d.work_date, start_time: d.start_time, end_time: d.end_time, work_type: d.work_type, outlet_venue: d.outlet_venue }, true))}
         ${td(escapeHtmlText(d.outlet_venue))}
         ${td('')}
         ${td(escapeHtmlText(d.work_description || ''))}
