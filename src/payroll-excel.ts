@@ -18,6 +18,7 @@ export type PayrollDeps = {
   weekStart: string
   weekEnd: string
   ownerPayKind: (staffId: number, workType: string, wording: string, payrollRule: string) => string
+  dayRuleKind?: (dateIso: string, kind: string) => string
   ownerPayForShift: (dateIso: string, startTime: string, endTime: string, kind: any) => { amount: number, hourlyRate: number, breakdown: string } | null
   timeToMinutes: (t: string) => number | null
 }
@@ -89,7 +90,7 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
   // ---- Per-row pricing under owner rules (what the payroll pays) -------------
   type Priced = { row: PaidRow, missed: boolean, claimedH: number, approvedH: number, amount: number, rate: number, breakdown: string, review?: ReviewRow, systemNote: string, reviewNote: string, rateChoice?: ReviewRow }
   const priceHours = (r: PaidRow, hours: number, startHint?: string | null, endHint?: string | null) => {
-    const kind = deps.ownerPayKind(r.staff_id, r.work_type, [r.outlet_venue, r.event_name, r.work_description].join(' '), r.payroll_rule)
+    const kind = deps.dayRuleKind ? deps.dayRuleKind(r.work_date, deps.ownerPayKind(r.staff_id, r.work_type, [r.outlet_venue, r.event_name, r.work_description].join(' '), r.payroll_rule)) : deps.ownerPayKind(r.staff_id, r.work_type, [r.outlet_venue, r.event_name, r.work_description].join(' '), r.payroll_rule)
     // Owner 2026-09-22: a WAREHOUSE / VENUE click on either a rate-choice review OR a crew-pattern flag
     // decides the place for this row — partial-hour pricing must follow that click too.
     const rateChoice = reviewsForPaid(r).filter((v) => /^(rate_choice_|crew_pattern\|)/.test(v.issue_key || '') && v.status === 'RESOLVED' && /chosen/i.test(v.decision_reason || '')).sort((a, b) => b.id - a.id)[0]

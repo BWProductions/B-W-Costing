@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-24-7'
+const WAGES_UI_VERSION = 'v2026-09-27-1'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3666,6 +3666,35 @@ async function ensureRealDateTable(env: Bindings | undefined) {
   realDateTableReady = true
 }
 
+// Owner day rules (owner 27 Sep 2026). Per date: a FORCED PLACE ("everyone who ticks Warehouse today is at the venue
+// rate — they are building for a venue event") and/or a list of STAFF WHO ARE OFF (an entry from them is held at R0
+// for the owner to approve or decline). Table wage_owner_day_rules(work_date PK, force_kind, staff_off_json, note, set_by).
+type OwnerDayRule = { work_date: string, force_kind: string | null, staff_off: number[], note: string }
+async function ownerDayRule(db: D1Database, dateIso: string): Promise<OwnerDayRule | null> {
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS wage_owner_day_rules (work_date TEXT PRIMARY KEY, force_kind TEXT, staff_off_json TEXT, note TEXT, set_by TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`).run()
+    const r = await db.prepare(`SELECT work_date, force_kind, staff_off_json, note FROM wage_owner_day_rules WHERE work_date = ?`).bind(dateIso).first<{ work_date: string, force_kind: string | null, staff_off_json: string | null, note: string | null }>()
+    if (!r) return null
+    let off: number[] = []; try { off = JSON.parse(r.staff_off_json || '[]').map(Number) } catch (err) {}
+    return { work_date: r.work_date, force_kind: r.force_kind || null, staff_off: off, note: r.note || '' }
+  } catch (err) { return null }
+}
+async function openStaffOffReview(env: Bindings | undefined, r: { id: number, staff_id: number, work_date: string, start_time: string, end_time: string, hours_worked: number, work_type: string, outlet_venue: string, event_name: string, work_description: string }, priced: OwnerPriced, kind: OwnerPayKind, note: string) {
+  const db = env?.DB
+  if (!db) return
+  const staff = await db.prepare(`SELECT display_name FROM wage_staff WHERE id = ?`).bind(r.staff_id).first<{ display_name: string }>()
+  const name = staff?.display_name || ('staff ' + r.staff_id)
+  const key = 'staff_off|shift:' + r.id
+  const rec = Number(priced.amount || 0)
+  const reason = 'STAFF OFF — OWNER APPROVAL NEEDED: ' + name + ' was marked OFF on ' + r.work_date + (note ? ' (' + note + ')' : '') + ' but has entered ' + r.start_time + '–' + r.end_time + ' at ' + (r.outlet_venue || '') + ' (' + (r.work_type || 'Normal') + '). Not paid automatically — R0 until the owner approves or declines. If he did work: ' + priced.breakdown + ' = ' + fmtRand(rec) + '.'
+  const snapshot = JSON.stringify({ shiftId: r.id, source: 'shift', staffId: r.staff_id, employee: name, workDate: r.work_date, venue: r.outlet_venue, eventName: r.event_name, workType: r.work_type, workDescription: r.work_description, startTime: r.start_time, endTime: r.end_time, hours: r.hours_worked, amountNow: 0 })
+  const system = JSON.stringify({ comparisonLabel: 'staff off', employee: name, warningTitle: 'Marked OFF by the owner — did he really work? Approve or decline', humanReason: reason, petrusExtra: 1, petrusSunday: 1, staffOff: 1, holidayKind: kind, extraHours: Number(r.hours_worked || 0), beforeHours: 0, afterHours: 0, baseAmount: 0, offeredRate: Number(priced.hourlyRate || 0), recommendedAmount: rec, recommendedText: priced.breakdown, staffBlocking: 0, autoDuplicate: 0, conflictDetected: 0 })
+  await db.prepare(`INSERT INTO wage_payroll_reviews (issue_key, status, warning_kind, severity, staff_id, staff_name, work_date, payroll_week_start, subject_source, subject_shift_id, compared_source, compared_shift_id, warning_reason, issue_summary, original_hours, facts_hash, subject_snapshot_json, system_snapshot_json)
+      SELECT ?, 'OPEN', 'possible_duplicate_manual_check', 'red', ?, ?, ?, (SELECT payroll_week_start FROM wage_shifts WHERE id = ?), 'shift', ?, 'shift', NULL, ?, ?, ?, ?, ?, ?
+      WHERE NOT EXISTS (SELECT 1 FROM wage_payroll_reviews WHERE issue_key = ?)`)
+    .bind(key, r.staff_id, name, r.work_date, r.id, r.id, reason, 'STAFF OFF — ' + name + ' — ' + r.work_date + ' — approve or decline (' + fmtRand(rec) + ' if he worked)', r.hours_worked, key, snapshot, system, key).run()
+}
+
 async function applyOwnerRatesToFinalSubmission(env: Bindings | undefined, draftId: number, cookieHeader: string) {
   const db = env?.DB
   if (!db || !draftId) return
@@ -3689,6 +3718,13 @@ async function applyOwnerRatesToFinalSubmission(env: Bindings | undefined, draft
       if (pd) { const sn = JSON.parse(pd.system_snapshot_json || '{}'); if (sn.placeDecision === 'warehouse' || sn.placeDecision === 'event' || sn.placeDecision === 'gardener') { kind = sn.placeDecision; placeNote = ' | Place decided by office (review #' + pd.id + ', ' + (sn.placeDecidedBy || 'office') + '): ' + (kind === 'warehouse' ? 'WAREHOUSE R81,25/h' : kind === 'gardener' ? 'GARDEN R62,50/h' : 'VENUE R95/h') } }
     } catch (err) {}
   }
+  // Owner 27 Sep 2026: day rules — forced place for everybody (e.g. "Sunday 27 Sep: Warehouse ticks pay the venue
+  // rate, they are building for a venue event") and staff marked OFF (entry held for the owner).
+  const dayRule = await ownerDayRule(db, dateIso)
+  let dayRuleNote = ''
+  if (dayRule?.force_kind === 'event' && (kind === 'warehouse' || kind === 'warehouse_or_event')) { kind = 'event'; dayRuleNote = ' | OWNER DAY RULE ' + dateIso + ': all Warehouse entries paid at the VENUE rate' + (dayRule.note ? ' (' + dayRule.note + ')' : '') }
+  if (dayRule?.force_kind === 'warehouse' && (kind === 'event' || kind === 'warehouse_or_event')) { kind = 'warehouse'; dayRuleNote = ' | OWNER DAY RULE ' + dateIso + ': all entries paid at the WAREHOUSE rate' + (dayRule.note ? ' (' + dayRule.note + ')' : '') }
+  const staffIsOff = !!dayRule && dayRule.staff_off.includes(Number(row.staff_id))
   let priced = ownerPayForShift(dateIso, row.start_time, row.end_time, kind)
   if (!priced) {
     // Owner 2026-09-15: "warehouse" only in the wording → not clearly warehouse-only.
@@ -3711,10 +3747,18 @@ async function applyOwnerRatesToFinalSubmission(env: Bindings | undefined, draft
       }
     }
   } catch (err) {}
+  let offNote = ''
+  if (staffIsOff && priced.amount > 0) {
+    // Owner 27 Sep 2026: he was marked OFF this day — hold the whole entry at R0 for the owner's decision.
+    offNote = ' | STAFF OFF ' + dateIso + (dayRule?.note ? ' (' + dayRule.note + ')' : '') + ' — HELD at R0 for owner approval; would be ' + fmtRand(priced.amount)
+    try { await openStaffOffReview(env, { id: row.id, staff_id: row.staff_id, work_date: dateIso, start_time: row.start_time, end_time: row.end_time, hours_worked: row.hours_worked, work_type: row.work_type, outlet_venue: row.outlet_venue, event_name: row.event_name, work_description: row.work_description }, priced, kind, dayRule?.note || '') } catch (err) {}
+    priced = { ...priced, amount: 0, baseAmount: 0 }
+  }
+  const noteTxt = 'Rate rules 2026-09-15: ' + priced.breakdown + placeNote + approvedNote + dayRuleNote + offNote
   await db.prepare(`UPDATE wage_shifts SET total_amount = ?, gross_wage = ?, hourly_rate_snapshot = ?, calculation_version = ?,
         payroll_note = CASE WHEN COALESCE(payroll_note,'') = '' THEN ? ELSE payroll_note || ' | ' || ? END
       WHERE id = ? AND staff_id = ?`)
-    .bind(priced.amount, priced.amount, priced.hourlyRate, OWNER_RATE_RULES_VERSION, 'Rate rules 2026-09-15: ' + priced.breakdown + placeNote + approvedNote, 'Rate rules 2026-09-15: ' + priced.breakdown + placeNote + approvedNote, row.id, staffId).run()
+    .bind(priced.amount, priced.amount, priced.hourlyRate, OWNER_RATE_RULES_VERSION, noteTxt, noteTxt, row.id, staffId).run()
   // Owner 2026-09-22: Petrus weekday time outside 06–16 is held for an office decision on the rate.
   if (priced.heldHoliday) {
     try { await openHolidayReview(env, { id: row.id, staff_id: row.staff_id, work_date: dateIso, start_time: row.start_time, end_time: row.end_time, hours_worked: row.hours_worked, work_type: row.work_type, outlet_venue: row.outlet_venue, event_name: row.event_name, work_description: row.work_description }, priced, kind) } catch (err) {}
@@ -4174,6 +4218,21 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     const pe = await db.prepare(`SELECT work_date, planned_end, note FROM wage_planned_hours WHERE work_date BETWEEN date(?, '-7 days') AND ?`).bind(weekStart, weekEnd).all()
     for (const r of (pe.results || []) as PlannedEnd[]) plannedEnds[r.work_date] = r
   } catch (err) {}
+  // Owner day rules for the week (owner 27 Sep 2026): forced place and staff off, by date.
+  const dayRules: Record<string, OwnerDayRule> = {}
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS wage_owner_day_rules (work_date TEXT PRIMARY KEY, force_kind TEXT, staff_off_json TEXT, note TEXT, set_by TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`).run()
+    const dr = await db.prepare(`SELECT work_date, force_kind, staff_off_json, note FROM wage_owner_day_rules WHERE work_date BETWEEN date(?, '-7 days') AND ?`).bind(weekStart, weekEnd).all()
+    for (const r of (dr.results || []) as any[]) { let off: number[] = []; try { off = JSON.parse(r.staff_off_json || '[]').map(Number) } catch (err) {} dayRules[String(r.work_date)] = { work_date: String(r.work_date), force_kind: r.force_kind || null, staff_off: off, note: String(r.note || '') } }
+  } catch (err) {}
+  const offNameById: Record<number, string> = {}
+  try { const ids = Array.from(new Set(Object.values(dayRules).flatMap((d) => d.staff_off))); if (ids.length) { const nr = await db.prepare(`SELECT id, display_name FROM wage_staff WHERE id IN (${ids.map(() => '?').join(',')})`).bind(...ids).all(); for (const r of (nr.results || []) as any[]) offNameById[Number(r.id)] = String(r.display_name) } } catch (err) {}
+  const applyDayRuleKind = (dateIso: string, kind: OwnerPayKind): OwnerPayKind => {
+    const d = dayRules[dateIso]; if (!d?.force_kind) return kind
+    if (d.force_kind === 'event' && (kind === 'warehouse' || kind === 'warehouse_or_event')) return 'event'
+    if (d.force_kind === 'warehouse' && (kind === 'event' || kind === 'warehouse_or_event')) return 'warehouse'
+    return kind
+  }
   const beyondPlanned = (r: { work_date: string, start_time: string, end_time: string }) => {
     const p = plannedEnds[r.work_date]; if (!p) return null
     const e = timeToMinutes(r.end_time), pe = timeToMinutes(p.planned_end), st = timeToMinutes(r.start_time)
@@ -4277,13 +4336,14 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   // Office decisions on Petrus weekday extra time (review key petrus_extra|shift:ID).
   const petrusExtraByShift: Record<number, { amount: number, label: string }> = {}
   for (const v of reviewsAll) {
-    const m = /^(?:petrus_extra|public_holiday)\|shift:(\d+)$/.exec(v.issue_key || '')
+    const m = /^(?:petrus_extra|public_holiday|staff_off)\|shift:(\d+)$/.exec(v.issue_key || '')
     if (!m || v.status !== 'RESOLVED') continue
     try { const sn = JSON.parse(v.system_snapshot_json || '{}'); if (sn.approvedExtraAmount !== undefined) petrusExtraByShift[Number(m[1])] = { amount: Number(sn.approvedExtraAmount), label: sn.petrusSunday ? `${sn.publicHoliday ? 'Public holiday (' + sn.publicHoliday + ')' : 'Sunday'} ${Number(sn.approvedExtraAmount) > 0 ? 'approved ' + fmtRand(Number(sn.approvedExtraAmount)) : 'declined — R0'} by ${sn.decidedBy || 'office'} (#${v.id})` : `office approved ${Number(sn.extraHours || 0).toFixed(2)} h outside 06–16 × ${fmtRand(Number(sn.approvedRate || 0))} = ${fmtRand(Number(sn.approvedExtraAmount))} (#${v.id})` } } catch (err) {}
   }
-  const ruleSegmentFor = (staffId: number, workType: string, start: string, end: string, wording = '', shiftId = 0): RuleSegment => {
+  const ruleSegmentFor = (staffId: number, workType: string, start: string, end: string, wording = '', shiftId = 0, dateIso = ''): RuleSegment => {
     const wt = workType || ''
     let kind = ownerPayKind(staffId, wt, wording, staffBase[staffId]?.payroll_rule || 'hourly')
+    if (dateIso) kind = applyDayRuleKind(dateIso, kind)
     if ((kind === 'warehouse_or_event' || kind === 'gardener' || kind === 'event' || kind === 'warehouse') && shiftId && rateChoiceByShift[shiftId]) kind = rateChoiceByShift[shiftId]
     if (kind === 'gardener') return { start, end, rate: workRates[staffId + '|' + wt] ?? GARDENER_HOURLY, kind: 'ownrate', label: wt }
     if (kind === 'student' || kind === 'student_warehouse') return { start, end, rate: STUDENT_HOURLY, kind, label: wt + ' (student R50/h)' }
@@ -4308,11 +4368,11 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       return `<form method="post" action="/wages-admin/petrus-extra" class="bw-review-decide" style="margin-top:6px;padding:8px;border-radius:8px;background:rgba(255,255,255,.05);font-size:12px">
       <input type="hidden" name="review_id" value="${v.id}">
       <input type="hidden" name="return_to" value="__RETURN__">
-      <div style="margin-bottom:6px"><strong>${snap.publicHoliday ? `Public holiday — ${escapeHtmlText(snap.publicHoliday)}. Nothing is paid until you decide. Recommended: ${escapeHtmlText(snap.recommendedText || '')} = ${fmtRand(rec)}.` : `Petrus worked on a Sunday — nothing is paid until you decide. Recommended: ${Number(snap.baseAmount || 0) > 0 ? 'R640 set day rate' : 'no 06–16 time'}${hrs > 0 ? ' + ' + hrs.toFixed(2) + ' h outside 06–16 × R80' : ''} = ${fmtRand(rec)}.`}</strong></div>
+      <div style="margin-bottom:6px"><strong>${snap.staffOff ? `⛔ You marked ${escapeHtmlText(String(snap.employee || 'this worker'))} OFF on this day — he was not allowed to claim, but he has entered a shift. Nothing is paid until you decide. If he did work: ${escapeHtmlText(snap.recommendedText || '')} = ${fmtRand(rec)}.` : snap.publicHoliday ? `Public holiday — ${escapeHtmlText(snap.publicHoliday)}. Nothing is paid until you decide. Recommended: ${escapeHtmlText(snap.recommendedText || '')} = ${fmtRand(rec)}.` : `Petrus worked on a Sunday — nothing is paid until you decide. Recommended: ${Number(snap.baseAmount || 0) > 0 ? 'R640 set day rate' : 'no 06–16 time'}${hrs > 0 ? ' + ' + hrs.toFixed(2) + ' h outside 06–16 × R80' : ''} = ${fmtRand(rec)}.`}</strong></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-        <button type="submit" name="choice" value="offered" style="padding:5px 10px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer">${snap.publicHoliday ? 'Approve public holiday' : 'Approve Sunday'} — ${fmtRand(rec)}</button>
+        <button type="submit" name="choice" value="offered" style="padding:5px 10px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer">${snap.staffOff ? 'He did work — approve' : snap.publicHoliday ? 'Approve public holiday' : 'Approve Sunday'} — ${fmtRand(rec)}</button>
         <span style="display:inline-flex;align-items:center;gap:4px">Other amount: R<input type="number" name="custom_amount" step="0.01" min="0" style="width:90px;padding:3px 5px;border-radius:5px;border:1px solid rgba(255,255,255,.3);background:#111;color:#fff"> <button type="submit" name="choice" value="custom_amount" style="padding:5px 10px;border-radius:6px;border:1px solid #e2b93b;background:transparent;color:#e2b93b;font-weight:700;cursor:pointer">Approve this amount</button></span>
-        <button type="submit" name="choice" value="zero" style="padding:5px 10px;border-radius:6px;border:1px solid rgba(255,255,255,.35);background:transparent;color:#fff;font-weight:700;cursor:pointer">Decline — R0</button>
+        <button type="submit" name="choice" value="zero" style="padding:5px 10px;border-radius:6px;border:1px solid rgba(255,255,255,.35);background:transparent;color:#fff;font-weight:700;cursor:pointer">${snap.staffOff ? 'He was OFF — decline, R0' : 'Decline — R0'}</button>
       </div>
     </form>`
     }
@@ -4694,7 +4754,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       for (const date of dates) {
         const dayRows = rows.filter((r) => r.work_date === date)
         const priorRows = date < weekStart ? prior.filter((p) => p.staff_id === sid && p.work_date === date) : []
-        const segs = [...dayRows.map((r) => ruleSegmentFor(sid, r.work_type, r.start_time, r.end_time, [r.outlet_venue, r.event_name, r.work_description].join(' '), r.id)), ...priorRows.map((p) => ruleSegmentFor(sid, p.work_type, p.start_time, p.end_time, p.outlet_venue))]
+        const segs = [...dayRows.map((r) => ruleSegmentFor(sid, r.work_type, r.start_time, r.end_time, [r.outlet_venue, r.event_name, r.work_description].join(' '), r.id, date)), ...priorRows.map((p) => ruleSegmentFor(sid, p.work_type, p.start_time, p.end_time, p.outlet_venue, 0, date))]
         const rule = computeRuleDay(date, segs)
         const paidTotal = dayRows.reduce((a, r) => a + Number(r.amount || 0), 0) + priorRows.reduce((a, p) => a + Number(p.amount || 0), 0)
         const diff = Math.round((paidTotal - rule.amount) * 100) / 100
@@ -4805,12 +4865,12 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       try { snap = decided.system_snapshot_json ? JSON.parse(decided.system_snapshot_json) : null } catch (err) {}
       const st = (decided as any).approved_start_time || snap?.recommendedStart, en = (decided as any).approved_end_time || snap?.recommendedEnd
       if (st && en && timeToMinutes(st) !== null && timeToMinutes(en) !== null && ruleApplies(sid)) {
-        agreedA += computeRuleDay(r.work_date, [ruleSegmentFor(sid, r.work_type, st, en, [r.outlet_venue, r.event_name, r.work_description].join(' '), r.id)]).amount
+        agreedA += computeRuleDay(r.work_date, [ruleSegmentFor(sid, r.work_type, st, en, [r.outlet_venue, r.event_name, r.work_description].join(' '), r.id, r.work_date)]).amount
       } else {
         // Owner 2026-09-22 (Givemore 17 Sep): partial hours are priced at the row's own hourly rule —
         // WAREHOUSE / VENUE click honoured — as the LAST `ah` hours of the entry (same as the Excel sheet).
         const placeRv = reviewsForPaid(r).filter((v) => /^(rate_choice_|crew_pattern\|)/.test(v.issue_key || '') && v.status === 'RESOLVED' && /chosen/i.test(v.decision_reason || '')).sort((a, b) => b.id - a.id)[0]
-        const baseKind = ownerPayKind(sid, r.work_type, [r.outlet_venue, r.event_name, r.work_description].join(' '), staffBase[sid]?.payroll_rule || 'hourly')
+        const baseKind = applyDayRuleKind(r.work_date, ownerPayKind(sid, r.work_type, [r.outlet_venue, r.event_name, r.work_description].join(' '), staffBase[sid]?.payroll_rule || 'hourly'))
         const kindP: OwnerPayKind = placeRv ? (/^warehouse/i.test((placeRv.decision_reason || '').trim()) ? 'warehouse' : 'event') : (baseKind === 'warehouse_or_event' ? 'event' : baseKind)
         const s0 = timeToMinutes(r.start_time), e0 = timeToMinutes(r.end_time)
         let priced: OwnerPriced | null = null
@@ -4893,16 +4953,27 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       // 26 Sep, so when they start putting their hours in we can triple-check it." Every planned end for a day in
       // THIS payroll week is shown here as a standing reminder; entries past it carry the red ⏰ pill on the row.
       const days = Object.values(plannedEnds).filter((p) => p.work_date >= weekStart && p.work_date <= weekEnd).sort((a, b) => a.work_date.localeCompare(b.work_date))
-      if (!days.length) return ''
+      const ruleDays = Object.values(dayRules).filter((d) => d.work_date >= weekStart && d.work_date <= weekEnd).sort((a, b) => a.work_date.localeCompare(b.work_date))
+      if (!days.length && !ruleDays.length) return ''
       const li = days.map((p) => {
         const rowsThatDay = paid.filter((r: AdminPaidRow) => r.work_date === p.work_date)
         const over = rowsThatDay.filter((r: AdminPaidRow) => beyondPlanned(r))
         const state = rowsThatDay.length ? `${rowsThatDay.length} entr${rowsThatDay.length === 1 ? 'y' : 'ies'} in so far · <strong style="color:${over.length ? '#fca5a5' : '#86efac'}">${over.length ? over.length + ' claim past ' + escapeHtmlText(p.planned_end) + ' — see the ⏰ pill on the row' : 'none past ' + escapeHtmlText(p.planned_end)}</strong>` : 'no entries in yet'
         return `<li style="margin:3px 0"><strong>${escapeHtmlText(proxyLongDate(p.work_date))} — work ended ${escapeHtmlText(p.planned_end)}</strong>${p.note ? ` <span style="opacity:.8">(${escapeHtmlText(p.note)})</span>` : ''}<br><span style="font-size:12px">${state}</span></li>`
       }).join('')
+      const ruleLi = ruleDays.map((d) => {
+        const offNames = d.staff_off.map((id) => offNameById[id] || ('staff ' + id))
+        const rowsThatDay = paid.filter((r: AdminPaidRow) => r.work_date === d.work_date)
+        const offClaims = rowsThatDay.filter((r: AdminPaidRow) => d.staff_off.includes(r.staff_id))
+        const parts: string[] = []
+        if (d.force_kind === 'event') parts.push(`<strong>everyone at the VENUE rate</strong> (R95/h · Sunday R114/h) — Warehouse ticks are re-priced as venue automatically`)
+        if (d.force_kind === 'warehouse') parts.push(`<strong>everyone at the WAREHOUSE rate</strong>`)
+        if (offNames.length) parts.push(`<strong>OFF — not allowed to claim:</strong> ${offNames.map(escapeHtmlText).join(', ')}${offClaims.length ? ` <span style="color:#fca5a5;font-weight:800">⚠ ${offClaims.length} of them entered a shift anyway — held at R0, see the red review</span>` : ' <span style="color:#86efac">— no claims from them so far</span>'}`)
+        return `<li style="margin:3px 0"><strong>${escapeHtmlText(proxyLongDate(d.work_date))}</strong> — ${parts.join(' · ')}${d.note ? ` <span style="opacity:.8">(${escapeHtmlText(d.note)})</span>` : ''}<br><span style="font-size:12px">${rowsThatDay.length ? rowsThatDay.length + ' entr' + (rowsThatDay.length === 1 ? 'y' : 'ies') + ' in so far' : 'no entries in yet'}</span></li>`
+      }).join('')
       return `<section id="bw-planned-end-note" style="margin:6px 0 12px;padding:9px 14px;border-radius:12px;background:rgba(202,138,4,.15);border:1px solid rgba(253,224,71,.55)">
-        <div style="font-weight:800;color:#fde68a;font-size:13.5px">📌 Owner's note — end of work set for this week</div>
-        <ul style="margin:4px 0 0 16px;padding:0;font-size:12.5px">${li}</ul>
+        <div style="font-weight:800;color:#fde68a;font-size:13.5px">📌 Owner's notes for this week</div>
+        <ul style="margin:4px 0 0 16px;padding:0;font-size:12.5px">${ruleLi}${li}</ul>
         <div style="font-size:11.5px;opacity:.7;margin-top:4px">Any entry that runs past the set time is flagged red <strong>⏰ CLAIMED PAST</strong> on the row. Ask the worker what time he really finished and use ✎ Edit shift to correct.</div>
       </section>`
     })()}
@@ -5467,7 +5538,11 @@ app.get('/wages-admin/payroll.xlsx', async (c) => {
   const weekEnd = proxyEndOfPayrollWeek(weekStart)
   try {
     if (weekStart === currentProxyPayrollWeekStart()) { try { await runPaidBeforeCheck({ db, weekStart, weekEnd, ownerPayKind, ownerPayForShift }) } catch (err) {} try { await runCrewPatternCheck({ db, weekStart, weekEnd, ownerPayKind }) } catch (err) {} }
-    const out = await buildPayrollWorkbook({ db, weekStart, weekEnd, ownerPayKind, ownerPayForShift, timeToMinutes })
+    // Owner day rules (27 Sep 2026) — forced place per date — must reach the Excel pricing too.
+    const dayRuleMap: Record<string, string | null> = {}
+    try { const dr = await db.prepare(`SELECT work_date, force_kind FROM wage_owner_day_rules WHERE work_date BETWEEN date(?, '-7 days') AND ?`).bind(weekStart, weekEnd).all(); for (const r of (dr.results || []) as any[]) dayRuleMap[String(r.work_date)] = r.force_kind || null } catch (err) {}
+    const dayRuleKind = (dateIso: string, kind: string) => { const f = dayRuleMap[dateIso]; if (!f) return kind; if (f === 'event' && (kind === 'warehouse' || kind === 'warehouse_or_event')) return 'event'; if (f === 'warehouse' && (kind === 'event' || kind === 'warehouse_or_event')) return 'warehouse'; return kind }
+    const out = await buildPayrollWorkbook({ db, weekStart, weekEnd, ownerPayKind, ownerPayForShift, timeToMinutes, dayRuleKind })
     if (c.req.query('check') === '1') return c.json({ weekStart, weekEnd, ...out.checks })
     return new Response(out.bytes, { status: 200, headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'content-disposition': `attachment; filename="${out.filename}"`, 'cache-control': 'no-store' } })
   } catch (err) {
@@ -5642,7 +5717,7 @@ app.post('/wages-admin/petrus-extra', async (c) => {
   if (choice === 'custom_amount' && !(customAmount > 0)) return back(safeReturn + sep + 'error=' + encodeURIComponent('Type the amount before clicking "Approve this amount".') + '#bw-review-' + reviewId)
   try {
     const rv = await db.prepare(`SELECT id, status, issue_key, subject_shift_id, staff_id, original_hours, system_snapshot_json FROM wage_payroll_reviews WHERE id = ?`).bind(reviewId).first<{ id: number, status: string, issue_key: string, subject_shift_id: number, staff_id: number, original_hours: number | null, system_snapshot_json: string | null }>()
-    if (!rv || !/^(petrus_extra|public_holiday)\|shift:/.test(rv.issue_key || '')) return back(safeReturn + sep + 'error=' + encodeURIComponent('Review #' + reviewId + ' is not a Petrus extra-time / public-holiday review.'))
+    if (!rv || !/^(petrus_extra|public_holiday|staff_off)\|shift:/.test(rv.issue_key || '')) return back(safeReturn + sep + 'error=' + encodeURIComponent('Review #' + reviewId + ' is not a Petrus extra-time / public-holiday / staff-off review.'))
     if (rv.status !== 'OPEN') return back(safeReturn + sep + 'msg=' + encodeURIComponent('Review #' + reviewId + ' was already ' + rv.status + '.'))
     let snap: any = {}
     try { snap = JSON.parse(rv.system_snapshot_json || '{}') } catch (err) { snap = {} }
@@ -5657,9 +5732,9 @@ app.post('/wages-admin/petrus-extra', async (c) => {
     const before = before0(row)
     const after = Math.round((before + extra) * 100) / 100
     const label = sunday
-      ? (choice === 'zero' ? (snap.publicHoliday ? 'Public holiday declined — R0' : 'Sunday declined — R0') : (snap.publicHoliday ? 'Public holiday (' + snap.publicHoliday + ') approved — ' : 'Sunday approved — ') + fmtRand(extra) + (choice === 'custom_amount' ? ' (owner amount)' : ' (as recommended)'))
+      ? (choice === 'zero' ? (snap.staffOff ? 'Marked OFF — declined, R0' : snap.publicHoliday ? 'Public holiday declined — R0' : 'Sunday declined — R0') : (snap.staffOff ? 'Marked OFF but owner confirms he worked — approved ' : snap.publicHoliday ? 'Public holiday (' + snap.publicHoliday + ') approved — ' : 'Sunday approved — ') + fmtRand(extra) + (choice === 'custom_amount' ? ' (owner amount)' : ' (as recommended)'))
       : choice === 'zero' ? 'Not payable — R0' : hrs.toFixed(2) + ' h outside 06–16 × ' + fmtRand(rate) + '/h = ' + fmtRand(extra)
-    const note = (snap.publicHoliday ? 'Public holiday (' + snap.publicHoliday + ')' : 'Petrus ' + (sunday ? 'Sunday' : 'extra time')) + ' decided by ' + admin.name + ' (review #' + reviewId + '): ' + label + ' — shift ' + fmtRand(before) + ' → ' + fmtRand(after)
+    const note = (snap.staffOff ? 'Staff OFF day' : snap.publicHoliday ? 'Public holiday (' + snap.publicHoliday + ')' : 'Petrus ' + (sunday ? 'Sunday' : 'extra time')) + ' decided by ' + admin.name + ' (review #' + reviewId + '): ' + label + ' — shift ' + fmtRand(before) + ' → ' + fmtRand(after)
     snap.approvedRate = rate; snap.approvedExtraAmount = extra; snap.decidedBy = admin.name
     if (extra > 0) {
       await db.prepare(`UPDATE wage_shifts SET total_amount = ?, gross_wage = ?, payroll_note = CASE WHEN COALESCE(payroll_note,'') = '' THEN ? ELSE payroll_note || ' | ' || ? END, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND staff_id = ?`).bind(after, after, note, note, row.id, row.staff_id).run()

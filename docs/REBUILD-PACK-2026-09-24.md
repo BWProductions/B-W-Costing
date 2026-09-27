@@ -129,6 +129,11 @@ Official gov.za list + Election Day **Wed 4 Nov 2026** (in `SA_PUBLIC_HOLIDAYS` 
 
 **📌 Owner's note panel (v2026-09-24-3, owner 24 Sep).** Any planned end time set for a day in the CURRENT payroll week (`wage_planned_hours`) shows at the top of the dashboard as a yellow note — *"Sat 26 Sep 2026 — work ended 13:00 (everyone at the warehouse …)"* — with a live count of entries in so far and how many claim past the time. Entries past it carry the red ⏰ CLAIMED PAST pill. To add a note for a day, the assistant inserts a row into `wage_planned_hours` (work_date, planned_end, note, set_by). First use: Sat 26 Sep 2026 → 13:00.
 
+**📌 Owner DAY RULES (owner 27 Sep 2026, v2026-09-27-1).** Table `wage_owner_day_rules(work_date PK, force_kind, staff_off_json, note, set_by)`. Two things the owner can set for a date:
+1. **Forced place** — e.g. Sun 27 Sep: *"all the staff that select warehouse today will use the venue rate — they're building and fixing for a venue event."* `force_kind = 'event'` → every Warehouse Team / warehouse-wording entry that day is priced as **venue** (R95/h; Sunday R114/h) at Final Submission, on the dashboard green figure and in the Excel; the row's note says "OWNER DAY RULE …". (`force_kind = 'warehouse'` does the reverse.)
+2. **Staff OFF** — e.g. *"Daniel, Thina and Patrick are off — not allowed to claim Sunday."* `staff_off_json = [10,3,13]`. An entry from them on that date is **held at R0** at Final Submission with a red review **"⛔ You marked X OFF on this day … If he did work: … = R…"** and buttons **He did work — approve R…** / Other amount / **He was OFF — decline, R0** (route `/wages-admin/petrus-extra`, key `staff_off|shift:ID`).
+The **📌 Owner's notes for this week** panel at the top of the dashboard lists each day rule (forced place, names off, "⚠ N of them entered a shift anyway") together with the planned-end notes. First use: **Sun 27 Sep 2026 — venue rate for all; Daniel, Thina, Patrick OFF.** Live-tested on the preview with temporary drafts (Daniel → held R0 + review; Bhekizitha warehouse → R684 venue Sunday), test rows removed.
+
 ## C5 — Already paid → pay only the DIFFERENCE (rule of 21 Sep, wording of 23 Sep)
 When a current-payroll entry overlaps a **paid** row from an earlier payroll, one red review with proof and one sum, in the owner's words:
 
