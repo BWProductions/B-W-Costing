@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-27-6'
+const WAGES_UI_VERSION = 'v2026-09-27-7'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3669,18 +3669,50 @@ async function ensureRealDateTable(env: Bindings | undefined) {
 // Owner day rules (owner 27 Sep 2026). Per date: a FORCED PLACE ("everyone who ticks Warehouse today is at the venue
 // rate — they are building for a venue event") and/or a list of STAFF WHO ARE OFF (an entry from them is held at R0
 // for the owner to approve or decline). Table wage_owner_day_rules(work_date PK, force_kind, staff_off_json, note, set_by).
-type OwnerDayRule = { work_date: string, force_kind: string | null, staff_off: number[], staff_start: Record<number, string>, staff_end: Record<number, string>, note: string }
+type OwnerWindow = { start: string, end: string, place?: string }
+type OwnerDayRule = { work_date: string, force_kind: string | null, staff_off: number[], staff_start: Record<number, string>, staff_end: Record<number, string>, staff_windows: Record<number, OwnerWindow[]>, note: string }
+// Owner 27 Sep 2026 (Taka: warehouse 07:00–11:30 THEN house/garden 12:30–14:14): a person can have SEVERAL allowed
+// windows on one day. Legacy single start/end becomes one window. Returns the windows for a staff member (or []).
+function ownerWindowsFor(d: OwnerDayRule | null | undefined, staffId: number): OwnerWindow[] {
+  if (!d) return []
+  const w = d.staff_windows?.[staffId]
+  if (w && w.length) return w
+  const st = d.staff_start?.[staffId] || '', en = d.staff_end?.[staffId] || ''
+  return st || en ? [{ start: st || '00:00', end: en || '23:59' }] : []
+}
+function parseOwnerWindows(json: string | null): Record<number, OwnerWindow[]> {
+  const out: Record<number, OwnerWindow[]> = {}
+  try { const o = JSON.parse(json || '{}'); for (const k of Object.keys(o)) { const arr = Array.isArray(o[k]) ? o[k] : []; out[Number(k)] = arr.filter((w: any) => w && /^\d{2}:\d{2}$/.test(String(w.start)) && /^\d{2}:\d{2}$/.test(String(w.end))).map((w: any) => ({ start: String(w.start), end: String(w.end), place: w.place ? String(w.place) : undefined })) } } catch (err) {}
+  return out
+}
+// How much of [start,end] lies inside the owner's windows, in minutes, plus the overlapping pieces.
+function ownerWindowOverlap(start: string, end: string, wins: OwnerWindow[]): { minutes: number, pieces: Array<{ start: string, end: string, place?: string }> } {
+  const s = timeToMinutes(start), e0 = timeToMinutes(end)
+  if (s === null || e0 === null) return { minutes: 0, pieces: [] }
+  const e = e0 <= s ? e0 + 1440 : e0
+  const pieces: Array<{ start: string, end: string, place?: string }> = []
+  let minutes = 0
+  const mm = (m: number) => String(Math.floor((m % 1440) / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0')
+  for (const w of wins) {
+    const ws = timeToMinutes(w.start), we = timeToMinutes(w.end)
+    if (ws === null || we === null) continue
+    const a = Math.max(s, ws), b = Math.min(e, we)
+    if (b > a) { minutes += b - a; pieces.push({ start: mm(a), end: mm(b), place: w.place }) }
+  }
+  return { minutes, pieces }
+}
 async function ownerDayRule(db: D1Database, dateIso: string): Promise<OwnerDayRule | null> {
   try {
     await db.prepare(`CREATE TABLE IF NOT EXISTS wage_owner_day_rules (work_date TEXT PRIMARY KEY, force_kind TEXT, staff_off_json TEXT, note TEXT, set_by TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`).run()
     try { await db.prepare(`ALTER TABLE wage_owner_day_rules ADD COLUMN staff_start_json TEXT`).run() } catch (err) {}
     try { await db.prepare(`ALTER TABLE wage_owner_day_rules ADD COLUMN staff_end_json TEXT`).run() } catch (err) {}
-    const r = await db.prepare(`SELECT work_date, force_kind, staff_off_json, staff_start_json, staff_end_json, note FROM wage_owner_day_rules WHERE work_date = ?`).bind(dateIso).first<{ work_date: string, force_kind: string | null, staff_off_json: string | null, staff_start_json: string | null, staff_end_json: string | null, note: string | null }>()
+    try { await db.prepare(`ALTER TABLE wage_owner_day_rules ADD COLUMN staff_windows_json TEXT`).run() } catch (err) {}
+    const r = await db.prepare(`SELECT work_date, force_kind, staff_off_json, staff_start_json, staff_end_json, staff_windows_json, note FROM wage_owner_day_rules WHERE work_date = ?`).bind(dateIso).first<{ work_date: string, force_kind: string | null, staff_off_json: string | null, staff_start_json: string | null, staff_end_json: string | null, staff_windows_json: string | null, note: string | null }>()
     if (!r) return null
     let off: number[] = []; try { off = JSON.parse(r.staff_off_json || '[]').map(Number) } catch (err) {}
     let st: Record<number, string> = {}; try { st = JSON.parse(r.staff_start_json || '{}') } catch (err) {}
     let en: Record<number, string> = {}; try { en = JSON.parse(r.staff_end_json || '{}') } catch (err) {}
-    return { work_date: r.work_date, force_kind: r.force_kind || null, staff_off: off, staff_start: st, staff_end: en, note: r.note || '' }
+    return { work_date: r.work_date, force_kind: r.force_kind || null, staff_off: off, staff_start: st, staff_end: en, staff_windows: parseOwnerWindows(r.staff_windows_json), note: r.note || '' }
   } catch (err) { return null }
 }
 async function openStaffOffReview(env: Bindings | undefined, r: { id: number, staff_id: number, work_date: string, start_time: string, end_time: string, hours_worked: number, work_type: string, outlet_venue: string, event_name: string, work_description: string }, priced: OwnerPriced, kind: OwnerPayKind, note: string) {
@@ -3733,22 +3765,30 @@ async function applyOwnerRatesToFinalSubmission(env: Bindings | undefined, draft
   // Owner 27 Sep 2026 (Takavaudza Sunday garden): "he only arrived at 12:30 — can only claim from that time onwards."
   // Price from the owner's start time when the worker claims earlier; the row keeps his clocked times, the note
   // says why, and a red review lets the owner override.
-  const ownerStart = dayRule?.staff_start?.[Number(row.staff_id)] || ''
-  const ownerEnd = dayRule?.staff_end?.[Number(row.staff_id)] || ''
+  const ownerWins = ownerWindowsFor(dayRule, Number(row.staff_id))
+  const ownerStart = ownerWins.length ? ownerWins.map((w) => w.start).sort()[0] : ''
+  const ownerEnd = ownerWins.length ? ownerWins.map((w) => w.end).sort().slice(-1)[0] : ''
+  const winText = ownerWins.map((w) => w.start + '–' + w.end + (w.place ? ' ' + w.place : '')).join(' and ')
   let priceFrom = row.start_time, priceTo = row.end_time, startNote = ''
   const sM = timeToMinutes(row.start_time), eM0 = timeToMinutes(row.end_time)
   const eM = sM !== null && eM0 !== null && eM0 <= sM ? eM0 + 1440 : eM0
-  if (ownerStart && timeToMinutes(ownerStart) !== null && sM !== null && eM !== null && timeToMinutes(ownerStart)! > sM && timeToMinutes(ownerStart)! < eM) priceFrom = ownerStart
-  if (ownerEnd && timeToMinutes(ownerEnd) !== null && sM !== null && eM !== null && timeToMinutes(ownerEnd)! < eM && timeToMinutes(ownerEnd)! > timeToMinutes(priceFrom)!) priceTo = ownerEnd
   // Owner 27 Sep 2026 (Taka draft 931, Warehouse 07:00–12:00 while the owner recorded him garden 12:30–14:14 only):
-  // an entry that lies COMPLETELY outside the owner's window is not trimmed — it is held at R0 like an OFF day,
-  // with a red review for the owner to approve or decline.
-  const wsM = ownerStart ? timeToMinutes(ownerStart) : null, weM = ownerEnd ? timeToMinutes(ownerEnd) : null
-  if (sM !== null && eM !== null && ((wsM !== null && eM <= wsM) || (weM !== null && sM >= weM))) {
-    staffIsOff = true
-    outsideWindowNote = ' | OUTSIDE OWNER TIMES ' + dateIso + ': owner recorded him ' + (ownerStart || '…') + '–' + (ownerEnd || '…') + ', this entry ' + row.start_time + '–' + row.end_time + ' is entirely outside that window' + (dayRule?.note ? ' (' + dayRule.note + ')' : '')
-  } else if (priceFrom !== row.start_time || priceTo !== row.end_time) {
-    startNote = ' | OWNER TIMES ' + dateIso + ': paid ' + priceFrom + '–' + priceTo + ' only (worker entered ' + row.start_time + '–' + row.end_time + ') — ' + (dayRule?.note || 'owner instruction')
+  // an entry that lies COMPLETELY outside the owner's windows is not trimmed — it is held at R0 like an OFF day,
+  // with a red review for the owner to approve or decline. An entry overlapping one window is paid for the
+  // overlapping piece only (a person can have several windows: e.g. warehouse 07:00–11:30 then house 12:30–14:14).
+  if (ownerWins.length && sM !== null && eM !== null) {
+    const ov = ownerWindowOverlap(row.start_time, row.end_time, ownerWins)
+    if (ov.minutes <= 0) {
+      staffIsOff = true
+      outsideWindowNote = ' | OUTSIDE OWNER TIMES ' + dateIso + ': owner recorded him ' + winText + ', this entry ' + row.start_time + '–' + row.end_time + ' is entirely outside those times' + (dayRule?.note ? ' (' + dayRule.note + ')' : '')
+    } else {
+      // Pay the single largest overlapping piece (entries are one place each; the pieces never span two windows in practice).
+      const best = ov.pieces.slice().sort((a, b) => (timeToMinutes(b.end)! - timeToMinutes(b.start)!) - (timeToMinutes(a.end)! - timeToMinutes(a.start)!))[0]
+      if (best.start !== row.start_time || best.end !== row.end_time) {
+        priceFrom = best.start; priceTo = best.end
+        startNote = ' | OWNER TIMES ' + dateIso + ': paid ' + priceFrom + '–' + priceTo + ' only (worker entered ' + row.start_time + '–' + row.end_time + '; owner recorded him ' + winText + ') — ' + (dayRule?.note || 'owner instruction')
+      }
+    }
   }
   let priced = ownerPayForShift(dateIso, priceFrom, priceTo, kind)
   if (!priced) {
@@ -3776,7 +3816,7 @@ async function applyOwnerRatesToFinalSubmission(env: Bindings | undefined, draft
   if (staffIsOff && priced.amount > 0) {
     // Owner 27 Sep 2026: he was marked OFF this day — hold the whole entry at R0 for the owner's decision.
     offNote = (outsideWindowNote ? outsideWindowNote : ' | STAFF OFF ' + dateIso + (dayRule?.note ? ' (' + dayRule.note + ')' : '')) + ' — HELD at R0 for owner approval; would be ' + fmtRand(priced.amount)
-    try { await openStaffOffReview(env, { id: row.id, staff_id: row.staff_id, work_date: dateIso, start_time: row.start_time, end_time: row.end_time, hours_worked: row.hours_worked, work_type: row.work_type, outlet_venue: row.outlet_venue, event_name: row.event_name, work_description: row.work_description }, priced, kind, outsideWindowNote ? 'owner recorded him there ' + (ownerStart || '…') + '–' + (ownerEnd || '…') + ' only' + (dayRule?.note ? '; ' + dayRule.note : '') : (dayRule?.note || '')) } catch (err) {}
+    try { await openStaffOffReview(env, { id: row.id, staff_id: row.staff_id, work_date: dateIso, start_time: row.start_time, end_time: row.end_time, hours_worked: row.hours_worked, work_type: row.work_type, outlet_venue: row.outlet_venue, event_name: row.event_name, work_description: row.work_description }, priced, kind, outsideWindowNote ? 'owner recorded him there ' + winText + ' only' + (dayRule?.note ? '; ' + dayRule.note : '') : (dayRule?.note || '')) } catch (err) {}
     priced = { ...priced, amount: 0, baseAmount: 0 }
   }
   if (startNote) {
@@ -3784,7 +3824,7 @@ async function applyOwnerRatesToFinalSubmission(env: Bindings | undefined, draft
       const full = ownerPayForShift(dateIso, row.start_time, row.end_time, kind)
       const nm = await db.prepare(`SELECT display_name FROM wage_staff WHERE id = ?`).bind(row.staff_id).first<{ display_name: string }>()
       const key = 'owner_start|shift:' + row.id
-      const reason = 'OWNER TIMES APPLIED: ' + (nm?.display_name || 'worker') + ' entered ' + row.start_time + '–' + row.end_time + ' on ' + dateIso + ' but the owner recorded him as there ' + priceFrom + '–' + priceTo + (dayRule?.note ? ' (' + dayRule.note + ')' : '') + '. Paid ' + priceFrom + '–' + priceTo + ': ' + priced.breakdown + ' = ' + fmtRand(priced.amount) + (full ? '. If the owner accepts his times it would be ' + full.breakdown + ' = ' + fmtRand(full.amount) : '') + '. Override below if anything changes.'
+      const reason = 'OWNER TIMES APPLIED: ' + (nm?.display_name || 'worker') + ' entered ' + row.start_time + '–' + row.end_time + ' on ' + dateIso + ' but the owner recorded him as there ' + winText + ' — paid the part inside ' + priceFrom + '–' + priceTo + (dayRule?.note ? ' (' + dayRule.note + ')' : '') + '. Paid ' + priceFrom + '–' + priceTo + ': ' + priced.breakdown + ' = ' + fmtRand(priced.amount) + (full ? '. If the owner accepts his times it would be ' + full.breakdown + ' = ' + fmtRand(full.amount) : '') + '. Override below if anything changes.'
       const snapshot = JSON.stringify({ shiftId: row.id, source: 'shift', staffId: row.staff_id, employee: nm?.display_name || '', workDate: dateIso, venue: row.outlet_venue, workType: row.work_type, workDescription: row.work_description, startTime: row.start_time, endTime: row.end_time, hours: row.hours_worked, amountNow: priced.amount })
       const system = JSON.stringify({ comparisonLabel: 'owner start', employee: nm?.display_name || '', startTime: row.start_time, endTime: row.end_time, ownerEndTime: priceTo, warningTitle: 'Paid ' + priceFrom + '–' + priceTo + ' (owner times) — override if needed', humanReason: reason, petrusExtra: 1, petrusSunday: 1, ownerStart: 1, ownerStartTime: priceFrom, holidayKind: kind, extraHours: full ? Math.round((full.amount - priced.amount) / (full.hourlyRate || 1) * 100) / 100 : 0, beforeHours: 0, afterHours: 0, baseAmount: priced.amount, offeredRate: Number(priced.hourlyRate || 0), recommendedAmount: full ? Math.round((full.amount - priced.amount) * 100) / 100 : 0, recommendedText: full ? 'the time he entered outside ' + priceFrom + '–' + priceTo : '', staffBlocking: 0, autoDuplicate: 0, conflictDetected: 0 })
       await db.prepare(`INSERT INTO wage_payroll_reviews (issue_key, status, warning_kind, severity, staff_id, staff_name, work_date, payroll_week_start, subject_source, subject_shift_id, compared_source, compared_shift_id, warning_reason, issue_summary, original_hours, facts_hash, subject_snapshot_json, system_snapshot_json)
@@ -3801,7 +3841,7 @@ async function applyOwnerRatesToFinalSubmission(env: Bindings | undefined, draft
   // A capped start (owner start time) or a held OFF day is an OWNER decision on the row — mark it so the green figure
   // and the Excel keep the row amount instead of re-pricing from the clocked hours.
   if (startNote || offNote) {
-    try { await db.prepare(`UPDATE wage_shifts SET manager_update_reason = ? WHERE id = ? AND staff_id = ?`).bind((startNote ? 'Owner times ' + priceFrom + '–' + priceTo + ' applied at Final Submission: ' + priced.breakdown + ' = ' + fmtRand(priced.amount) + ' (worker entered ' + row.start_time + '–' + row.end_time + ')' : '') + (offNote ? (startNote ? ' | ' : '') + (outsideWindowNote ? 'Entirely outside the owner\'s times ' + (ownerStart || '…') + '–' + (ownerEnd || '…') + ' on ' + dateIso : 'Marked OFF by the owner on ' + dateIso) + ' — held at R0 pending the owner\'s decision' : ''), row.id, staffId).run() } catch (err) {}
+    try { await db.prepare(`UPDATE wage_shifts SET manager_update_reason = ? WHERE id = ? AND staff_id = ?`).bind((startNote ? 'Owner times ' + priceFrom + '–' + priceTo + ' applied at Final Submission: ' + priced.breakdown + ' = ' + fmtRand(priced.amount) + ' (worker entered ' + row.start_time + '–' + row.end_time + ')' : '') + (offNote ? (startNote ? ' | ' : '') + (outsideWindowNote ? 'Entirely outside the owner\'s times ' + winText + ' on ' + dateIso : 'Marked OFF by the owner on ' + dateIso) + ' — held at R0 pending the owner\'s decision' : ''), row.id, staffId).run() } catch (err) {}
   }
   // Owner 2026-09-22: Petrus weekday time outside 06–16 is held for an office decision on the rate.
   if (priced.heldHoliday) {
@@ -4268,11 +4308,12 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     await db.prepare(`CREATE TABLE IF NOT EXISTS wage_owner_day_rules (work_date TEXT PRIMARY KEY, force_kind TEXT, staff_off_json TEXT, note TEXT, set_by TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`).run()
     try { await db.prepare(`ALTER TABLE wage_owner_day_rules ADD COLUMN staff_start_json TEXT`).run() } catch (err) {}
     try { await db.prepare(`ALTER TABLE wage_owner_day_rules ADD COLUMN staff_end_json TEXT`).run() } catch (err) {}
-    const dr = await db.prepare(`SELECT work_date, force_kind, staff_off_json, staff_start_json, staff_end_json, note FROM wage_owner_day_rules WHERE work_date BETWEEN date(?, '-7 days') AND ?`).bind(weekStart, weekEnd).all()
-    for (const r of (dr.results || []) as any[]) { let off: number[] = []; try { off = JSON.parse(r.staff_off_json || '[]').map(Number) } catch (err) {} let st: Record<number, string> = {}; try { st = JSON.parse(r.staff_start_json || '{}') } catch (err) {} let en: Record<number, string> = {}; try { en = JSON.parse(r.staff_end_json || '{}') } catch (err) {} dayRules[String(r.work_date)] = { work_date: String(r.work_date), force_kind: r.force_kind || null, staff_off: off, staff_start: st, staff_end: en, note: String(r.note || '') } }
+    try { await db.prepare(`ALTER TABLE wage_owner_day_rules ADD COLUMN staff_windows_json TEXT`).run() } catch (err) {}
+    const dr = await db.prepare(`SELECT work_date, force_kind, staff_off_json, staff_start_json, staff_end_json, staff_windows_json, note FROM wage_owner_day_rules WHERE work_date BETWEEN date(?, '-7 days') AND ?`).bind(weekStart, weekEnd).all()
+    for (const r of (dr.results || []) as any[]) { let off: number[] = []; try { off = JSON.parse(r.staff_off_json || '[]').map(Number) } catch (err) {} let st: Record<number, string> = {}; try { st = JSON.parse(r.staff_start_json || '{}') } catch (err) {} let en: Record<number, string> = {}; try { en = JSON.parse(r.staff_end_json || '{}') } catch (err) {} dayRules[String(r.work_date)] = { work_date: String(r.work_date), force_kind: r.force_kind || null, staff_off: off, staff_start: st, staff_end: en, staff_windows: parseOwnerWindows(r.staff_windows_json), note: String(r.note || '') } }
   } catch (err) {}
   const offNameById: Record<number, string> = {}
-  try { const ids = Array.from(new Set(Object.values(dayRules).flatMap((d) => [...d.staff_off, ...Object.keys(d.staff_start || {}).map(Number), ...Object.keys(d.staff_end || {}).map(Number)]))); if (ids.length) { const nr = await db.prepare(`SELECT id, display_name FROM wage_staff WHERE id IN (${ids.map(() => '?').join(',')})`).bind(...ids).all(); for (const r of (nr.results || []) as any[]) offNameById[Number(r.id)] = String(r.display_name) } } catch (err) {}
+  try { const ids = Array.from(new Set(Object.values(dayRules).flatMap((d) => [...d.staff_off, ...Object.keys(d.staff_start || {}).map(Number), ...Object.keys(d.staff_end || {}).map(Number), ...Object.keys(d.staff_windows || {}).map(Number)]))); if (ids.length) { const nr = await db.prepare(`SELECT id, display_name FROM wage_staff WHERE id IN (${ids.map(() => '?').join(',')})`).bind(...ids).all(); for (const r of (nr.results || []) as any[]) offNameById[Number(r.id)] = String(r.display_name) } } catch (err) {}
   const applyDayRuleKind = (dateIso: string, kind: OwnerPayKind): OwnerPayKind => {
     const d = dayRules[dateIso]; if (!d?.force_kind) return kind
     if (d.force_kind === 'event' && (kind === 'warehouse' || kind === 'warehouse_or_event')) return 'event'
@@ -4297,13 +4338,15 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     const box = (bg: string, fg: string, text: string) => `<div style="margin-top:3px;padding:4px 7px;border-radius:6px;background:${bg};color:${fg};font-size:11.5px;line-height:1.35">${text}</div>`
     if (d?.force_kind === 'event' && /warehouse/i.test((r.work_type || '') + ' ' + (r.outlet_venue || ''))) out.push(box('rgba(202,138,4,.22)', '#fde68a', `📌 <strong>OWNER NOTE ${escapeHtmlText(proxyLongDate(r.work_date))}:</strong> everyone at the <strong>VENUE rate</strong> today — this Warehouse entry ${isDraft ? 'will be' : 'is'} priced as venue (Sunday R114/h).`))
     if (d?.staff_off?.includes(r.staff_id)) out.push(box('rgba(127,29,29,.35)', '#fecaca', `⛔ <strong>OWNER NOTE:</strong> this worker was marked <strong>OFF</strong> on ${escapeHtmlText(proxyLongDate(r.work_date))} — not allowed to claim. ${isDraft ? 'If he final-submits it is held at R0 for your decision.' : 'Held at R0 — see the red review.'}`))
-    const st = d?.staff_start?.[r.staff_id] || '', en = d?.staff_end?.[r.staff_id] || ''
-    if (st || en) {
-      const early = st && sM !== null && sM < timeToMinutes(st)!, late = en && eM !== null && eM > timeToMinutes(en)!
-      const clash = early || late
-      const wholly = (st && eM !== null && eM <= timeToMinutes(st)!) || (en && sM !== null && sM >= timeToMinutes(en)!)
-      if (wholly) out.push(box('rgba(127,29,29,.5)', '#fee2e2', `🚫 <strong>OWNER NOTE — ENTIRELY OUTSIDE YOUR TIMES:</strong> you recorded him there <strong>${escapeHtmlText(st || '…')}–${escapeHtmlText(en || '…')}</strong> on ${escapeHtmlText(proxyLongDate(r.work_date))}. This entry (${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)}${r.work_type ? ', ' + escapeHtmlText(r.work_type) : ''}) falls <strong>completely outside</strong> that window — nothing of it is payable under your note. ${isDraft ? 'If he final-submits it is held at R0 with a red review for your decision.' : 'Check the red review.'}`))
-      else out.push(box(clash ? 'rgba(127,29,29,.35)' : 'rgba(22,163,74,.2)', clash ? '#fecaca' : '#bbf7d0', `🕧 <strong>OWNER NOTE:</strong> you recorded him as there <strong>${escapeHtmlText(st || '…')}–${escapeHtmlText(en || '…')}</strong> on ${escapeHtmlText(proxyLongDate(r.work_date))}. He entered ${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)}${clash ? ` — <strong>${early ? 'starts before ' + escapeHtmlText(st) : ''}${early && late ? ' and ' : ''}${late ? 'ends after ' + escapeHtmlText(en) : ''}</strong>. ${isDraft ? 'When he final-submits it is paid inside your window only, with a red review to override.' : 'Paid inside your window only — red review to override.'}` : ' — inside your window ✔'}`))
+    const wins = ownerWindowsFor(d, r.staff_id)
+    const st = wins.length ? wins.map((w) => w.start).sort()[0] : '', en = wins.length ? wins.map((w) => w.end).sort().slice(-1)[0] : ''
+    if (wins.length) {
+      const winTxt = wins.map((w) => `<strong>${escapeHtmlText(w.start)}–${escapeHtmlText(w.end)}</strong>${w.place ? ' ' + escapeHtmlText(w.place) : ''}`).join(' and ')
+      const ov = ownerWindowOverlap(r.start_time, r.end_time, wins)
+      const dur = sM !== null && eM !== null ? (eM <= sM ? eM + 1440 : eM) - sM : 0
+      if (ov.minutes <= 0) out.push(box('rgba(127,29,29,.5)', '#fee2e2', `🚫 <strong>OWNER NOTE — ENTIRELY OUTSIDE YOUR TIMES:</strong> you recorded him ${winTxt} on ${escapeHtmlText(proxyLongDate(r.work_date))}. This entry (${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)}${r.work_type ? ', ' + escapeHtmlText(r.work_type) : ''}) falls <strong>completely outside</strong> those times — nothing of it is payable under your note. ${isDraft ? 'If he final-submits it is held at R0 with a red review for your decision.' : 'Check the red review.'}`))
+      else if (ov.minutes < dur - 0.5) { const best = ov.pieces[0]; out.push(box('rgba(127,29,29,.35)', '#fecaca', `🕧 <strong>OWNER NOTE:</strong> you recorded him ${winTxt} on ${escapeHtmlText(proxyLongDate(r.work_date))}. He entered ${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)} — <strong>${(( dur - ov.minutes) / 60).toFixed(2)} h of it is outside your times</strong>; only ${escapeHtmlText(best.start)}–${escapeHtmlText(best.end)} is payable. ${isDraft ? 'When he final-submits it is paid inside your times only, with a red review to override.' : 'Paid inside your times only — red review to override.'}`)) }
+      else out.push(box('rgba(22,163,74,.2)', '#bbf7d0', `🕧 <strong>OWNER NOTE:</strong> you recorded him ${winTxt} on ${escapeHtmlText(proxyLongDate(r.work_date))}. He entered ${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)} — inside your times ✔`))
     }
     // A per-person window (e.g. Taka garden 12:30–14:14) overrides the general finish time (e.g. warehouse 11:40).
     if (pe && !st && !en && eM !== null && timeToMinutes(pe.planned_end) !== null) {
@@ -4782,26 +4825,28 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         const paidH = rate > 0 && Number(r.amount) > 0 ? Math.round(Number(r.amount) / rate * 100) / 100 : clocked
         const meetingOff = paidH > 0 && clocked - paidH >= 0.24
         const hoursTxt = meetingOff ? `<strong>${paidH.toFixed(2)} h paid</strong><br><span style="font-size:11px;opacity:.75">${clocked.toFixed(2)} h clocked − ${(clocked - paidH).toFixed(2)} h meeting 07:00–07:30</span>` : `${clocked.toFixed(2)} h${rate ? ` × ${fmtRand(rate)}` : ''}`
+        // Owner 27 Sep: "put a square so I can tick it to say it's being paid, because now it looks like everything's paid."
         return `<tr style="border-top:1px solid rgba(255,255,255,.08)">
+          <td style="padding:4px 8px;white-space:nowrap;text-align:center">${held ? '<span title="held — decide the review first" style="opacity:.5">⛔</span>' : `<input type="checkbox" name="shift_id" value="${r.id}" form="bw-own-pay-form" style="width:20px;height:20px;cursor:pointer;accent-color:#16a34a" title="Tick when this shift has been paid to ${firstName}">`}</td>
           <td style="padding:4px 8px;white-space:nowrap"><strong>${escapeHtmlText(proxyLongDate(r.work_date))}</strong></td>
           <td style="padding:4px 8px;white-space:nowrap">${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)} · ${hoursTxt}</td>
           <td style="padding:4px 8px">${escapeHtmlText(r.work_type || '')}${r.outlet_venue ? ' · ' + escapeHtmlText(r.outlet_venue) : ''}${r.work_description ? ' · <span style="opacity:.75">' + escapeHtmlText(r.work_description.slice(0, 60)) + '</span>' : ''}</td>
           <td style="padding:4px 8px;text-align:right;white-space:nowrap;font-weight:800;color:${held ? '#fca5a5' : '#fde68a'}">${fmtRand(Number(r.amount || 0))}${held ? '<br><span style="font-size:10.5px;font-weight:600">held — decide the review first</span>' : ''}</td>
-          <td style="padding:4px 8px;white-space:nowrap">${held ? '' : `<form method="post" action="/wages-admin/own-schedule-paid" style="margin:0" onsubmit="return confirm('Mark ${firstName} ${escapeHtmlText(proxyLongDate(r.work_date))} ${fmtRand(Number(r.amount || 0))} as PAID? It will leave this list.')"><input type="hidden" name="shift_id" value="${r.id}"><input type="hidden" name="return_to" value="__RETURN__"><button type="submit" style="padding:4px 12px;border-radius:6px;border:0;background:#16a34a;color:#fff;font-weight:800;cursor:pointer">✔ Paid</button></form>`}</td>
+          <td style="padding:4px 8px;white-space:nowrap"><span style="display:inline-block;padding:2px 8px;border-radius:999px;background:rgba(127,29,29,.45);color:#fecaca;font-size:11px;font-weight:800">NOT PAID</span></td>
         </tr>`
-      }).join('') : `<tr><td colspan="5" style="padding:6px 8px;opacity:.75">Nothing unpaid — everything from ${escapeHtmlText(proxyLongDate(o.from_date))} has been marked paid.</td></tr>`
+      }).join('') : `<tr><td colspan="6" style="padding:6px 8px;opacity:.75">Nothing unpaid — everything from ${escapeHtmlText(proxyLongDate(o.from_date))} has been marked paid.</td></tr>`
       const payable = unpaid.filter((r) => !openHold(r))
-      const payAll = payable.length > 1 ? `<form method="post" action="/wages-admin/own-schedule-paid" style="margin:0" onsubmit="return confirm('Mark ALL ${payable.length} unpaid ${firstName} shifts (${fmtRand(payable.reduce((a, r) => a + Number(r.amount || 0), 0))}) as PAID?')"><input type="hidden" name="shift_id" value="${payable.map((r) => r.id).join(',')}"><input type="hidden" name="return_to" value="__RETURN__"><button type="submit" style="padding:6px 14px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-weight:800;cursor:pointer">✔ Paid — all ${payable.length} shifts ${fmtRand(payable.reduce((a, r) => a + Number(r.amount || 0), 0))}</button></form>` : ''
+      const payBtn = payable.length ? `<form method="post" id="bw-own-pay-form" action="/wages-admin/own-schedule-paid" style="margin:0" onsubmit="var n=this.querySelectorAll('input[name=shift_id]:checked').length; if(!n){alert('Tick the square next to each shift that has been paid first.');return false;} return confirm('Mark the '+n+' ticked ${firstName} shift(s) as PAID? They will leave this list.')"><input type="hidden" name="return_to" value="__RETURN__"><button type="submit" style="padding:7px 14px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-weight:800;cursor:pointer">✔ Mark the TICKED shifts as PAID</button></form>` : ''
       blocks.push(`<div style="margin-top:6px">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div style="font-weight:800">${escapeHtmlText(o.display_name)} — unpaid since ${escapeHtmlText(proxyLongDate(o.from_date))}${o.note ? ` <span style="opacity:.75;font-weight:500">(${escapeHtmlText(o.note)})</span>` : ''}</div><div style="font-size:12px;opacity:.75">${unpaid.length} unpaid · ${paidCount} already marked paid</div></div>
-        ${o.next_pay_date ? `<div style="margin-top:4px;padding:6px 10px;border-radius:8px;background:rgba(22,163,74,.18);border:1px solid rgba(134,239,172,.5);font-size:12.5px"><strong>💰 ONE PAYMENT DUE ${escapeHtmlText(proxyLongDate(o.next_pay_date).toUpperCase())}</strong> — everything he works until then accumulates here; on that day pay the TOTAL below and press <strong>✔ Paid — all</strong>. Every clocked hour is paid — <strong>no 07:00–07:30 meeting deduction</strong> for him (owner 24 Sep: his rate is far lower than anyone else's).</div>` : ''}
-        <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:4px"><tbody>${li}</tbody>
-        <tfoot><tr style="border-top:2px solid rgba(253,224,71,.5)"><td colspan="3" style="padding:6px 8px;font-weight:800">TOTAL STILL TO PAY ${firstName}</td><td style="padding:6px 8px;text-align:right;font-weight:900;font-size:15px;color:#fde68a">${fmtRand(total)}</td><td style="padding:6px 8px">${payAll}</td></tr></tfoot></table>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div style="font-weight:800">${escapeHtmlText(o.display_name)} — unpaid since ${escapeHtmlText(proxyLongDate(o.from_date))}${o.note ? ` <span style="opacity:.75;font-weight:500">(${escapeHtmlText(o.note)})</span>` : ''}</div><div style="font-size:12px;opacity:.75">${unpaid.length} NOT paid · ${paidCount} already marked paid</div></div>
+        ${o.next_pay_date ? `<div style="margin-top:4px;padding:6px 10px;border-radius:8px;background:rgba(22,163,74,.18);border:1px solid rgba(134,239,172,.5);font-size:12.5px"><strong>💰 ONE PAYMENT DUE ${escapeHtmlText(proxyLongDate(o.next_pay_date).toUpperCase())}</strong> — everything he works until then accumulates here. On that day pay the TOTAL below, <strong>tick every square</strong>, then press <strong>Mark the TICKED shifts as PAID</strong>. Every clocked hour is paid — <strong>no 07:00–07:30 meeting deduction</strong> for him (owner 24 Sep: his rate is far lower than anyone else's).</div>` : ''}
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:4px"><thead><tr style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;opacity:.7"><th style="padding:2px 8px;text-align:center">Paid?</th><th style="padding:2px 8px;text-align:left">Day</th><th style="padding:2px 8px;text-align:left">Times</th><th style="padding:2px 8px;text-align:left">Work</th><th style="padding:2px 8px;text-align:right">Amount</th><th style="padding:2px 8px;text-align:left">Status</th></tr></thead><tbody>${li}</tbody>
+        <tfoot><tr style="border-top:2px solid rgba(253,224,71,.5)"><td colspan="4" style="padding:6px 8px;font-weight:800">TOTAL STILL TO PAY ${firstName}</td><td style="padding:6px 8px;text-align:right;font-weight:900;font-size:15px;color:#fde68a">${fmtRand(total)}</td><td style="padding:6px 8px">${payBtn}</td></tr></tfoot></table>
       </div>`)
     }
     if (blocks.length) ownSchedulePanel = `<section id="bw-own-schedule" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(30,64,175,.18);border:1px solid rgba(147,197,253,.55)">
       <div style="font-weight:800;color:#bfdbfe;font-size:14px">🎓 Paid on his own schedule — running total until you press Paid</div>
-      <div style="font-size:12px;opacity:.8;margin-top:2px">These shifts stay here across payroll weeks (weekly, fortnightly or monthly — whenever he is paid). Press <strong>✔ Paid</strong> on a line when the money has gone to him; it leaves the list and the row is stamped with your name and the date. Nothing here changes the shift amounts — corrections still go through ✎ Edit shift and the reviews.</div>
+      <div style="font-size:12px;opacity:.8;margin-top:2px">These shifts stay here across payroll weeks (weekly, fortnightly or monthly — whenever he is paid). Every line is <strong>NOT PAID</strong> until you say so: <strong>tick the square</strong> next to each shift the money has gone out for, then press <strong>Mark the TICKED shifts as PAID</strong>; they leave the list and the row is stamped with your name and the date. Nothing here changes the shift amounts — corrections still go through ✎ Edit shift and the reviews.</div>
       ${blocks.join('')}
     </section>`
   } catch (err) {}
@@ -5040,8 +5085,8 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         const parts: string[] = []
         if (d.force_kind === 'event') parts.push(`<strong>everyone at the VENUE rate</strong> (R95/h · Sunday R114/h) — Warehouse ticks are re-priced as venue automatically`)
         if (d.force_kind === 'warehouse') parts.push(`<strong>everyone at the WAREHOUSE rate</strong>`)
-        const winIds = Array.from(new Set([...Object.keys(d.staff_start || {}), ...Object.keys(d.staff_end || {})].map(Number)))
-        for (const sid of winIds) { const st = d.staff_start?.[sid] || '', en = d.staff_end?.[sid] || ''; const claims = rowsThatDay.filter((r: AdminPaidRow) => r.staff_id === sid); const outside = claims.some((r: AdminPaidRow) => (st && timeToMinutes(r.start_time)! < timeToMinutes(st)!) || (en && timeToMinutes(r.end_time)! > timeToMinutes(en)!)); parts.push(`<strong>${escapeHtmlText(offNameById[sid] || ('staff ' + sid))} only ${escapeHtmlText(st || '…')}–${escapeHtmlText(en || '…')}</strong> — paid inside that window whatever he enters${claims.length ? (outside ? ' <span style="color:#fca5a5;font-weight:800">⚠ he entered time outside it — capped, red review to override</span>' : ' <span style="color:#86efac">— his entry is inside the window</span>') : ' <span style="opacity:.75">— no entry from him yet</span>'}`) }
+        const winIds = Array.from(new Set([...Object.keys(d.staff_start || {}), ...Object.keys(d.staff_end || {}), ...Object.keys(d.staff_windows || {})].map(Number)))
+        for (const sid of winIds) { const wins = ownerWindowsFor(d, sid); const claims = rowsThatDay.filter((r: AdminPaidRow) => r.staff_id === sid); const outside = claims.some((r: AdminPaidRow) => { const s0 = timeToMinutes(r.start_time)!, e0 = timeToMinutes(r.end_time)!; return ownerWindowOverlap(r.start_time, r.end_time, wins).minutes < (e0 <= s0 ? e0 + 1440 : e0) - s0 - 0.5 }); parts.push(`<strong>${escapeHtmlText(offNameById[sid] || ('staff ' + sid))} only ${wins.map((w) => escapeHtmlText(w.start + '–' + w.end + (w.place ? ' ' + w.place : ''))).join(' and ')}</strong> — paid inside those times whatever he enters${claims.length ? (outside ? ' <span style="color:#fca5a5;font-weight:800">⚠ he entered time outside it — capped, red review to override</span>' : ' <span style="color:#86efac">— his entry is inside the window</span>') : ' <span style="opacity:.75">— no entry from him yet</span>'}`) }
         if (offNames.length) parts.push(`<strong>OFF — not allowed to claim:</strong> ${offNames.map(escapeHtmlText).join(', ')}${offClaims.length ? ` <span style="color:#fca5a5;font-weight:800">⚠ ${offClaims.length} of them entered a shift anyway — held at R0, see the red review</span>` : ' <span style="color:#86efac">— no claims from them so far</span>'}`)
         return `<li style="margin:3px 0"><strong>${escapeHtmlText(proxyLongDate(d.work_date))}</strong> — ${parts.join(' · ')}${d.note ? ` <span style="opacity:.8">(${escapeHtmlText(d.note)})</span>` : ''}<br><span style="font-size:12px">${rowsThatDay.length ? rowsThatDay.length + ' entr' + (rowsThatDay.length === 1 ? 'y' : 'ies') + ' in so far' : 'no entries in yet'}</span></li>`
       }).join('')
@@ -5839,11 +5884,11 @@ app.post('/wages-admin/own-schedule-paid', async (c) => {
   if (!admin) return back('/login?next=' + encodeURIComponent('/admin/wages'))
   let form: FormData
   try { form = await c.req.raw.formData() } catch (err) { return back('/admin/wages?error=' + encodeURIComponent('Could not read the form.')) }
-  const ids = String(normalizeProxyFieldValue(form.get('shift_id')) || '').split(',').map((x) => Number(x.trim())).filter((n) => n > 0)
+  const ids = Array.from(new Set(form.getAll('shift_id').flatMap((v) => String(normalizeProxyFieldValue(v) || '').split(',')).map((x) => Number(x.trim())).filter((n) => n > 0)))
   const returnTo = normalizeProxyFieldValue(form.get('return_to')) || '/admin/wages'
   const safeReturn = /^\/admin\/wages(\?|$)/.test(returnTo) ? returnTo : '/admin/wages'
   const sep = safeReturn.includes('?') ? '&' : '?'
-  if (!ids.length) return back(safeReturn + sep + 'error=' + encodeURIComponent('No shift selected.'))
+  if (!ids.length) return back(safeReturn + sep + 'error=' + encodeURIComponent('Tick the squares next to the shifts that have been paid, then press the button.') + '#bw-own-schedule')
   try {
     const done: string[] = []; let total = 0
     for (const id of ids) {

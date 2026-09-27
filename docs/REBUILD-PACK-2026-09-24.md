@@ -265,3 +265,9 @@ Every owner note for a day is printed **on the row itself** (paid rows AND not-f
 - 🚫 entry ENTIRELY outside the per-person window (e.g. Taka draft 931 Warehouse 07:00–12:00 vs 12:30–14:14): **held at R0** at final submission with the staff-off style red review (approve if he did work / decline). Not merely trimmed.
 - ⏰ general finish time for the day (Sat 26 Sep 13:00, Sun 27 Sep 11:40): green within / red "x h past your time — ask what time he really finished". A per-person window overrides the general finish time for that person.
 Helper: `ownerNotesForRow()` in src/index.tsx; final-submission rule `outsideWindowNote` in `applyOwnerRatesToFinalSubmission`.
+
+### Several owner windows per person per day (v2026-09-27-7)
+`wage_owner_day_rules.staff_windows_json = {"<staff_id>":[{"start":"07:00","end":"11:30","place":"Warehouse"},{"start":"12:30","end":"14:14","place":"House/Garden"}]}`.
+At final submission an entry is paid for the piece inside a window only (red review to override); entirely outside all windows → held R0.
+Sun 27 Sep 2026: everyone left the warehouse at 11:30 (planned_end 11:30); Taka warehouse 07:00–11:30 + house 12:30–14:14.
+Lebo ledger: tick boxes + "Mark the TICKED shifts as PAID"; lines show NOT PAID until ticked. Lebo Heritage Day = 07:00–15:00 R800 (owner 27 Sep).
