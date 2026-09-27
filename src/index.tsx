@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-24-6'
+const WAGES_UI_VERSION = 'v2026-09-24-7'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3937,7 +3937,7 @@ const WAREHOUSE_HOURLY = 81.25, VENUE_HOURLY = 95, SUNDAY_FACTOR = 1.2, MEETING_
 // Gardeners' House / House-Garden work (Givemore, Takavaudza): R62,50/h Mon–Sat; SUNDAY ×1.2 = R75/h
 // (owner 24 Sep 2026 — Takavaudza Sun 20 Sep 6 h = R450, not R375); public holiday ×2 = R125/h, held.
 const GARDENER_HOURLY = 62.5
-// Student (Lebo, staff 16) — owner 24 Sep 2026: R50/h at any place; Sunday ×1.2 = R60/h; public holiday ×2 = R100/h (held).
+// Student (Lebo, staff 16) — owner 24 Sep 2026: R50/h at any place, every clocked hour (NO meeting deduction); Sunday ×1.2 = R60/h; public holiday ×2 = R100/h (held).
 const STUDENT_STAFF_ID = 16, STUDENT_HOURLY = 50
 // Petrus (staff 4), owner 2026-09-22 (amended later the same day): SET DAY RATE R640,00 for 06:00–16:00 every day;
 // Mon–Fri time before 06:00 / after 16:00 R55/h (held for office approval); Sat & Sun before 06:00 / after 16:00 R80/h (automatic).
@@ -4018,20 +4018,18 @@ function ownerPayForShift(dateIso: string, startTime: string, endTime: string, k
     }
     else if (kind === 'gardener') { rate = r2(GARDENER_HOURLY * HOLIDAY_FACTOR); rec = r2(totalH * rate); text = `Gardener House work public holiday (${holiday}): ${h(totalH)} h × R125 (R62,50 × 2)` }
     else if (kind === 'student' || kind === 'student_warehouse') {
-      const meetingMinS = kind === 'student_warehouse' && dow >= 1 && dow <= 5 ? overlapMinutes(sMin, eMin, MEETING_START, MEETING_END) : 0
-      const paidHS = r2(totalH - meetingMinS / 60)
-      rate = r2(STUDENT_HOURLY * HOLIDAY_FACTOR); rec = r2(paidHS * rate)
-      text = `Student public holiday (${holiday}): ${h(totalH)} h${meetingMinS > 0 ? ` − ${h(meetingMinS / 60)} h staff meeting 07:00–07:30 (unpaid) = ${h(paidHS)} h` : ''} × R100 (R50 × 2)`
+      // Owner 24 Sep 2026: NO meeting deduction for the student — "his rate is far less than anyone else's".
+      rate = r2(STUDENT_HOURLY * HOLIDAY_FACTOR); rec = r2(totalH * rate)
+      text = `Student public holiday (${holiday}): ${h(totalH)} h × R100 (R50 × 2) — no meeting deduction`
     }
     else { rate = r2(VENUE_HOURLY * HOLIDAY_FACTOR); rec = r2(totalH * rate); text = `Venue/event public holiday (${holiday}): ${h(totalH)} h × R190 (R95 × 2)` }
     return { amount: 0, hourlyRate: rate, breakdown: `PUBLIC HOLIDAY — HELD for owner approval — recommended ${text} = ${fmtRand(rec)}; R0 until approved`, heldHoliday: holiday, recommendedAmount: rec, heldExtraHours: r2(totalH), baseAmount: 0 }
   }
   if (kind === 'student' || kind === 'student_warehouse') {
-    // Owner 24 Sep 2026: Lebo R50/h any place; Sunday ×1.2; Mon–Fri meeting 07:00–07:30 unpaid when in the warehouse (like the guys).
-    const meetingMinS = kind === 'student_warehouse' && dow >= 1 && dow <= 5 ? overlapMinutes(sMin, eMin, MEETING_START, MEETING_END) : 0
-    const paidHS = totalH - meetingMinS / 60
+    // Owner 24 Sep 2026: Lebo R50/h any place, every clocked hour; Sunday ×1.2. NO 07:00–07:30 meeting deduction
+    // ("because the wages are so little … his rate is far less than anyone else's").
     if (dow === 0) return { amount: r2(totalH * STUDENT_HOURLY * SUNDAY_FACTOR), hourlyRate: r2(STUDENT_HOURLY * SUNDAY_FACTOR), breakdown: `Student Sunday: ${h(totalH)} h × R60 (R50 × 1.2)` }
-    return { amount: r2(paidHS * STUDENT_HOURLY), hourlyRate: STUDENT_HOURLY, breakdown: `Student: ${h(totalH)} h${meetingMinS > 0 ? ` − ${h(meetingMinS / 60)} h staff meeting 07:00–07:30 (unpaid, ${fmtRand(r2(meetingMinS / 60 * STUDENT_HOURLY))}) = ${h(paidHS)} h` : ''} × R50` }
+    return { amount: r2(totalH * STUDENT_HOURLY), hourlyRate: STUDENT_HOURLY, breakdown: `Student: ${h(totalH)} h × R50 (no meeting deduction)` }
   }
   if (kind === 'gardener') {
     // Owner 24 Sep 2026: gardener House work is hourly R62,50; Sunday ×1.2 = R75/h like everyone else.
@@ -4665,7 +4663,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       const payAll = payable.length > 1 ? `<form method="post" action="/wages-admin/own-schedule-paid" style="margin:0" onsubmit="return confirm('Mark ALL ${payable.length} unpaid ${firstName} shifts (${fmtRand(payable.reduce((a, r) => a + Number(r.amount || 0), 0))}) as PAID?')"><input type="hidden" name="shift_id" value="${payable.map((r) => r.id).join(',')}"><input type="hidden" name="return_to" value="__RETURN__"><button type="submit" style="padding:6px 14px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-weight:800;cursor:pointer">✔ Paid — all ${payable.length} shifts ${fmtRand(payable.reduce((a, r) => a + Number(r.amount || 0), 0))}</button></form>` : ''
       blocks.push(`<div style="margin-top:6px">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div style="font-weight:800">${escapeHtmlText(o.display_name)} — unpaid since ${escapeHtmlText(proxyLongDate(o.from_date))}${o.note ? ` <span style="opacity:.75;font-weight:500">(${escapeHtmlText(o.note)})</span>` : ''}</div><div style="font-size:12px;opacity:.75">${unpaid.length} unpaid · ${paidCount} already marked paid</div></div>
-        ${o.next_pay_date ? `<div style="margin-top:4px;padding:6px 10px;border-radius:8px;background:rgba(22,163,74,.18);border:1px solid rgba(134,239,172,.5);font-size:12.5px"><strong>💰 ONE PAYMENT DUE ${escapeHtmlText(proxyLongDate(o.next_pay_date).toUpperCase())}</strong> — everything he works until then accumulates here; on that day pay the TOTAL below and press <strong>✔ Paid — all</strong>. Meeting rule: Mon–Fri 07:00–07:30 is not paid when he is in the warehouse (shown per line as "h paid" vs "h clocked"); Saturday and Sunday have no meeting deduction.</div>` : ''}
+        ${o.next_pay_date ? `<div style="margin-top:4px;padding:6px 10px;border-radius:8px;background:rgba(22,163,74,.18);border:1px solid rgba(134,239,172,.5);font-size:12.5px"><strong>💰 ONE PAYMENT DUE ${escapeHtmlText(proxyLongDate(o.next_pay_date).toUpperCase())}</strong> — everything he works until then accumulates here; on that day pay the TOTAL below and press <strong>✔ Paid — all</strong>. Every clocked hour is paid — <strong>no 07:00–07:30 meeting deduction</strong> for him (owner 24 Sep: his rate is far lower than anyone else's).</div>` : ''}
         <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:4px"><tbody>${li}</tbody>
         <tfoot><tr style="border-top:2px solid rgba(253,224,71,.5)"><td colspan="3" style="padding:6px 8px;font-weight:800">TOTAL STILL TO PAY ${firstName}</td><td style="padding:6px 8px;text-align:right;font-weight:900;font-size:15px;color:#fde68a">${fmtRand(total)}</td><td style="padding:6px 8px">${payAll}</td></tr></tfoot></table>
       </div>`)
