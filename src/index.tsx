@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-28-1'
+const WAGES_UI_VERSION = 'v2026-09-28-3'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4105,8 +4105,9 @@ const WAREHOUSE_HOURLY = 81.25, VENUE_HOURLY = 95, SUNDAY_FACTOR = 1.2, MEETING_
 // Gardeners' House / House-Garden work (Givemore, Takavaudza): R62,50/h Mon–Sat; SUNDAY ×1.2 = R75/h
 // (owner 24 Sep 2026 — Takavaudza Sun 20 Sep 6 h = R450, not R375); public holiday ×2 = R125/h, held.
 const GARDENER_HOURLY = 62.5
-// Student (Lebo, staff 16) — owner 24 Sep 2026: R50/h at any place, every clocked hour (NO meeting deduction); Sunday ×1.2 = R60/h; public holiday ×2 = R100/h (held).
-const STUDENT_STAFF_ID = 16, STUDENT_HOURLY = 50
+// Student (Lebo, staff 16) — owner 24 Sep 2026: R50/h at any place, every clocked hour (NO meeting deduction); public holiday ×2 = R100/h (held).
+// Owner 28 Sep 2026: Lebo's Sunday is ×1.5 = R75/h (NOT the ×1.2 the rest of the team gets) — Lebo only.
+const STUDENT_STAFF_ID = 16, STUDENT_HOURLY = 50, STUDENT_SUNDAY_FACTOR = 1.5
 // Petrus (staff 4), owner 2026-09-22 (amended later the same day): SET DAY RATE R640,00 for 06:00–16:00 every day;
 // Mon–Fri time before 06:00 / after 16:00 R55/h (held for office approval); Sat & Sun before 06:00 / after 16:00 R80/h (automatic).
 const PETRUS_DAY = 640, PETRUS_WINDOW_START = 6 * 60, PETRUS_WINDOW_END = 16 * 60, PETRUS_EXTRA_RATE = 55, PETRUS_WEEKEND_EXTRA_RATE = 80
@@ -4119,7 +4120,7 @@ function ownerPayKind(staffId: number, workType: string, wording: string, payrol
   const wt = (workType || '').trim()
   if (/music\s*bus/i.test(wt)) return 'musicbus'
   if (staffId === 4) return 'petrus'
-  // Owner 24 Sep 2026: Lebo (staff 16) is a student — R50/h whatever the place, Sunday ×1.2, public holiday ×2,
+  // Owner 24 Sep 2026: Lebo (staff 16) is a student — R50/h whatever the place, Sunday ×1.5 (owner 28 Sep), public holiday ×2,
   // Mon–Fri 07:00–07:30 meeting unpaid when he is in the warehouse (same as the guys).
   if (staffId === STUDENT_STAFF_ID) return (/warehouse/i.test(wt) || /w[ae]a?re?\s?house/i.test(wording || '')) ? 'student_warehouse' : 'student'
   // Gardeners: only their House / House/Garden block keeps the gardener rate; the Team
@@ -4194,9 +4195,9 @@ function ownerPayForShift(dateIso: string, startTime: string, endTime: string, k
     return { amount: 0, hourlyRate: rate, breakdown: `PUBLIC HOLIDAY — HELD for owner approval — recommended ${text} = ${fmtRand(rec)}; R0 until approved`, heldHoliday: holiday, recommendedAmount: rec, heldExtraHours: r2(totalH), baseAmount: 0 }
   }
   if (kind === 'student' || kind === 'student_warehouse') {
-    // Owner 24 Sep 2026: Lebo R50/h any place, every clocked hour; Sunday ×1.2. NO 07:00–07:30 meeting deduction
+    // Owner 24 Sep 2026: Lebo R50/h any place, every clocked hour; Sunday ×1.5 (owner 28 Sep). NO 07:00–07:30 meeting deduction
     // ("because the wages are so little … his rate is far less than anyone else's").
-    if (dow === 0) return { amount: r2(totalH * STUDENT_HOURLY * SUNDAY_FACTOR), hourlyRate: r2(STUDENT_HOURLY * SUNDAY_FACTOR), breakdown: `Student Sunday: ${h(totalH)} h × R60 (R50 × 1.2)` }
+    if (dow === 0) return { amount: r2(totalH * STUDENT_HOURLY * STUDENT_SUNDAY_FACTOR), hourlyRate: r2(STUDENT_HOURLY * STUDENT_SUNDAY_FACTOR), breakdown: `Student Sunday: ${h(totalH)} h × R75 (R50 × 1.5 — owner 28 Sep)` }
     return { amount: r2(totalH * STUDENT_HOURLY), hourlyRate: STUDENT_HOURLY, breakdown: `Student: ${h(totalH)} h × R50 (no meeting deduction)` }
   }
   if (kind === 'gardener') {
@@ -4376,7 +4377,10 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     const d = dayRules[r.work_date]; const pe = plannedEnds[r.work_date]
     const sM = timeToMinutes(r.start_time), eM = timeToMinutes(r.end_time)
     const box = (bg: string, fg: string, text: string) => `<div style="margin-top:3px;padding:4px 7px;border-radius:6px;background:${bg};color:${fg};font-size:11.5px;line-height:1.35">${text}</div>`
-    if (d?.force_kind === 'event' && /warehouse/i.test((r.work_type || '') + ' ' + (r.outlet_venue || ''))) out.push(box('rgba(202,138,4,.22)', '#fde68a', `📌 <strong>OWNER NOTE ${escapeHtmlText(proxyLongDate(r.work_date))}:</strong> everyone at the <strong>VENUE rate</strong> today — this Warehouse entry ${isDraft ? 'will be' : 'is'} priced as venue (Sunday R114/h).`))
+    if (d?.force_kind === 'event' && /warehouse/i.test((r.work_type || '') + ' ' + (r.outlet_venue || ''))) {
+      if (r.staff_id === STUDENT_STAFF_ID) out.push(box('rgba(202,138,4,.22)', '#fde68a', `📌 <strong>OWNER NOTE ${escapeHtmlText(proxyLongDate(r.work_date))}:</strong> everyone at the venue rate today — <strong>except Lebo</strong>, who stays on his student rate (R50/h; Sunday ×1.5 = R75/h).`))
+      else out.push(box('rgba(202,138,4,.22)', '#fde68a', `📌 <strong>OWNER NOTE ${escapeHtmlText(proxyLongDate(r.work_date))}:</strong> everyone at the <strong>VENUE rate</strong> today — this Warehouse entry ${isDraft ? 'will be' : 'is'} priced as venue (Sunday R114/h).`))
+    }
     if (d?.staff_off?.includes(r.staff_id)) out.push(box('rgba(127,29,29,.35)', '#fecaca', `⛔ <strong>OWNER NOTE:</strong> this worker was marked <strong>OFF</strong> on ${escapeHtmlText(proxyLongDate(r.work_date))} — not allowed to claim. ${isDraft ? 'If he final-submits it is held at R0 for your decision.' : 'Held at R0 — see the red review.'}`))
     const wins = ownerWindowsFor(d, r.staff_id)
     const st = wins.length ? wins.map((w) => w.start).sort()[0] : '', en = wins.length ? wins.map((w) => w.end).sort().slice(-1)[0] : ''

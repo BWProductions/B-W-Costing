@@ -280,3 +280,8 @@ and it looked as if the change had not taken. Now after every accepted POST /adm
 warehouse meeting, student, gardener; stamps calculation_version 10 and appends "Re-priced after office edit …" to payroll_note.
 Rows carrying an owner decision (held at R0, owner-times cap, already-paid difference) are left as saved. The green message after
 Save now reads "… Priced under your rules: Venue/event: 7 h × R95 = R665,00 (the engine had put R840,00)."
+
+### Lebo Sunday ×1.5 (v2026-09-28-2, owner 28 Sep 2026)
+Lebo (student, staff 16) Sunday = R50 × 1.5 = **R75/h** — Lebo only; the rest of the team stays on Sunday ×1.2. `STUDENT_SUNDAY_FACTOR = 1.5`
+in src/index.tsx. Sun 27 Sep #9867 re-priced 4,5 h × R75 = R337,50 (was R270). Lebo ledger total due 6 Oct: R1 937,50.
+The day-rule "everyone at the venue rate" note on Lebo's rows says he stays on his student rate.
