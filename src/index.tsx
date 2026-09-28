@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-28-3'
+const WAGES_UI_VERSION = 'v2026-09-28-4'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4361,7 +4361,10 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     if (d.force_kind === 'warehouse' && (kind === 'event' || kind === 'warehouse_or_event')) return 'warehouse'
     return kind
   }
-  const beyondPlanned = (r: { work_date: string, start_time: string, end_time: string }) => {
+  // Owner-amount lines (e.g. Thina R650 Heritage Day allowance, 28 Sep): no hours, 00:00–00:00 — no time checks.
+  const isOwnerAmountLine = (r: { start_time: string, end_time: string, hours_worked?: number }) => Number(r.hours_worked || 0) === 0 && r.start_time === r.end_time
+  const beyondPlanned = (r: { work_date: string, start_time: string, end_time: string, hours_worked?: number }) => {
+    if (isOwnerAmountLine(r)) return null
     const p = plannedEnds[r.work_date]; if (!p) return null
     const e = timeToMinutes(r.end_time), pe = timeToMinutes(p.planned_end), st = timeToMinutes(r.start_time)
     if (e === null || pe === null || st === null) return null
@@ -4372,8 +4375,9 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   // Owner 27 Sep: "I asked you to show notes for me for Sundays … the warehouse doesn't show the message." Every
   // owner note for the day — end time, forced place, staff off, per-person window — is shown ON THE ROW, for paid
   // rows AND drafts, with the clash against what the worker entered spelled out.
-  const ownerNotesForRow = (r: { staff_id: number, work_date: string, start_time: string, end_time: string, work_type: string, outlet_venue?: string }, isDraft: boolean) => {
+  const ownerNotesForRow = (r: { staff_id: number, work_date: string, start_time: string, end_time: string, work_type: string, outlet_venue?: string, hours_worked?: number }, isDraft: boolean) => {
     const out: string[] = []
+    if (isOwnerAmountLine(r)) return ''
     const d = dayRules[r.work_date]; const pe = plannedEnds[r.work_date]
     const sM = timeToMinutes(r.start_time), eM = timeToMinutes(r.end_time)
     const box = (bg: string, fg: string, text: string) => `<div style="margin-top:3px;padding:4px 7px;border-radius:6px;background:${bg};color:${fg};font-size:11.5px;line-height:1.35">${text}</div>`
@@ -4771,6 +4775,8 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
 
   function missedCell(r: AdminPaidRow) {
     if (r.work_date >= weekStart) return '<span style="opacity:.45">—</span>'
+    // Owner-amount line (no hours) from an earlier date — e.g. Thina R650 Heritage Day allowance (owner 28 Sep).
+    if (isOwnerAmountLine(r)) return pill('OWNER AMOUNT – for ' + escapeHtmlText(proxyLongDate(r.work_date)), '#fef3c7', '#7c2d12') + `<div style="font-size:12px;opacity:.8;margin:2px 0 4px">Set by the owner as a rand amount (no hours) and paid in this payroll ${escapeHtmlText(weekStart)} to ${escapeHtmlText(weekEnd)}.</div><div>${editBtn(r.id)}</div>`
     const sameDay = prior.filter((p) => p.staff_id === r.staff_id && p.work_date === r.work_date)
     const clash = sameDay.filter((p) => shiftsOverlap(r.start_time, r.end_time, p.start_time, p.end_time))
     let check: string

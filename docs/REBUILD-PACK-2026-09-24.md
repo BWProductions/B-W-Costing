@@ -285,3 +285,9 @@ Save now reads "… Priced under your rules: Venue/event: 7 h × R95 = R665,00 (
 Lebo (student, staff 16) Sunday = R50 × 1.5 = **R75/h** — Lebo only; the rest of the team stays on Sunday ×1.2. `STUDENT_SUNDAY_FACTOR = 1.5`
 in src/index.tsx. Sun 27 Sep #9867 re-priced 4,5 h × R75 = R337,50 (was R270). Lebo ledger total due 6 Oct: R1 937,50.
 The day-rule "everyone at the venue rate" note on Lebo's rows says he stays on his student rate.
+
+### Owner amounts 28 Sep 2026 (v2026-09-28-4)
+- Givemore #9794 Heritage Day Thu 24 Sep: owner set **R950,00** (formula gave R875 = 7 h × R62,50 × 2). Owner amount — do not re-price.
+- Thina (staff 3, fixed weekly) #9876: **R650,00** Heritage Day weekend allowance (owner 28 Sep). Real date 24 Sep, paid in payroll
+  26 Sep–2 Oct as a manager line with 0 hours, 00:00–00:00. Dashboard shows an "OWNER AMOUNT – for Thu 24 Sep" pill instead of the
+  missed-shift / time checks (`isOwnerAmountLine`: hours 0 and start == end → no planned-end / owner-note checks).
