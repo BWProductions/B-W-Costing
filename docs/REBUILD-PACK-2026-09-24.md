@@ -271,3 +271,12 @@ Helper: `ownerNotesForRow()` in src/index.tsx; final-submission rule `outsideWin
 At final submission an entry is paid for the piece inside a window only (red review to override); entirely outside all windows → held R0.
 Sun 27 Sep 2026: everyone left the warehouse at 11:30 (planned_end 11:30); Taka warehouse 07:00–11:30 + house 12:30–14:14.
 Lebo ledger: tick boxes + "Mark the TICKED shifts as PAID"; lines show NOT PAID until ticked. Lebo Heritage Day = 07:00–15:00 R800 (owner 27 Sep).
+
+### Office edit form re-prices under the owner rules (v2026-09-28-1)
+Bernie 28 Sep: "I'm trying to make changes. It's not allowing me." The engine's Edit Wage Shift form DID save the times, but
+re-priced the row with its old base formula (R90/h × engine Saturday loading = R840 for Patrick #9869), so the owner rules were lost
+and it looked as if the change had not taken. Now after every accepted POST /admin/wages/shifts/:id/edit the proxy calls
+`repriceAfterManagerEdit()` (src/index.tsx): place from work type / wording / office decision / day rule, Sunday ×1.2, holiday ×2,
+warehouse meeting, student, gardener; stamps calculation_version 10 and appends "Re-priced after office edit …" to payroll_note.
+Rows carrying an owner decision (held at R0, owner-times cap, already-paid difference) are left as saved. The green message after
+Save now reads "… Priced under your rules: Venue/event: 7 h × R95 = R665,00 (the engine had put R840,00)."

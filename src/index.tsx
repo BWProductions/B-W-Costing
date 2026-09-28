@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-27-7'
+const WAGES_UI_VERSION = 'v2026-09-28-1'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -3731,6 +3731,46 @@ async function openStaffOffReview(env: Bindings | undefined, r: { id: number, st
     .bind(key, r.staff_id, name, r.work_date, r.id, r.id, reason, 'STAFF OFF — ' + name + ' — ' + r.work_date + ' — approve or decline (' + fmtRand(rec) + ' if he worked)', r.hours_worked, key, snapshot, system, key).run()
 }
 
+// Owner 28 Sep 2026 (Patrick #9869 "I'm trying to make changes, it's not allowing me"): the engine's manager edit
+// form saves the times but re-prices the row with its OLD base formula (R90/h, engine Saturday ×1.33), so the
+// amount on the row goes wrong and the owner's rate rules are lost. After every accepted /admin/wages/shifts/:id/edit
+// the proxy re-prices THAT ROW under the owner rules (place from work type / wording / office decision / day rule,
+// Sunday ×1.2, holiday ×2, warehouse meeting, student, gardener, Petrus) and stamps calculation_version = 10.
+// The owner's own decisions on a row (OFF held at R0, owner-times cap, already-paid difference) are kept: a row whose
+// manager_update_reason says "held at R0" or "Owner times" is left as the engine saved it.
+async function repriceAfterManagerEdit(env: Bindings | undefined, shiftId: number, adminName: string): Promise<string> {
+  const db = env?.DB
+  if (!db || !shiftId) return ''
+  const row = await db.prepare(`SELECT w.id, w.staff_id, w.work_date, w.start_time, w.end_time, w.hours_worked, w.work_type, w.outlet_venue, w.event_name, w.work_description, w.total_amount, w.gross_wage, w.manager_update_reason, w.source_draft_id, s.payroll_rule, s.display_name
+      FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id WHERE w.id = ?`).bind(shiftId).first<{ id: number, staff_id: number, work_date: string, start_time: string, end_time: string, hours_worked: number, work_type: string, outlet_venue: string, event_name: string, work_description: string, total_amount: number, gross_wage: number, manager_update_reason: string | null, source_draft_id: number | null, payroll_rule: string, display_name: string }>()
+  if (!row) return ''
+  const mur = row.manager_update_reason || ''
+  if (/held at R0|Owner times .* applied|DIFFERENCE ONLY|difference only/i.test(mur)) return ' Amount left as your earlier decision on this row (' + fmtRand(before0(row)) + ').'
+  let kind = ownerPayKind(row.staff_id, row.work_type, [row.outlet_venue, row.event_name, row.work_description].join(' '), row.payroll_rule)
+  // Office place decision made earlier on this row / its draft wins over the wording.
+  try {
+    const pd = await db.prepare(`SELECT system_snapshot_json FROM wage_payroll_reviews WHERE status = 'RESOLVED' AND ((subject_source = 'shift' AND subject_shift_id = ?) OR (subject_source = 'draft' AND subject_shift_id = ?)) AND (issue_key LIKE 'crew_pattern|%' OR issue_key LIKE 'rate_choice_%') ORDER BY reviewed_at DESC LIMIT 1`).bind(row.id, row.source_draft_id || -1).first<{ system_snapshot_json: string | null }>()
+    if (pd) { const sn = JSON.parse(pd.system_snapshot_json || '{}'); if (sn.placeDecision === 'warehouse' || sn.placeDecision === 'event' || sn.placeDecision === 'gardener') kind = sn.placeDecision }
+  } catch (err) {}
+  const dayRule = await ownerDayRule(db, row.work_date)
+  if (dayRule?.force_kind === 'event' && (kind === 'warehouse' || kind === 'warehouse_or_event')) kind = 'event'
+  if (dayRule?.force_kind === 'warehouse' && (kind === 'event' || kind === 'warehouse_or_event')) kind = 'warehouse'
+  if (kind === 'warehouse_or_event') return ' Place unclear (wording says warehouse, work type says Normal) — the amount is not final until you pick Warehouse or Venue in the red review.'
+  const priced = ownerPayForShift(row.work_date, row.start_time, row.end_time, kind)
+  if (!priced) return ''
+  const amt = Math.round(Number(priced.recommendedAmount ?? priced.amount) * 100) / 100
+  const before = before0(row)
+  if (Math.abs(amt - before) < 0.005) {
+    await db.prepare(`UPDATE wage_shifts SET calculation_version = ?, hourly_rate_snapshot = ? WHERE id = ?`).bind(OWNER_RATE_RULES_VERSION, priced.hourlyRate, row.id).run()
+    return ' Priced under your rules: ' + priced.breakdown + ' = ' + fmtRand(amt) + '.'
+  }
+  const note = ' | Re-priced after office edit by ' + adminName + ' ' + new Date().toISOString().slice(0, 10) + ': ' + priced.breakdown + ' = ' + fmtRand(amt) + ' (engine had ' + fmtRand(before) + ')'
+  await db.prepare(`UPDATE wage_shifts SET total_amount = ?, gross_wage = ?, hourly_rate_snapshot = ?, calculation_version = ?, payroll_note = COALESCE(payroll_note,'') || ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+    .bind(amt, amt, priced.hourlyRate, OWNER_RATE_RULES_VERSION, note, row.id).run()
+  await captureWagesDebug(env, { request_path: '/admin/wages/shifts/' + row.id + '/edit (reprice)', request_method: 'POST', original_payload_json: JSON.stringify({ shift_id: row.id, staff: row.display_name, start: row.start_time, end: row.end_time, kind, engine_amount: before }), rewritten_payload_json: JSON.stringify({ amount: amt, breakdown: priced.breakdown, by: adminName }), rewrite_applied: 1, response_status: 302, response_location: '', response_error_text: '' })
+  return ' Priced under your rules: ' + priced.breakdown + ' = ' + fmtRand(amt) + ' (the engine had put ' + fmtRand(before) + ').'
+}
+
 async function applyOwnerRatesToFinalSubmission(env: Bindings | undefined, draftId: number, cookieHeader: string) {
   const db = env?.DB
   if (!db || !draftId) return
@@ -5489,6 +5529,21 @@ async function proxyRequest(c: any) {
     }
   }
   const upstreamAccepted = upstreamResponse.status === 302 && !/[?&]error=/.test(upstreamLocation)
+  const adminEditMatch = method === 'POST' ? incomingUrl.pathname.match(/^\/admin\/wages\/shifts\/(\d+)\/edit\/?$/) : null
+  if (upstreamAccepted && adminEditMatch && c.env?.DB) {
+    try {
+      const admin = await adminUserFromCookie(c.req.raw.headers.get('cookie') || '')
+      const extra = await repriceAfterManagerEdit(c.env, Number(adminEditMatch[1]), admin?.name || 'office')
+      if (extra) {
+        const loc = new URL(upstreamLocation, incomingUrl.origin)
+        loc.searchParams.set('msg', (loc.searchParams.get('msg') || 'Shift saved.') + extra)
+        const h = new Headers(upstreamResponse.headers); h.set('location', loc.pathname + loc.search)
+        upstreamResponse = new Response(null, { status: 302, headers: h })
+      }
+    } catch (err) {
+      await captureWagesDebug(c.env, { request_path: incomingUrl.pathname, request_method: 'POST', original_payload_json: '{}', rewritten_payload_json: '{}', rewrite_applied: 0, response_status: upstreamResponse.status, response_location: upstreamLocation, response_error_text: 'reprice after manager edit failed: ' + describeProxyError(err) })
+    }
+  }
   if (upstreamAccepted && realDateRestore && !realDateRestore.staffId) {
     await captureWagesDebug(c.env, { request_path: incomingUrl.pathname + incomingUrl.search, request_method: 'POST', original_payload_json: JSON.stringify(realDateRestore), rewritten_payload_json: '{}', rewrite_applied: 1, response_status: upstreamResponse.status, response_location: upstreamLocation, response_error_text: 'real-date restore skipped: no staff session resolved' })
   }
