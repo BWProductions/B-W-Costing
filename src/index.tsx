@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-28-4'
+const WAGES_UI_VERSION = 'v2026-09-28-5'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -2280,7 +2280,7 @@ label[for="bw-missed-work-date"] {
     if (emptyNote) emptyNote.remove()
     const intro = document.createElement('p')
     intro.className = 'muted small bw-missed-intro'
-    intro.textContent = 'Missed shifts from last week are shown first with their real date. They are final-submitted, locked and paid in this payroll — do not capture them again.'
+    intro.textContent = 'Catch-up shifts (worked in last week\\'s payroll, entered late) are shown first with their real date. They are final-submitted, locked and paid in this payroll — do not capture them again.'
     let anchor = finalH.nextSibling
     finalSection.insertBefore(intro, anchor)
     anchor = intro.nextSibling
@@ -4783,8 +4783,9 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     if (clash.length) check = pill('OVERLAP', '#fdecec', '#7f1d1d') + `<span style="font-size:12px">already paid ${clash.map((p) => escapeHtmlText(p.start_time + '–' + p.end_time) + ' (' + escapeHtmlText(p.outlet_venue) + ', payroll ' + escapeHtmlText(p.payroll_week_start || 'n/a') + ')').join('; ')}</span>`
     else if (sameDay.length) check = pill('CLEAR', '#e7f6ec', '#14532d') + `<span style="font-size:12px">worked ${sameDay.map((p) => escapeHtmlText(p.start_time + '–' + p.end_time)).join(', ')} that day (paid); these hours are outside those times</span>`
     else check = pill('CLEAR', '#e7f6ec', '#14532d') + `<span style="font-size:12px">nothing else paid for this day</span>`
-    return pill('MISSED SHIFT – actual date ' + escapeHtmlText(proxyLongDate(r.work_date)) + ' – ' + escapeHtmlText(r.work_description || ''), '#fdecec', '#7f1d1d')
-      + `<div style="font-size:12px;opacity:.8;margin:2px 0 4px">Worked ${escapeHtmlText(proxyLongDate(r.work_date))} (previous payroll), not captured that week; final-submitted and paid in payroll ${escapeHtmlText(weekStart)} to ${escapeHtmlText(weekEnd)}.</div>` + check
+    // Owner 28 Sep 2026: call it CATCH-UP, and always say what that means — "I can't read your mind."
+    return pill('CATCH-UP – worked ' + escapeHtmlText(proxyLongDate(r.work_date)) + ' – ' + escapeHtmlText(r.work_description || ''), '#fdecec', '#7f1d1d')
+      + `<div style="font-size:12px;opacity:.85;margin:2px 0 4px"><strong>What CATCH-UP means:</strong> he worked this on ${escapeHtmlText(proxyLongDate(r.work_date))}, which belongs to the <strong>previous payroll</strong> (already paid out). He only entered it afterwards, so it is paid now, in this payroll ${escapeHtmlText(weekStart)} to ${escapeHtmlText(weekEnd)}. The day was not missed — the entry was late.</div>` + check
       + `<div>${editBtn(r.id)}</div>`
   }
 
@@ -4951,7 +4952,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       const ruleOff = !!ruleChk && Math.abs(ruleChk.diff) >= 0.5
       const rowBg = hasRed ? 'background:rgba(127,29,29,.18)' : ruleOff ? 'background:rgba(30,58,138,.14)' : isMissed ? 'background:rgba(226,185,59,.07)' : ''
       const flags = [
-        isMissed ? pill('MISSED', '#fdecec', '#7f1d1d') : '',
+        isMissed ? `<span title="CATCH-UP: worked in the previous payroll (already paid out), entered late, paid in this payroll">${pill('CATCH-UP', '#fdecec', '#7f1d1d')}</span>` : '',
         hasRed ? pill('⚑ REVIEW', '#7f1d1d', '#fff') : revs.some((v) => v.status === 'OPEN') ? pill('⚑ review', '#b45309', '#fff') : '',
         r.overnight_confirmed ? pill('next day', '#1e3a8a', '#fff') : '',
         r.manager_update_reason ? pill('corrected', '#1f5f3a', '#fff') : '',
@@ -4988,7 +4989,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       return `<tr style="border-top:1px dashed rgba(255,255,255,.12);opacity:.85">
         ${td(escapeHtmlText(g.name), 'font-weight:700;white-space:nowrap')}
         ${td(`<strong>${escapeHtmlText(d.work_date)}</strong><br><span style="opacity:.75">${escapeHtmlText(dayName(d.work_date))}</span>`, 'white-space:nowrap')}
-        ${td(pill('NOT FINAL-SUBMITTED', '#374151', '#fff') + (isMissed ? pill('MISSED', '#fdecec', '#7f1d1d') : '') + (revs.some((v) => v.status === 'OPEN') ? pill('⚑ review', '#b45309', '#fff') : '') + ownerNotesForRow({ staff_id: sid, work_date: d.work_date, start_time: d.start_time, end_time: d.end_time, work_type: d.work_type, outlet_venue: d.outlet_venue }, true))}
+        ${td(pill('NOT FINAL-SUBMITTED', '#374151', '#fff') + (isMissed ? `<span title="CATCH-UP: worked in the previous payroll (already paid out), entered late, paid in this payroll once final-submitted">${pill('CATCH-UP', '#fdecec', '#7f1d1d')}</span>` : '') + (revs.some((v) => v.status === 'OPEN') ? pill('⚑ review', '#b45309', '#fff') : '') + ownerNotesForRow({ staff_id: sid, work_date: d.work_date, start_time: d.start_time, end_time: d.end_time, work_type: d.work_type, outlet_venue: d.outlet_venue }, true))}
         ${td(escapeHtmlText(d.outlet_venue))}
         ${td('')}
         ${td(escapeHtmlText(d.work_description || ''))}
@@ -4999,7 +5000,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
           return td('<span style="opacity:.5">not paid</span>', 'text-align:right;white-space:nowrap') + td('<span style="opacity:.5">R0,00</span>', 'text-align:right;white-space:nowrap') })()}
         ${td((isStaleDraft(d)
           ? pill('STALE DRAFT – ' + escapeHtmlText(proxyLongDate(d.work_date)) + ' is before the capture window (' + escapeHtmlText(captureStart) + ')', '#7f1d1d', '#fff') + `<div style="font-size:12px;opacity:.9;margin-top:3px">Cannot be final-submitted any more. If this day was paid in an earlier payroll it must be removed; if it was genuinely never paid, tell the office and it is paid as a correction. ${deleteDraftBtn(d.id, d.work_date)}</div>`
-          : isMissed ? pill('MISSED SHIFT – actual date ' + escapeHtmlText(proxyLongDate(d.work_date)) + ' – ' + escapeHtmlText(d.work_description || ''), '#fdecec', '#7f1d1d') + '<div style="font-size:12px;opacity:.8">Saved temporarily by the worker; will be paid in this payroll once Final Submission is pressed.</div>' : '<div style="font-size:12px;opacity:.8">Saved temporarily by the worker; not yet final-submitted, so not yet in the payroll.</div>') + `<div>${workerAppBtn(sid, d.id)} ${isStaleDraft(d) ? '' : deleteDraftBtn(d.id, d.work_date)}</div>`)}
+          : isMissed ? pill('CATCH-UP – worked ' + escapeHtmlText(proxyLongDate(d.work_date)) + ' – ' + escapeHtmlText(d.work_description || ''), '#fdecec', '#7f1d1d') + `<div style="font-size:12px;opacity:.85"><strong>What CATCH-UP means:</strong> worked on ${escapeHtmlText(proxyLongDate(d.work_date))} in the <strong>previous payroll</strong> (already paid out), entered late. Saved temporarily by the worker; it will be paid in this payroll once Final Submission is pressed.</div>` : '<div style="font-size:12px;opacity:.8">Saved temporarily by the worker; not yet final-submitted, so not yet in the payroll.</div>') + `<div>${workerAppBtn(sid, d.id)} ${isStaleDraft(d) ? '' : deleteDraftBtn(d.id, d.work_date)}</div>`)}
         ${td(revs.length ? reviewCell(revs, true, workerAppBtn(sid, d.id)) : workerAppBtn(sid, d.id), 'min-width:260px')}
         ${td(workerAppBtn(sid, d.id, '✎'), 'text-align:center;white-space:nowrap')}
       </tr>`
@@ -5090,7 +5091,8 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   const filterNote = employeeFilter && /^\d+$/.test(employeeFilter) ? ' — one employee selected' : ''
   return `<section id="bw-combined-sheet" class="card" style="margin:14px 0;padding:16px 18px;border-radius:14px;border:1px solid rgba(226,185,59,.45)">
     <h2 style="margin:0 0 4px">Wage sheet — combined (${escapeHtmlText(weekStart)} to ${escapeHtmlText(weekEnd)})${filterNote}</h2>
-    <p style="margin:0 0 10px;opacity:.8">Every worker with anything in this payroll, all their shifts together: in-week shifts <strong>and</strong> missed shifts paid this week (shown at their real date), review flags with the recommended figure and the reason to record, and shifts still waiting for Final Submission. Totals here <strong>include</strong> missed shifts, so they are the true payroll figures. Use the worker-app link on each name to open that person's own page and edit or final-submit for them.</p>
+    <div id="bw-catchup-legend" style="margin:0 0 10px;padding:8px 12px;border-radius:10px;background:rgba(127,29,29,.14);border:1px solid rgba(252,165,165,.45);font-size:12.5px"><strong style="color:#fecaca">CATCH-UP</strong> = a shift the worker did in a <strong>previous payroll week</strong> (that payroll has already been paid out) but only entered afterwards. It is paid now, in this payroll, and shows the <strong>real date worked</strong>. The system checks it against what was already paid for that day (OVERLAP / CLEAR) so no hour is paid twice. The day was not missed — the entry was late.</div>
+    <p style="margin:0 0 10px;opacity:.8">Every worker with anything in this payroll, all their shifts together: in-week shifts <strong>and</strong> catch-ups paid this week (shown at their real date), review flags with the recommended figure and the reason to record, and shifts still waiting for Final Submission. Totals here <strong>include</strong> missed shifts, so they are the true payroll figures. Use the worker-app link on each name to open that person's own page and edit or final-submit for them.</p>
     ${(() => {
       const allOpen = reviews.filter((v) => v.status === 'OPEN' && staffIds.includes(v.staff_id)).sort((a, b) => (a.severity === 'red' ? 0 : 1) - (b.severity === 'red' ? 0 : 1) || (byStaff[a.staff_id]?.name || '').localeCompare(byStaff[b.staff_id]?.name || '') || a.work_date.localeCompare(b.work_date))
       if (!allOpen.length) return `<div style="margin:6px 0 12px;padding:8px 12px;border-radius:10px;background:rgba(20,83,45,.25);color:#86efac;font-weight:700">No open reviews for this payroll week.</div>`
@@ -5151,16 +5153,16 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     <div style="display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 12px;font-size:13px">
       <div><span style="opacity:.7">Paid shifts</span><br><strong style="font-size:18px">${gShifts}</strong></div>
       <div><span style="opacity:.7">Total hours</span><br><strong style="font-size:18px">${gHours.toFixed(2)}</strong></div>
-      <div><span style="opacity:.7">Total wages (incl. missed)</span><br><strong style="font-size:18px;color:#e2b93b">${fmtRand(gAmount)}</strong></div>
+      <div><span style="opacity:.7">Total wages (incl. catch-ups)</span><br><strong style="font-size:18px;color:#e2b93b">${fmtRand(gAmount)}</strong></div>
       <div><span style="opacity:.7">Agreed after reviews</span><br><strong style="font-size:18px;color:${gAgreedPending ? '#fbbf24' : '#86efac'}">${gAgreedH.toFixed(2)} h · ${fmtRand(gAgreedA)}</strong>${gAgreedPending ? `<span style="font-size:12px;opacity:.85"> · ${gAgreedPending} person${gAgreedPending === 1 ? '' : 's'} with open reviews (their paid figures used meanwhile)</span>` : ''}</div>
-      <div><span style="opacity:.7">of which missed shifts</span><br><strong style="font-size:18px">${gMissedH.toFixed(2)} h · ${fmtRand(gMissedA)}</strong></div>
+      <div><span style="opacity:.7" title="Catch-ups: shifts worked in the previous payroll (already paid out), entered late, paid in this payroll">of which CATCH-UPS</span><br><strong style="font-size:18px">${gMissedH.toFixed(2)} h · ${fmtRand(gMissedA)}</strong></div>
       <div><span style="opacity:.7">Open reviews</span><br><strong style="font-size:18px;color:${gOpenReviews ? '#fca5a5' : '#86efac'}">${gOpenReviews}</strong></div>
       <div><span style="opacity:.7">Awaiting Final Submission</span><br><strong style="font-size:18px">${gDrafts}</strong></div>
     </div>
     <div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
       <thead><tr>${th('Name')}${th('Date / day')}${th('Flags')}${th('Outlet / venue')}${th('Event')}${th('Description')}${th('Time worked')}${th('Work type')}${th('Hours', 'text-align:right')}${th('Amount', 'text-align:right')}${th('Missed shift detail & cross-check')}${th('Review / correction')}${th('Edit')}</tr></thead>
       <tbody>${sections}</tbody>
-      <tfoot><tr style="border-top:2px solid rgba(226,185,59,.6);font-weight:800"><td colspan="8" style="padding:12px 10px">GRAND TOTAL (incl. missed shifts) — ${gShifts} paid shifts</td><td style="padding:12px 10px;text-align:right">${gHours.toFixed(2)}</td><td style="padding:12px 10px;text-align:right;color:#e2b93b;font-size:15px">${fmtRand(gAmount)}</td><td colspan="3" style="padding:12px 10px;opacity:.8">Missed shifts included: ${gMissedH.toFixed(2)} h · ${fmtRand(gMissedA)}</td></tr></tfoot>
+      <tfoot><tr style="border-top:2px solid rgba(226,185,59,.6);font-weight:800"><td colspan="8" style="padding:12px 10px">GRAND TOTAL (incl. catch-ups) — ${gShifts} paid shifts</td><td style="padding:12px 10px;text-align:right">${gHours.toFixed(2)}</td><td style="padding:12px 10px;text-align:right;color:#e2b93b;font-size:15px">${fmtRand(gAmount)}</td><td colspan="3" style="padding:12px 10px;opacity:.8">Missed shifts included: ${gMissedH.toFixed(2)} h · ${fmtRand(gMissedA)}</td></tr></tfoot>
     </table></div>
   </section>`
 }
@@ -5248,9 +5250,9 @@ async function buildMissedPaidSection(env: Bindings | undefined, staffId: number
   const totalCount = Number(inWeek?.n || 0) + shifts.length
   if (!shifts.length) return { html: '', totalHours, totalCount, missedHours }
   const cards = shifts.map((r) => `
-        <article class="shift"><div class="row"><div><div class="shift-title">${escapeHtmlText(r.outlet_venue)}</div><div class="muted small">${escapeHtmlText(r.work_date)} · ${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)}</div><div class="muted small">Missed shift · ${Number(r.hours_worked || 0).toFixed(2)} h</div></div><strong>${Number(r.hours_worked || 0).toFixed(2)} h</strong></div><div class="pill">Submitted — locked</div><div class="pill bw-missed-detail">MISSED SHIFT – actual date ${escapeHtmlText(proxyLongDate(r.work_date))} – ${escapeHtmlText(r.work_description)}</div></article>`).join('')
+        <article class="shift"><div class="row"><div><div class="shift-title">${escapeHtmlText(r.outlet_venue)}</div><div class="muted small">${escapeHtmlText(r.work_date)} · ${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)}</div><div class="muted small">Catch-up (worked last payroll week, entered late, paid this payroll) · ${Number(r.hours_worked || 0).toFixed(2)} h</div></div><strong>${Number(r.hours_worked || 0).toFixed(2)} h</strong></div><div class="pill">Submitted — locked</div><div class="pill bw-missed-detail">MISSED SHIFT – actual date ${escapeHtmlText(proxyLongDate(r.work_date))} – ${escapeHtmlText(r.work_description)}</div></article>`).join('')
   const html = `
-    <section class="card bw-missed-paid" data-bw-missed-paid="1"><h2>Missed shifts from last week — paid in this payroll</h2><p class="muted">These shifts show their real work date. They are included in this payroll week (${weekStart} to ${weekEnd}).</p>${cards}</section>`
+    <section class="card bw-missed-paid" data-bw-missed-paid="1"><h2>Catch-up shifts from last week — paid in this payroll</h2><p class="muted">A catch-up is a shift you worked in last week's payroll (already paid out) but only entered afterwards. These show the real date worked and are paid in this payroll week (${weekStart} to ${weekEnd}). Do not enter them again.</p>${cards}</section>`
   return { html, totalHours, totalCount, missedHours }
 }
 

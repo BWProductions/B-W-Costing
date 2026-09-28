@@ -291,3 +291,12 @@ The day-rule "everyone at the venue rate" note on Lebo's rows says he stays on h
 - Thina (staff 3, fixed weekly) #9876: **R650,00** Heritage Day weekend allowance (owner 28 Sep). Real date 24 Sep, paid in payroll
   26 Sep–2 Oct as a manager line with 0 hours, 00:00–00:00. Dashboard shows an "OWNER AMOUNT – for Thu 24 Sep" pill instead of the
   missed-shift / time checks (`isOwnerAmountLine`: hours 0 and start == end → no planned-end / owner-note checks).
+
+### "CATCH-UP" replaces "MISSED SHIFT" everywhere the owner sees it (v2026-09-28-5, owner 28 Sep 2026)
+Bernie: "CATCH-UP — use this term, but you always need to explain it, because I can't read your mind."
+Definition shown with the label every time: a shift the worker did in a PREVIOUS payroll week (already paid out) but only entered
+afterwards; paid now, in the current payroll, showing the real date worked; checked against what was already paid that day
+(OVERLAP / CLEAR) so no hour is paid twice. "The day was not missed — the entry was late."
+Where: admin dashboard legend `#bw-catchup-legend`, CATCH-UP pill (hover text), per-row "What CATCH-UP means" line on paid rows and
+drafts, totals ("of which CATCH-UPS"), Excel (column header, sheet 6 title/headers), worker app locked-section heading and card text.
+Internal DB marker `missed_previous_week` / description prefix "MISSED SHIFT - actual date …" is unchanged (the engine relies on it).

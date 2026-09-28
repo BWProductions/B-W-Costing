@@ -171,10 +171,10 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
 
   // ============================ TAB 1: Wage Detail Linked =====================
   const S1 = 'Wage Detail Linked'
-  const d1Header = ['Shift ID', 'Employee', 'Date', 'Day', 'Missed shift?', 'Venue / Outlet', 'Area', 'Description', 'Work type', 'Start', 'End', 'Claimed hours', 'Approved hours (system)', 'Override hours (edit)', 'Effective hours', 'Amount (system)', 'Override amount (edit)', 'Effective amount', 'Rate used', 'Breakdown (how the amount was worked out)', 'Override reason (edit)', 'Review #', 'System note', 'Review decision']
+  const d1Header = ['Shift ID', 'Employee', 'Date', 'Day', 'Catch-up? (worked in previous payroll, entered late, paid now)', 'Venue / Outlet', 'Area', 'Description', 'Work type', 'Start', 'End', 'Claimed hours', 'Approved hours (system)', 'Override hours (edit)', 'Effective hours', 'Amount (system)', 'Override amount (edit)', 'Effective amount', 'Rate used', 'Breakdown (how the amount was worked out)', 'Override reason (edit)', 'Review #', 'System note', 'Review decision']
   const d1: Cell[][] = [
     [{ v: 'B&W PRODUCTIONS — WAGE DETAIL LINKED (master)', s: 'title' }],
-    [{ v: `Payroll week ${weekStart} to ${weekEnd}. One row per paid shift, including missed shifts from the previous payroll (real date shown). Edit only the yellow cells; Auditor Trail, Auditor Summary and Missed Shifts recalculate from this tab.`, s: 'note' }],
+    [{ v: `Payroll week ${weekStart} to ${weekEnd}. One row per paid shift, including CATCH-UPS = shifts worked in the previous payroll (already paid out) but entered late and paid in this payroll (real date shown). Edit only the yellow cells; Auditor Trail, Auditor Summary and Missed Shifts recalculate from this tab.`, s: 'note' }],
     [],
     d1Header.map((h) => ({ v: h, s: 'header' as const })),
   ]
@@ -207,10 +207,10 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
   // Notes = the dashboard's missed-shift wording + the overlap / clear line.
   const S6 = 'Missed Shifts'
   const m6: Cell[][] = [
-    [{ v: 'B&W PRODUCTIONS — MISSED SHIFTS (previous payroll, paid in this payroll)', s: 'title' }],
+    [{ v: 'B&W PRODUCTIONS — CATCH-UPS (worked in the previous payroll, entered late, paid in this payroll)', s: 'title' }],
     [{ v: `Payroll week ${weekStart} to ${weekEnd}. Approved hours = the green review decision (claimed hours where no review was needed). YELLOW hours cells can be overtyped — the Amount next to them recalculates automatically and flows to block 6 on the Auditor Trail and to the Summary.`, s: 'note' }],
     [],
-    ['Worker', 'Missed shift', 'Approved hours', 'Amount', 'Notes'].map((h) => ({ v: h, s: 'header' as const })),
+    ['Worker', 'Catch-up (real date worked)', 'Approved hours', 'Amount', 'Notes'].map((h) => ({ v: h, s: 'header' as const })),
   ]
   const missedTotalsRow: Record<number, number> = {}
   const noteFor = (p: Priced) => {
@@ -242,7 +242,7 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     m6.push([])
   }
   const m6TotalRows = Object.values(missedTotalsRow)
-  m6.push([{ v: 'GRAND TOTAL MISSED SHIFTS', s: 'bold' }, null, { f: m6TotalRows.length ? m6TotalRows.map((r) => `C${r}`).join('+') : '0', s: 'sub' }, { f: m6TotalRows.length ? m6TotalRows.map((r) => `D${r}`).join('+') : '0', s: 'subMoney' }])
+  m6.push([{ v: 'GRAND TOTAL CATCH-UPS', s: 'bold' }, null, { f: m6TotalRows.length ? m6TotalRows.map((r) => `C${r}`).join('+') : '0', s: 'sub' }, { f: m6TotalRows.length ? m6TotalRows.map((r) => `D${r}`).join('+') : '0', s: 'subMoney' }])
   const band6 = headBand(5)
   m6.forEach((row, i) => { if (i >= 4 && row.length >= 5 && row[4] && typeof row[4] === 'object' && (row[4] as any).s === 'wrap') band6.heights[i + 1] = 28 })
   const sheet6: Sheet = { name: S6, rows: m6, freeze: 4, widths: [28, 30, 12, 12, 120], ...band6 }
@@ -257,7 +257,7 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
   const merges2: string[] = ['A1:A3']
   days.forEach((d, i) => { const c = 2 + i * 2; hdr1.push({ v: `${i + 1}  ${DAY_SHORT[isoToDate(d)!.getUTCDay()]}`, s: 'header' }, { v: '', s: 'header' }); hdr2.push({ v: d, s: 'header' }, { v: '', s: 'header' }); hdr3.push({ v: 'HR', s: 'header' }, { v: 'Amount', s: 'header' }); merges2.push(`${colLetter(c)}1:${colLetter(c + 1)}1`, `${colLetter(c)}2:${colLetter(c + 1)}2`) })
   const MC = 16 // missed shifts HR column (P), amount Q
-  hdr1.push({ v: '6  MISSED SHIFTS', s: 'header' }, { v: '', s: 'header' }); hdr2.push({ v: 'previous payroll, approved', s: 'header' }, { v: '', s: 'header' }); hdr3.push({ v: 'HR', s: 'header' }, { v: 'Amount', s: 'header' }); merges2.push(`P1:Q1`, `P2:Q2`)
+  hdr1.push({ v: '6  CATCH-UPS', s: 'header' }, { v: '', s: 'header' }); hdr2.push({ v: 'worked in previous payroll, entered late', s: 'header' }, { v: '', s: 'header' }); hdr3.push({ v: 'HR', s: 'header' }, { v: 'Amount', s: 'header' }); merges2.push(`P1:Q1`, `P2:Q2`)
   const tail = ['Total Hours (Sat–Fri + Missed)', 'Wages (linked)', 'Fixed Deductions Due', 'Fixed Deducted (edit)', 'Fixed Outstanding After Payroll', 'Additional Loan Due', 'Additional Loan Deducted (edit)', 'Additional Loan Outstanding After Payroll', 'Total Deducted This Period', 'NET WAGE']
   tail.forEach((h, i) => { const c = 18 + i; hdr1.push({ v: h, s: 'header' }); hdr2.push({ v: '', s: 'header' }); hdr3.push({ v: '', s: 'header' }); merges2.push(`${colLetter(c)}1:${colLetter(c)}3`) })
   t2.push(hdr1, hdr2, hdr3)
