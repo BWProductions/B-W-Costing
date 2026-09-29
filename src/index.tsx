@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-28-5'
+const WAGES_UI_VERSION = 'v2026-09-28-7'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4111,6 +4111,10 @@ const STUDENT_STAFF_ID = 16, STUDENT_HOURLY = 50, STUDENT_SUNDAY_FACTOR = 1.5
 // Petrus (staff 4), owner 2026-09-22 (amended later the same day): SET DAY RATE R640,00 for 06:00–16:00 every day;
 // Mon–Fri time before 06:00 / after 16:00 R55/h (held for office approval); Sat & Sun before 06:00 / after 16:00 R80/h (automatic).
 const PETRUS_DAY = 640, PETRUS_WINDOW_START = 6 * 60, PETRUS_WINDOW_END = 16 * 60, PETRUS_EXTRA_RATE = 55, PETRUS_WEEKEND_EXTRA_RATE = 80
+// Owner 28 Sep 2026: Petrus is a FIXED weekly wage — R640 × 6 days (Mon–Sat) = R3 840, spread over 6 days for UIF/VAT only.
+// He must ALWAYS clear R3 840 in a week (more only when a Mon–Fri public holiday is priced on the holiday rule). A public
+// holiday on Sat/Sun does not add anything: the R3 840 is simply spread over the 5 working days.
+const PETRUS_STAFF_ID = 4, PETRUS_WEEK_DAYS = 6, PETRUS_WEEK_GUARANTEE = PETRUS_DAY * PETRUS_WEEK_DAYS
 // 'warehouse_or_event' (owner 2026-09-15): the work TYPE is not Warehouse but the wording
 // mentions "warehouse" — not clearly warehouse-only, so Bernie must choose Warehouse or
 // Event/Venue in Review before the weekday rate is decided (engine amount stands meanwhile).
@@ -4163,7 +4167,9 @@ function ownerPayForShift(dateIso: string, startTime: string, endTime: string, k
   const outsideH = ((eMin - sMin) - insideMin) / 60
   const h = (n: number) => n.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')
   const r2 = (n: number) => Math.round(n * 100) / 100
-  const holiday = publicHolidayName(dateIso)
+  // Owner 28 Sep 2026: Petrus — public holiday pay applies Mon–Fri only. A public holiday on a Saturday or Sunday is
+  // an ordinary Saturday/Sunday for him: the week still clears R3 840 (6 × R640), just spread over the 5 working days.
+  const holiday = (kind === 'petrus' && (dow === 0 || dow === 6)) ? null : publicHolidayName(dateIso)
   if (holiday) {
     // Owner 2026-09-22 (rate rules v10): public holiday — recommended amount worked out, but HELD (amount 0)
     // until the office approves. The review shows the recommendation and the buttons.
@@ -4902,6 +4908,56 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     </section>`
   } catch (err) {}
 
+  // Owner 28 Sep 2026: Petrus weekly guarantee panel — "You must always clear 3 840." Shows the 6 days Mon–Sat, what is
+  // paid / drafted / missing, the guaranteed total vs what is in, and a button that adds the shortfall as an owner line.
+  let petrusPanel = ''
+  try {
+    const ws = parseProxyIsoDate(weekStart)
+    if (ws) {
+      const dayIso = (offset: number) => formatProxyIsoDate(new Date(ws.getTime() + offset * 86400000))
+      // Payroll week runs Sat..Fri; Petrus's 6 paid days are Mon..Sat = offsets 2,3,4,5,6 (Mon–Fri) and 0 (Sat).
+      const days = [0, 2, 3, 4, 5, 6].map(dayIso).sort()
+      const pr = await db.prepare(`SELECT id, work_date, start_time, end_time, hours_worked, COALESCE(gross_wage, total_amount, 0) amount, work_description, event_name FROM wage_shifts WHERE staff_id = ? AND work_date BETWEEN ? AND ? AND (payroll_week_start = ? OR payroll_week_start IS NULL) ORDER BY work_date, start_time`).bind(PETRUS_STAFF_ID, weekStart, weekEnd, weekStart).all()
+      const prows = (pr.results || []) as Array<{ id: number, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, work_description: string, event_name: string }>
+      const pd = await db.prepare(`SELECT id, work_date, start_time, end_time FROM wage_shift_drafts WHERE staff_id = ? AND work_date BETWEEN ? AND ? AND final_shift_id IS NULL ORDER BY work_date`).bind(PETRUS_STAFF_ID, weekStart, weekEnd).all()
+      const pdrafts = (pd.results || []) as Array<{ id: number, work_date: string, start_time: string, end_time: string }>
+      const paidIn = prows.reduce((a, r) => a + Number(r.amount || 0), 0)
+      const topUps = prows.filter((r) => r.event_name === 'Petrus weekly guarantee')
+      const weekdayHoliday = days.filter((d) => publicHolidayName(d) && (parseProxyIsoDate(d)!.getUTCDay() >= 1 && parseProxyIsoDate(d)!.getUTCDay() <= 5))
+      const weekendHoliday = days.filter((d) => publicHolidayName(d) && (parseProxyIsoDate(d)!.getUTCDay() === 0 || parseProxyIsoDate(d)!.getUTCDay() === 6))
+      // Guarantee: R3 840; if a Mon–Fri holiday is priced on the holiday rule, that day's holiday amount replaces its R640.
+      let guarantee = PETRUS_WEEK_GUARANTEE
+      const holRows = prows.filter((r) => weekdayHoliday.includes(r.work_date) && r.event_name !== 'Petrus weekly guarantee')
+      const holAmt = holRows.reduce((a, r) => a + Number(r.amount || 0), 0)
+      if (holRows.length && holAmt > PETRUS_DAY) guarantee = PETRUS_WEEK_GUARANTEE - PETRUS_DAY * weekdayHoliday.length + holAmt
+      const short = Math.round((guarantee - paidIn) * 100) / 100
+      const missingDays = days.filter((d) => !prows.some((r) => r.work_date === d))
+      const todayIso = formatProxyIsoDate(new Date())
+      const cells = days.map((d) => {
+        const rs = prows.filter((r) => r.work_date === d), dr = pdrafts.filter((x) => x.work_date === d)
+        const hol = publicHolidayName(d), dow = parseProxyIsoDate(d)!.getUTCDay()
+        const amt = rs.reduce((a, r) => a + Number(r.amount || 0), 0)
+        const label = proxyLongDate(d).replace(/ 2026$/, '')
+        let body: string, bg: string
+        if (rs.length) { body = `<strong>${fmtRand(amt)}</strong><br><span style="font-size:11px;opacity:.8">${rs.map((r) => r.event_name === 'Petrus weekly guarantee' ? 'guarantee top-up' : escapeHtmlText(r.start_time + '–' + r.end_time)).join(', ')}</span>`; bg = 'rgba(22,163,74,.22)' }
+        else if (dr.length) { body = `<strong>R640,00</strong><br><span style="font-size:11px;opacity:.8">draft ${escapeHtmlText(dr[0].start_time + '–' + dr[0].end_time)} — not final-submitted</span>`; bg = 'rgba(202,138,4,.25)' }
+        else if (d >= todayIso) { body = `<span style="opacity:.6">R640,00<br><span style="font-size:11px">${d === todayIso ? 'today — he enters it at the end of the day' : 'still to come'}</span></span>`; bg = 'rgba(255,255,255,.04)' }
+        else { body = `<strong style="color:#fecaca">nothing in</strong><br><span style="font-size:11px;opacity:.9">R640 still owed</span>`; bg = 'rgba(127,29,29,.35)' }
+        const holTag = hol ? `<div style="font-size:10.5px;color:#fde68a;margin-top:2px">${escapeHtmlText(hol)}${dow === 0 || dow === 6 ? ' — weekend: no holiday pay, R640 day' : ' — holiday rule (' + (amt ? fmtRand(amt) : 'held for you') + ')'}</div>` : ''
+        return `<div style="flex:1 1 120px;padding:6px 8px;border-radius:8px;background:${bg};font-size:12.5px"><div style="font-weight:800">${escapeHtmlText(label)}</div>${body}${holTag}</div>`
+      }).join('')
+      const pastMissing = missingDays.filter((d) => d < todayIso && !pdrafts.some((x) => x.work_date === d))
+      const topUpBtn = short > 0.004 && pastMissing.length ? `<form method="post" action="/wages-admin/petrus-guarantee" style="margin:0" onsubmit="return confirm('Add ${fmtRand(short)} so Petrus clears ${fmtRand(guarantee)} this week? One owner line per missing day (${pastMissing.length}).')"><input type="hidden" name="week_start" value="${weekStart}"><input type="hidden" name="return_to" value="__RETURN__"><button type="submit" style="padding:6px 12px;border-radius:8px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer">Top up the missing day${pastMissing.length > 1 ? 's' : ''} — ${fmtRand(Math.min(short, pastMissing.length * PETRUS_DAY))}</button></form>` : ''
+      const state = short <= 0.004 ? `<strong style="color:#86efac">✔ clears ${fmtRand(guarantee)}</strong>` : `<strong style="color:#fecaca">${fmtRand(short)} short of ${fmtRand(guarantee)}</strong> — ${pdrafts.length ? pdrafts.length + ' draft' + (pdrafts.length > 1 ? 's' : '') + ' still to be final-submitted' : ''}${pastMissing.length ? (pdrafts.length ? '; ' : '') + pastMissing.length + ' day' + (pastMissing.length > 1 ? 's' : '') + ' with nothing entered' : ''}${days.some((d) => d >= todayIso) ? ' — week not finished yet' : ''}`
+      petrusPanel = `<section id="bw-petrus-week" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(88,28,135,.18);border:1px solid rgba(216,180,254,.5)">
+        <div style="font-weight:800;color:#e9d5ff;font-size:14px">🔒 Petrus — fixed weekly wage R3 840 (R640 × 6 days Mon–Sat)</div>
+        <div style="font-size:12.5px;opacity:.85;margin-top:2px"><strong>What this means:</strong> Petrus is paid a fixed R640 a day, Monday to Saturday — R3 840 a week — whatever hours he enters. It is spread over 6 days only for UIF/VAT. He must always clear R3 840. The only time the week is more is a <strong>Mon–Fri public holiday</strong> priced on the holiday rule (like Heritage Day). A public holiday on a Saturday or Sunday adds nothing — the R3 840 is just spread over the 5 working days. Nothing changes unless the owner says so (owner 28 Sep 2026).</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${cells}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px;font-size:13px"><div>In this payroll so far: <strong>${fmtRand(paidIn)}</strong>${topUps.length ? ` (incl. ${topUps.length} guarantee top-up${topUps.length > 1 ? 's' : ''})` : ''} · ${state}${weekendHoliday.length ? ` · ${weekendHoliday.map((d) => escapeHtmlText(publicHolidayName(d) || '')).join(', ')} falls on the weekend — no extra` : ''}</div>${topUpBtn}</div>
+      </section>`
+    }
+  } catch (err) {}
+
   const sections = order.map((sid) => {
     const g = byStaff[sid]
     const rows = g.paid.slice().sort((a, b) => (a.work_date + a.start_time).localeCompare(b.work_date + b.start_time))
@@ -5150,6 +5206,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     })()}
     ${followUpPanel}
     ${ownSchedulePanel}
+    ${petrusPanel}
     <div style="display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 12px;font-size:13px">
       <div><span style="opacity:.7">Paid shifts</span><br><strong style="font-size:18px">${gShifts}</strong></div>
       <div><span style="opacity:.7">Total hours</span><br><strong style="font-size:18px">${gHours.toFixed(2)}</strong></div>
@@ -5943,6 +6000,44 @@ app.post('/wages-admin/petrus-extra', async (c) => {
 // Owner 24 Sep 2026: mark a shift (or several) of an own-schedule worker (Lebo) as PAID by the owner. Stamps
 // own_schedule_paid_at / by on wage_shifts; the line leaves the running ledger on the dashboard. Nothing else
 // changes — amounts, reviews and the payroll Excel are untouched. Logged in wage_debug_capture.
+// Owner 28 Sep 2026: Petrus weekly guarantee — adds an owner line of R640 for each Mon–Sat day of the payroll week that has
+// nothing paid and no draft, so the week clears R3 840. Idempotent per day (event_name 'Petrus weekly guarantee').
+app.post('/wages-admin/petrus-guarantee', async (c) => {
+  const db = c.env?.DB
+  const admin = await adminUserFromCookie(c.req.raw.headers.get('cookie') || '')
+  const back = (v: string) => new Response(null, { status: 302, headers: { location: v, 'cache-control': 'no-store' } })
+  if (!db) return c.text('no database', 500)
+  if (!admin) return back('/login?next=' + encodeURIComponent('/admin/wages'))
+  let form: FormData
+  try { form = await c.req.raw.formData() } catch (err) { return back('/admin/wages?error=' + encodeURIComponent('Could not read the form.')) }
+  const weekStart = normalizeProxyFieldValue(form.get('week_start'))
+  const returnTo = normalizeProxyFieldValue(form.get('return_to')) || '/admin/wages'
+  const safeReturn = /^\/admin\/wages(\?|$)/.test(returnTo) ? returnTo : '/admin/wages'
+  const sep = safeReturn.includes('?') ? '&' : '?'
+  const ws = parseProxyIsoDate(weekStart)
+  if (!ws) return back(safeReturn + sep + 'error=' + encodeURIComponent('Bad week.'))
+  try {
+    const dayIso = (offset: number) => formatProxyIsoDate(new Date(ws.getTime() + offset * 86400000))
+    const weekEnd = dayIso(6)
+    const days = [0, 2, 3, 4, 5, 6].map(dayIso).sort()
+    const todayIso = formatProxyIsoDate(new Date())
+    const have = await db.prepare(`SELECT work_date FROM wage_shifts WHERE staff_id = ? AND work_date BETWEEN ? AND ?`).bind(PETRUS_STAFF_ID, weekStart, weekEnd).all()
+    const drafts = await db.prepare(`SELECT work_date FROM wage_shift_drafts WHERE staff_id = ? AND work_date BETWEEN ? AND ? AND final_shift_id IS NULL`).bind(PETRUS_STAFF_ID, weekStart, weekEnd).all()
+    const haveSet = new Set(((have.results || []) as any[]).map((r) => String(r.work_date))), draftSet = new Set(((drafts.results || []) as any[]).map((r) => String(r.work_date)))
+    const missing = days.filter((d) => d < todayIso && !haveSet.has(d) && !draftSet.has(d))
+    if (!missing.length) return back(safeReturn + sep + 'msg=' + encodeURIComponent('Petrus: nothing to top up — every day has an entry or a draft.') + '#bw-petrus-week')
+    for (const d of missing) {
+      await db.prepare(`INSERT INTO wage_shifts (staff_id, work_date, outlet_venue, area, event_name, work_description, start_time, end_time, hours_worked, normal_hours, hourly_rate_snapshot, base_rate_snapshot, total_amount, normal_amount, gross_wage, entered_by, entered_by_type, manager_update_reason, work_type, calculation_version, missed_previous_week, payroll_week_start, payroll_note)
+          VALUES (?, ?, 'Warehouse', 'Highbury', 'Petrus weekly guarantee', ?, '00:00', '00:00', 0, 0, 0, 0, ?, ?, ?, ?, 'manager', ?, 'Normal', ?, 0, ?, ?)`)
+        .bind(PETRUS_STAFF_ID, d, 'Fixed day R640 — Petrus weekly guarantee (R640 × 6 = R3 840, owner 28 Sep 2026). No entry from him for this day.', PETRUS_DAY, PETRUS_DAY, PETRUS_DAY, admin.name, 'Owner rule 28 Sep 2026: Petrus always clears R3 840 a week (R640 × Mon–Sat). Day added by ' + admin.name + ' because nothing was entered.', OWNER_RATE_RULES_VERSION, weekStart, 'PETRUS WEEKLY GUARANTEE — R640 fixed day added for ' + d + ' by ' + admin.name + ' (owner 28 Sep 2026). Do not re-price.').run()
+    }
+    await captureWagesDebug(c.env, { request_path: '/wages-admin/petrus-guarantee', request_method: 'POST', original_payload_json: JSON.stringify({ week_start: weekStart, days: missing, by: admin.name }), rewritten_payload_json: '{}', rewrite_applied: 1, response_status: 302, response_location: safeReturn, response_error_text: '' })
+    return back(safeReturn + sep + 'msg=' + encodeURIComponent('Petrus: R640 added for ' + missing.map((d) => proxyLongDate(d)).join(', ') + ' by ' + admin.name + ' — week now clears the guarantee.') + '#bw-petrus-week')
+  } catch (err) {
+    return back(safeReturn + sep + 'error=' + encodeURIComponent('Could not top up: ' + describeProxyError(err)))
+  }
+})
+
 app.post('/wages-admin/own-schedule-paid', async (c) => {
   const db = c.env?.DB
   const admin = await adminUserFromCookie(c.req.raw.headers.get('cookie') || '')

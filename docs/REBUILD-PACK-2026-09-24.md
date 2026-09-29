@@ -300,3 +300,16 @@ afterwards; paid now, in the current payroll, showing the real date worked; chec
 Where: admin dashboard legend `#bw-catchup-legend`, CATCH-UP pill (hover text), per-row "What CATCH-UP means" line on paid rows and
 drafts, totals ("of which CATCH-UPS"), Excel (column header, sheet 6 title/headers), worker app locked-section heading and card text.
 Internal DB marker `missed_previous_week` / description prefix "MISSED SHIFT - actual date …" is unchanged (the engine relies on it).
+
+### Petrus fixed weekly wage — R3 840 guarantee (v2026-09-28-7, owner 28 Sep 2026)
+Owner: "It's a fixed day rate, Monday to Saturday. No changes unless I tell you. Public holidays are different, but it doesn't apply
+to Saturday and Sunday. If there's a public holiday on Saturday/Sunday we take 640 × 6 and put it in 5 days. You must always clear
+3 840. We put it over 6 days for UIF and VAT purposes."
+- Constants `PETRUS_STAFF_ID = 4`, `PETRUS_DAY = 640`, `PETRUS_WEEK_DAYS = 6`, `PETRUS_WEEK_GUARANTEE = 3840`.
+- `ownerPayForShift`: for kind 'petrus' a Sat/Sun date is never treated as a public holiday (ordinary R640 Saturday; Sunday held as before).
+  Mon–Fri public holiday keeps the holiday rule (hours − meeting × R160, held for approval) — that week clears MORE than R3 840.
+- Dashboard panel `#bw-petrus-week`: the 6 days Mon–Sat of the payroll week, each paid / draft / today / still to come / nothing in;
+  "In this payroll so far" vs the guarantee (R3 840, or R3 840 − R640 + holiday amount when a weekday holiday is priced).
+  Button "Top up the missing day(s)" → POST /wages-admin/petrus-guarantee adds an owner line (event_name 'Petrus weekly guarantee',
+  0 h, R640) for each fully-past Mon–Sat day with no paid row and no draft. Only days before today count as missing.
+- Week 19–25 Sep check: 5 × R640 + Heritage Day R1 120 = R4 320 ✔.
