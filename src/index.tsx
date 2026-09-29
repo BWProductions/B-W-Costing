@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-28-7'
+const WAGES_UI_VERSION = 'v2026-09-28-8'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -5363,7 +5363,7 @@ async function proxyRequest(c: any) {
   if (staleHostRedirect) return staleHostRedirect
   rewritePreviousPayrollGetRequest(incomingUrl, upstreamUrl)
 
-  const method = (c.req.raw.method || 'GET').toUpperCase()
+  let method = (c.req.raw.method || 'GET').toUpperCase()
 
   // Safety net (2026-09-14, seen on Patrick's phone): a Final Submission POST
   // that lands on /final-check instead of /final-submit is answered by the
@@ -5372,7 +5372,12 @@ async function proxyRequest(c: any) {
   // normal final-submit handling below (Saturday parking, real-date restore,
   // error checking) exactly as if the button on the confirmation page was pressed.
   let finalCheckRedirectFix = false
-  const finalCheckPostMatch = method === 'POST' ? incomingUrl.pathname.match(/^\/wages\/drafts\/(\d+)\/final-check\/?$/) : null
+  // Owner 28 Sep 2026 (told several times): NO "Final Shift Check" page. Pressing FINAL SUBMISSION on a shift must
+  // final-submit it, full stop. The worker's button is a GET link to /final-check — the proxy treats that GET exactly
+  // like the confirmation POST: it performs the final-submit itself (three engine yes-answers filled in) and the
+  // worker lands back on the shift list with the result. The engine's check page is never shown.
+  const finalCheckGetMatch = (method === 'GET' || method === 'HEAD') && !/[?&]bw_show_check=1/.test(incomingUrl.search) ? incomingUrl.pathname.match(/^\/wages\/drafts\/(\d+)\/final-check\/?$/) : null
+  const finalCheckPostMatch = method === 'POST' ? incomingUrl.pathname.match(/^\/wages\/drafts\/(\d+)\/final-check\/?$/) : (finalCheckGetMatch || null)
   if (finalCheckPostMatch) {
     finalCheckRedirectFix = true
     incomingUrl.pathname = '/wages/drafts/' + finalCheckPostMatch[1] + '/final-submit'
@@ -5381,6 +5386,7 @@ async function proxyRequest(c: any) {
     const h = new Headers(c.req.raw.headers); h.delete('content-length'); h.set('content-type', 'application/x-www-form-urlencoded;charset=UTF-8')
     c.req.raw = new Request(c.req.raw.url.replace(/\/final-check(\/)?(\?|$)/, '/final-submit$2'), { method: 'POST', headers: h, body: fixedBody })
   }
+  if (finalCheckRedirectFix) method = 'POST'
 
   if (method === 'GET' && (incomingUrl.pathname === '/wages' || incomingUrl.pathname === '/wages/') && !incomingUrl.search) {
     const baseResponse = new Response(renderWagesLandingHtml(), {
@@ -5592,7 +5598,8 @@ async function proxyRequest(c: any) {
   if (finalCheckRedirectFix) {
     await captureWagesDebug(c.env, { request_path: incomingUrl.pathname + incomingUrl.search + ' (was final-check POST)', request_method: 'POST', original_payload_json: '{"note":"final-check POST treated as final-submit"}', rewritten_payload_json: '{}', rewrite_applied: 1, response_status: upstreamResponse.status, response_location: upstreamLocation, response_error_text: '' })
     if (/\/login/.test(upstreamLocation) || (upstreamResponse.status === 302 && /[?&]error=/.test(upstreamLocation) === false && !/\/wages\/me/.test(upstreamLocation))) {
-      const back = '/wages/drafts/' + finalCheckPostMatch![1] + '/final-check?error=' + encodeURIComponent('Final Submission did not go through. Please tick all three boxes and press YES – FINAL SUBMISSION again.')
+      // No check page any more (owner 28 Sep): send the worker back to his shift list with the error.
+      const back = '/wages/me?error=' + encodeURIComponent('Final Submission did not go through — please press FINAL SUBMISSION on that shift again.')
       if (parkedDraft) { /* restore handled in finally above */ }
       return new Response(null, { status: 302, headers: { location: back, 'cache-control': 'no-store' } })
     }

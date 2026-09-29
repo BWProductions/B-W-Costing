@@ -313,3 +313,11 @@ to Saturday and Sunday. If there's a public holiday on Saturday/Sunday we take 6
   Button "Top up the missing day(s)" → POST /wages-admin/petrus-guarantee adds an owner line (event_name 'Petrus weekly guarantee',
   0 h, R640) for each fully-past Mon–Sat day with no paid row and no draft. Only days before today count as missing.
 - Week 19–25 Sep check: 5 × R640 + Heritage Day R1 120 = R4 320 ✔.
+
+### No "Final Shift Check" page — FINAL SUBMISSION submits immediately (v2026-09-28-8, owner 28 Sep 2026)
+Owner: "I've told you multiple times we don't want this anymore. When you push final submit, it just finally submits it."
+The worker's FINAL SUBMISSION button is a GET link to /wages/drafts/:id/final-check (engine's confirmation page with tick boxes).
+The proxy now treats that GET like the confirmation POST: rewrites it to POST /final-submit with the engine's three yes-answers
+(time_correct / end_time_correct / information_complete), runs the normal final-submit handling (Saturday parking, real date,
+owner-rule re-pricing) and redirects to /wages/me?submitted=1. The check page is never shown. Errors go to /wages/me?error=….
+Escape hatch for debugging only: ?bw_show_check=1 still renders the engine page. Tested 29 Sep with a throwaway draft (removed).
