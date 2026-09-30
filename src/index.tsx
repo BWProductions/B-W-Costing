@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-29-4'
+const WAGES_UI_VERSION = 'v2026-09-30-1'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4933,6 +4933,44 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
 
   // Owner 28 Sep 2026: Petrus weekly guarantee panel — "You must always clear 3 840." Shows the 6 days Mon–Sat, what is
   // paid / drafted / missing, the guaranteed total vs what is in, and a button that adds the shortfall as an owner line.
+  // Owner 30 Sep 2026: "The wage schedule ends this week on the 2nd of October, and all the wages need to go into the auditors
+  // by the 30th. The rule is that they will submit for Thursday and Friday [in advance], and then your job next week is to
+  // just deduct whatever they say they missed." → Thu/Fri submitted early is NORMAL, not a flag. On the NEXT week's dashboard
+  // (and in the previous-week view) list every pre-submitted Thu/Fri row so the office can knock off anything not worked.
+  let preSubmitPanel = ''
+  try {
+    const ws = parseProxyIsoDate(weekStart)
+    if (ws) {
+      const dayIso = (offset: number) => formatProxyIsoDate(new Date(ws.getTime() + offset * 86400000))
+      const thu = dayIso(5), fri = dayIso(6), wed = dayIso(4)
+      const todayIso = formatProxyIsoDate(new Date())
+      const cur = weekStart === currentProxyPayrollWeekStart()
+      // Show while the week is running (from Wednesday, when pre-submission starts) and for the week just closed.
+      const showFor = (cur && todayIso >= wed) || (!cur && weekStart === formatProxyIsoDate(new Date(parseProxyIsoDate(currentProxyPayrollWeekStart())!.getTime() - 7 * 86400000)))
+      if (showFor) {
+        const pr = await db.prepare(`SELECT w.id, w.staff_id, s.display_name, w.work_date, w.start_time, w.end_time, w.hours_worked, COALESCE(w.gross_wage, w.total_amount, 0) amount, w.outlet_venue, w.work_description, w.created_at, w.manager_update_reason FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id WHERE w.work_date IN (?, ?) AND date(w.created_at) < w.work_date ORDER BY s.display_name, w.work_date`).bind(thu, fri).all()
+        const rows = (pr.results || []) as Array<{ id: number, staff_id: number, display_name: string, work_date: string, start_time: string, end_time: string, hours_worked: number, amount: number, outlet_venue: string, work_description: string, created_at: string, manager_update_reason: string | null }>
+        if (rows.length) {
+          const total = rows.reduce((a, r) => a + Number(r.amount || 0), 0)
+          const li = rows.map((r) => `<tr style="border-top:1px solid rgba(255,255,255,.08)">
+            <td style="padding:4px 8px;font-weight:700">${escapeHtmlText(r.display_name)}</td>
+            <td style="padding:4px 8px;white-space:nowrap">${escapeHtmlText(proxyLongDate(r.work_date))}</td>
+            <td style="padding:4px 8px;white-space:nowrap">${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)} · ${Number(r.hours_worked || 0).toFixed(2)} h</td>
+            <td style="padding:4px 8px">${escapeHtmlText(r.outlet_venue || '')}${r.work_description ? ' · <span style="opacity:.75">' + escapeHtmlText(r.work_description.slice(0, 50)) + '</span>' : ''}</td>
+            <td style="padding:4px 8px;text-align:right;white-space:nowrap;font-weight:800;color:#fde68a">${fmtRand(Number(r.amount || 0))}</td>
+            <td style="padding:4px 8px;font-size:11px;opacity:.75;white-space:nowrap">submitted ${escapeHtmlText(String(r.created_at).slice(0, 10))}</td>
+            <td style="padding:4px 8px;white-space:nowrap">${r.manager_update_reason ? '<span style="color:#86efac;font-size:11px">✔ checked</span>' : editBtn(r.id, '✎ Adjust / deduct')}</td>
+          </tr>`).join('')
+          preSubmitPanel = `<section id="bw-presubmit-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:rgba(30,58,138,.18);border:1px solid rgba(147,197,253,.5)">
+            <div style="font-weight:800;color:#bfdbfe;font-size:14px">📅 Thursday / Friday submitted in advance — ${rows.length} shift${rows.length === 1 ? '' : 's'} · ${fmtRand(total)}</div>
+            <div style="font-size:12.5px;opacity:.85;margin-top:2px"><strong>What this means:</strong> the payroll week closes on Friday and the wages go to the auditors on Wednesday the 30th, so the crew final-submit Thursday and Friday <strong>before</strong> they work them (owner rule, 30 Sep 2026). That is normal — not a red flag. <strong>${cur ? 'Next week' : 'This week'}, the office checks these against what actually happened</strong>: if anyone did not work, left early or was elsewhere, press <strong>✎ Adjust / deduct</strong> on that row and the difference is taken off. Rows already corrected show ✔ checked.</div>
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px"><thead><tr style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;opacity:.7"><th style="padding:2px 8px;text-align:left">Worker</th><th style="padding:2px 8px;text-align:left">Day</th><th style="padding:2px 8px;text-align:left">Times</th><th style="padding:2px 8px;text-align:left">Where</th><th style="padding:2px 8px;text-align:right">Paid</th><th style="padding:2px 8px;text-align:left">When</th><th style="padding:2px 8px"></th></tr></thead><tbody>${li}</tbody></table>
+          </section>`
+        }
+      }
+    }
+  } catch (err) {}
+
   let petrusPanel = ''
   try {
     const ws = parseProxyIsoDate(weekStart)
@@ -5230,6 +5268,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     ${followUpPanel}
     ${ownSchedulePanel}
     ${petrusPanel}
+    ${preSubmitPanel}
     <div style="display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 12px;font-size:13px">
       <div><span style="opacity:.7">Paid shifts</span><br><strong style="font-size:18px">${gShifts}</strong></div>
       <div><span style="opacity:.7">Total hours</span><br><strong style="font-size:18px">${gHours.toFixed(2)}</strong></div>

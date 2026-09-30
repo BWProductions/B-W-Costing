@@ -343,3 +343,13 @@ were NOT at Sonop and stay 13:00. A per-person owner window overrides the genera
   arena / festival / wedding / function / install / rig) → R75, and they WIN over the word "warehouse";
   otherwise warehouse words (load / offload / prepar / pack / clean / wash / sort / stock / receiv / warehouse) or Warehouse work type → R50;
   anything else → R75. No owner question needed.
+
+### Payroll timing rule — Thursday/Friday submitted in advance (owner 30 Sep 2026, v2026-09-30-1)
+"The wage schedule ends this week on the 2nd of October, and all the wages need to go into the auditors by the 30th. The rule is
+that they will submit for Thursday and Friday, and then your job next week is to just deduct whatever they say they missed."
+- Payroll week Sat→Fri; wages to the auditors on the WEDNESDAY. Crew final-submit Thu + Fri on Tue/Wed BEFORE working them. NORMAL — never a flag.
+- Dashboard panel `#bw-presubmit-check` (shows from Wednesday of the running week, and on the just-closed week's view): every Thu/Fri
+  row whose created_at is before its work_date, with amount, submit date and an "✎ Adjust / deduct" button (office edit form → owner
+  rules re-price). Rows with a manager correction show ✔ checked.
+- Next-week job: compare each pre-submitted Thu/Fri row with what actually happened; deduct via the edit form. The deduction lands as a
+  correction on the row (already paid in the closed payroll → the difference must be recovered in the next payroll by the office).
