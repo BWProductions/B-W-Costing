@@ -375,3 +375,19 @@ Where it shows
 Restore
 - `UPDATE wage_staff SET varies_weekly=1 WHERE id=12;`
 - `INSERT INTO wage_fixed_weekly_amounts (staff_id, week_start, amount, set_by, note) VALUES (12,'2026-09-26',2500,'Bernie Burness','Owner 30 Sep: this week R2 500 — varies weekly, ask every week');`
+
+## 30 Sep 2026 — PAID snapshot / triple-check (v2026-09-30-3)
+
+Owner: "you need to triple-check this next week so that I don't get pulled again about the hours we've paid. If someone claims more or less, we know exactly."
+
+- Table `wage_paid_snapshot(week_start, shift_id PK, staff_id, display_name, work_date, start_time, end_time, hours, rate, amount, outlet_venue, work_description, snapshot_by, snapshot_at)` — every row of a payroll week frozen exactly as paid.
+- Taken automatically when `/wages-admin/payroll.xlsx` is downloaded (by "<admin> (Excel download)") and manually with the 🔒 button → `POST /wages-admin/paid-snapshot` (week_start, return_to). `takePaidSnapshot(db, weekStart, by)` — INSERT OR REPLACE, so re-locking updates to the latest state.
+- Panel `#bw-paid-check` on `/admin/wages` (this week + last week): compares the snapshot to live `wage_shifts`. Shows per person/day: PAID times+Rand vs NOW times+Rand, the exact difference (+ = claims more, − = claims less / deduct), ROW REMOVED after paying, and rows added after the sheet (CATCH-UP only if approved). Green ✔ when everything matches.
+- Week 2026-09-26 locked 30 Sep 08:14: 94 rows, R67 349,80 (+ Brian R2 500 + Sharleen R3 500 fixed).
+
+## 30 Sep 2026 — Sharleen R3 500; Thina not in; owner approvals
+- Sharleen (staff 17) fixed_weekly, `varies_weekly=1`, this week R3 500 (record had R3 000) — asked every week like Brian.
+- Thina not in week 26 Sep–2 Oct: nothing to pay.
+- Owner approved: Tue 29 warehouse loading = warehouse R690,63 whole team; Sonop Sat 26 06:00–14:00 fixed for the team (Erick #9924 → R760); Thu 1 Oct FNB → venue; Middleburg activations = Music Bus fixed R750 for 07:00–16:00, after 16:00 R120/h; Isaac Sunbet set-up event R855.
+- Rule: "warehouse loading" wording = warehouse; set-up / strike / venue name = venue only after owner approval. Team rule: set the time to the highest the team chose.
+- Lebo: submits Wed–Fri by Monday 5 Oct, paid Tuesday 6 Oct (ledger).

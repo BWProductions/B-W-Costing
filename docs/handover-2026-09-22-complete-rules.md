@@ -539,3 +539,6 @@ Excel puts the fixed amount in his week total; no hourly shifts expected; extra 
 
 ## Brian Ndlovu — weekly amount changes every week (owner rule, 30 Sep 2026)
 Brian is on a fixed weekly amount, but the amount is different each week. Never assume it. Every payroll week the office dashboard (`/admin/wages`, panel "❓ Bernie — what is this week's amount?") asks the owner for Brian's figure; until it is typed the auditor Excel shows R0,00 for Brian. Week 26 Sep–2 Oct 2026 = R2 500 (owner confirmed). Stored per week in `wage_fixed_weekly_amounts`; flag `wage_staff.varies_weekly=1`.
+
+## Triple-check of paid hours (owner rule, 30 Sep 2026)
+When the payroll Excel is downloaded, every row is locked as PAID (`wage_paid_snapshot`). The `/admin/wages` panel "🔎 Triple-check: what we PAID vs what the rows say now" lists any row that later differs — exact paid times and Rand vs the current claim, with the difference — and any row added after the sheet. Claims more → pay difference only if owner approves; claims less → deduct next payroll. Sharleen: fixed weekly, amount asked every week (R3 500 for 26 Sep). Thina: not in week 26 Sep.

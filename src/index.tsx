@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-30-2'
+const WAGES_UI_VERSION = 'v2026-09-30-3'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4937,6 +4937,46 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   // by the 30th. The rule is that they will submit for Thursday and Friday [in advance], and then your job next week is to
   // just deduct whatever they say they missed." → Thu/Fri submitted early is NORMAL, not a flag. On the NEXT week's dashboard
   // (and in the previous-week view) list every pre-submitted Thu/Fri row so the office can knock off anything not worked.
+  // Owner 30 Sep 2026: "you need to triple-check this next week so that I don't get pulled again about the hours we've
+  // paid. If someone claims more or less, we know exactly." → wage_paid_snapshot freezes every row exactly as it went to
+  // the auditors (taken when the payroll Excel is downloaded, or with the Lock button). This panel compares the paid
+  // snapshot against the live rows and shows the exact difference per person: changed, removed, or claimed afterwards.
+  let paidCheckPanel = ''
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS wage_paid_snapshot (week_start TEXT NOT NULL, shift_id INTEGER NOT NULL, staff_id INTEGER, display_name TEXT, work_date TEXT, start_time TEXT, end_time TEXT, hours REAL, rate REAL, amount REAL, outlet_venue TEXT, work_description TEXT, snapshot_by TEXT, snapshot_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (week_start, shift_id))`).run()
+    const wsD = parseProxyIsoDate(weekStart)
+    const prevWeek = wsD ? formatProxyIsoDate(new Date(wsD.getTime() - 7 * 86400000)) : ''
+    const weeks = [weekStart, prevWeek].filter(Boolean)
+    const blocks: string[] = []
+    let flagged = 0
+    for (const wk of weeks) {
+      const wkEnd = proxyEndOfPayrollWeek(wk)
+      const meta = await db.prepare(`SELECT COUNT(*) n, MAX(snapshot_at) at, MAX(snapshot_by) by, ROUND(SUM(amount),2) total FROM wage_paid_snapshot WHERE week_start = ?`).bind(wk).first<{ n: number, at: string, by: string, total: number }>()
+      if (!meta || !Number(meta.n)) continue
+      const diff = await db.prepare(`SELECT p.shift_id, p.display_name, p.work_date, p.start_time p_st, p.end_time p_en, p.hours p_h, p.amount p_amt, w.id w_id, w.start_time w_st, w.end_time w_en, w.hours_worked w_h, COALESCE(w.gross_wage, w.total_amount) w_amt, w.manager_update_reason mgr FROM wage_paid_snapshot p LEFT JOIN wage_shifts w ON w.id = p.shift_id WHERE p.week_start = ? AND (w.id IS NULL OR w.start_time != p.start_time OR w.end_time != p.end_time OR ABS(COALESCE(w.gross_wage, w.total_amount, 0) - p.amount) > 0.01) ORDER BY p.display_name, p.work_date`).bind(wk).all()
+      const late = await db.prepare(`SELECT w.id, s.display_name, w.work_date, w.start_time, w.end_time, w.hours_worked, COALESCE(w.gross_wage, w.total_amount, 0) amt, w.outlet_venue, w.work_description, w.created_at FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id WHERE w.work_date BETWEEN ? AND ? AND w.id NOT IN (SELECT shift_id FROM wage_paid_snapshot WHERE week_start = ?) ORDER BY s.display_name, w.work_date`).bind(wk, wkEnd, wk).all()
+      const drows = (diff.results || []) as any[]
+      const lrows = (late.results || []) as any[]
+      flagged += drows.length + lrows.length
+      const money = (n: any) => fmtRand(Number(n || 0))
+      const dl = drows.map((r) => {
+        const removed = r.w_id === null || r.w_id === undefined
+        const d = removed ? -Number(r.p_amt) : Number(r.w_amt) - Number(r.p_amt)
+        const col = d > 0 ? '#fca5a5' : (d < 0 ? '#86efac' : '#e5e7eb')
+        return `<tr style="border-top:1px solid rgba(255,255,255,.08)"><td style="padding:4px 8px;font-weight:700">${escapeHtmlText(r.display_name)}</td><td style="padding:4px 8px;white-space:nowrap">${escapeHtmlText(proxyLongDate(r.work_date))}</td><td style="padding:4px 8px;white-space:nowrap">PAID ${escapeHtmlText(r.p_st)}–${escapeHtmlText(r.p_en)} · ${money(r.p_amt)}</td><td style="padding:4px 8px;white-space:nowrap">${removed ? '<span style="color:#fca5a5;font-weight:800">ROW REMOVED after paying</span>' : 'NOW ' + escapeHtmlText(r.w_st) + '–' + escapeHtmlText(r.w_en) + ' · ' + money(r.w_amt)}</td><td style="padding:4px 8px;text-align:right;white-space:nowrap;font-weight:800;color:${col}">${d > 0 ? '+' : ''}${money(d)}</td><td style="padding:4px 8px;font-size:11px;opacity:.8">${d > 0 ? 'claims MORE than paid — pay the difference only if approved' : (d < 0 ? 'claims LESS than paid — deduct next payroll' : '')}${r.mgr ? ' · ' + escapeHtmlText(String(r.mgr).slice(0, 90)) : ''}</td></tr>`
+      }).join('')
+      const ll = lrows.map((r) => `<tr style="border-top:1px solid rgba(255,255,255,.08)"><td style="padding:4px 8px;font-weight:700">${escapeHtmlText(r.display_name)}</td><td style="padding:4px 8px;white-space:nowrap">${escapeHtmlText(proxyLongDate(r.work_date))}</td><td style="padding:4px 8px;white-space:nowrap">NOT on the paid sheet</td><td style="padding:4px 8px;white-space:nowrap">CLAIMS ${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)} · ${money(r.amt)} <span style="opacity:.7">${escapeHtmlText(r.outlet_venue || '')}</span></td><td style="padding:4px 8px;text-align:right;white-space:nowrap;font-weight:800;color:#fca5a5">+${money(r.amt)}</td><td style="padding:4px 8px;font-size:11px;opacity:.8">submitted ${escapeHtmlText(String(r.created_at).slice(0, 10))} after the sheet — CATCH-UP next payroll only if approved${editBtn ? ' ' + editBtn(r.id, '✎ Check') : ''}</td></tr>`).join('')
+      const ok = !drows.length && !lrows.length
+      blocks.push(`<div style="margin-top:${blocks.length ? 10 : 4}px"><div style="font-weight:800;font-size:13px;color:${ok ? '#86efac' : '#fde68a'}">${ok ? '✔' : '⚠'} Payroll ${escapeHtmlText(wk)} → ${escapeHtmlText(wkEnd)}: ${Number(meta.n)} rows locked · ${money(meta.total)} paid · locked ${escapeHtmlText(String(meta.at).slice(0, 16))} by ${escapeHtmlText(meta.by || 'office')}${ok ? ' — every live row still matches what was paid' : ' — ' + (drows.length + lrows.length) + ' difference' + (drows.length + lrows.length === 1 ? '' : 's')}</div>${ok ? '' : `<table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:4px"><thead><tr style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;opacity:.7"><th style="padding:2px 8px;text-align:left">Worker</th><th style="padding:2px 8px;text-align:left">Day</th><th style="padding:2px 8px;text-align:left">What we paid</th><th style="padding:2px 8px;text-align:left">What the row says now</th><th style="padding:2px 8px;text-align:right">Difference</th><th style="padding:2px 8px;text-align:left">Action</th></tr></thead><tbody>${dl}${ll}</tbody></table>`}</div>`)
+    }
+    const lockForm = `<form method="post" action="/wages-admin/paid-snapshot" style="display:inline;margin:0" onsubmit="return confirm('Lock every row of payroll ${weekStart} exactly as it stands now as WHAT WAS PAID? (Downloading the payroll Excel does this automatically.)')"><input type="hidden" name="week_start" value="${weekStart}"><input type="hidden" name="return_to" value="__RETURN__"><button type="submit" style="padding:5px 10px;border-radius:8px;border:0;background:#1d4ed8;color:#fff;font-weight:800;cursor:pointer;font-size:12px">🔒 Lock what was paid (${escapeHtmlText(weekStart)})</button></form>`
+    paidCheckPanel = `<section id="bw-paid-check" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:${flagged ? 'rgba(127,29,29,.18)' : 'rgba(22,163,74,.10)'};border:1px solid ${flagged ? 'rgba(252,165,165,.6)' : 'rgba(134,239,172,.45)'}">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div style="font-weight:800;color:${flagged ? '#fca5a5' : '#86efac'};font-size:14px">🔎 Triple-check: what we PAID vs what the rows say now${flagged ? ' — ' + flagged + ' to look at' : ''}</div>${lockForm}</div>
+      <div style="font-size:12.5px;opacity:.85;margin-top:2px"><strong>What this is:</strong> when the payroll Excel goes to the auditors every row is locked exactly as paid (times, hours, Rand). If anyone later claims more or less — or a row is changed, removed or added for a paid week — it shows here with the exact difference, so we know precisely what was paid and what is being claimed (owner 30 Sep 2026).</div>
+      ${blocks.length ? blocks.join('') : '<div style="font-size:12.5px;margin-top:4px;opacity:.8">Nothing locked yet for this week or last week. Download the payroll Excel (locks automatically) or press Lock.</div>'}
+    </section>`
+  } catch (err) {}
+
   let preSubmitPanel = ''
   try {
     const ws = parseProxyIsoDate(weekStart)
@@ -5292,6 +5332,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     ${followUpPanel}
     ${ownSchedulePanel}
     ${weeklyAmountPanel}
+    ${paidCheckPanel}
     ${petrusPanel}
     ${preSubmitPanel}
     <div style="display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 12px;font-size:13px">
@@ -5881,6 +5922,7 @@ app.get('/wages-admin/payroll.xlsx', async (c) => {
     const dayRuleKind = (dateIso: string, kind: string) => { const f = dayRuleMap[dateIso]; if (!f) return kind; if (f === 'event' && (kind === 'warehouse' || kind === 'warehouse_or_event')) return 'event'; if (f === 'warehouse' && (kind === 'event' || kind === 'warehouse_or_event')) return 'warehouse'; return kind }
     const out = await buildPayrollWorkbook({ db, weekStart, weekEnd, ownerPayKind, ownerPayForShift, timeToMinutes, dayRuleKind })
     if (c.req.query('check') === '1') return c.json({ weekStart, weekEnd, ...out.checks })
+    try { await takePaidSnapshot(db, weekStart, admin.name + ' (Excel download)') } catch (err) {}
     return new Response(out.bytes, { status: 200, headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'content-disposition': `attachment; filename="${out.filename}"`, 'cache-control': 'no-store' } })
   } catch (err) {
     return c.text('Could not build the payroll Excel: ' + describeProxyError(err), 500)
@@ -6097,6 +6139,37 @@ app.post('/wages-admin/petrus-extra', async (c) => {
 // Owner 28 Sep 2026: Petrus weekly guarantee — adds an owner line of R640 for each Mon–Sat day of the payroll week that has
 // nothing paid and no draft, so the week clears R3 840. Idempotent per day (event_name 'Petrus weekly guarantee').
 // Owner 30 Sep 2026: this week's amount for a fixed-weekly worker whose pay varies (Brian). One row per staff per week.
+async function takePaidSnapshot(db: D1Database, weekStart: string, by: string) {
+  const weekEnd = proxyEndOfPayrollWeek(weekStart)
+  await db.prepare(`CREATE TABLE IF NOT EXISTS wage_paid_snapshot (week_start TEXT NOT NULL, shift_id INTEGER NOT NULL, staff_id INTEGER, display_name TEXT, work_date TEXT, start_time TEXT, end_time TEXT, hours REAL, rate REAL, amount REAL, outlet_venue TEXT, work_description TEXT, snapshot_by TEXT, snapshot_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (week_start, shift_id))`).run()
+  await db.prepare(`INSERT OR REPLACE INTO wage_paid_snapshot (week_start, shift_id, staff_id, display_name, work_date, start_time, end_time, hours, rate, amount, outlet_venue, work_description, snapshot_by, snapshot_at)
+    SELECT ?, w.id, w.staff_id, s.display_name, w.work_date, w.start_time, w.end_time, w.hours_worked, w.hourly_rate_snapshot, COALESCE(w.gross_wage, w.total_amount, 0), w.outlet_venue, w.work_description, ?, CURRENT_TIMESTAMP
+    FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id WHERE w.work_date BETWEEN ? AND ?`).bind(weekStart, by, weekStart, weekEnd).run()
+  const n = await db.prepare(`SELECT COUNT(*) n, ROUND(SUM(amount),2) total FROM wage_paid_snapshot WHERE week_start = ?`).bind(weekStart).first<{ n: number, total: number }>()
+  return { rows: Number(n?.n || 0), total: Number(n?.total || 0) }
+}
+
+// Owner 30 Sep 2026: lock what was paid so next week's claims can be checked against it exactly.
+app.post('/wages-admin/paid-snapshot', async (c) => {
+  const db = c.env?.DB
+  const admin = await adminUserFromCookie(c.req.raw.headers.get('cookie') || '')
+  if (!db) return c.text('no database', 500)
+  if (!admin) return new Response(null, { status: 302, headers: { location: '/login?next=' + encodeURIComponent('/admin/wages') } })
+  const form = await c.req.formData()
+  const weekStart = String(form.get('week_start') || '')
+  const returnTo = String(form.get('return_to') || '/admin/wages')
+  const safeReturn = returnTo.startsWith('/admin/wages') ? returnTo : '/admin/wages'
+  const sep = safeReturn.includes('?') ? '&' : '?'
+  const back = (u: string) => new Response(null, { status: 303, headers: { location: u } })
+  if (!parseProxyIsoDate(weekStart)) return back(safeReturn + sep + 'error=' + encodeURIComponent('Bad week.') + '#bw-paid-check')
+  try {
+    const r = await takePaidSnapshot(db, weekStart, admin.name)
+    return back(safeReturn + sep + 'msg=' + encodeURIComponent('Locked ' + r.rows + ' rows (' + fmtRand(r.total) + ') as PAID for payroll ' + weekStart + ' by ' + admin.name + '.') + '#bw-paid-check')
+  } catch (err) {
+    return back(safeReturn + sep + 'error=' + encodeURIComponent('Could not lock: ' + describeProxyError(err)) + '#bw-paid-check')
+  }
+})
+
 app.post('/wages-admin/weekly-amount', async (c) => {
   const db = c.env?.DB
   const admin = await adminUserFromCookie(c.req.raw.headers.get('cookie') || '')
