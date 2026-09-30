@@ -5,11 +5,11 @@
 // on open. Used for the B&W Payroll Excel (2026-09-15).
 import { zipSync, strToU8 } from 'fflate'
 
-export type CellStyle = 'text' | 'bold' | 'header' | 'title' | 'money' | 'moneyBold' | 'edit' | 'editMoney' | 'wrap' | 'num' | 'numBold' | 'note' | 'sub' | 'subMoney' | 'flag' | 'flagLine' | 'editNum' | 'band0' | 'band0Num' | 'band0Money' | 'band1' | 'band1Num' | 'band1Money' | 'band2' | 'band2Num' | 'band2Money' | 'band3' | 'band3Num' | 'band3Money' | 'band4' | 'band4Num' | 'band4Money' | 'band5' | 'band5Num' | 'band5Money'
+export type CellStyle = 'text' | 'bold' | 'header' | 'title' | 'money' | 'moneyBold' | 'edit' | 'editMoney' | 'wrap' | 'num' | 'numBold' | 'note' | 'sub' | 'subMoney' | 'flag' | 'flagLine' | 'editNum' | 'band0' | 'band0Num' | 'band0Money' | 'band1' | 'band1Num' | 'band1Money' | 'band2' | 'band2Num' | 'band2Money' | 'band3' | 'band3Num' | 'band3Money' | 'band4' | 'band4Num' | 'band4Money' | 'band5' | 'band5Num' | 'band5Money' | 'cell' | 'noteCell' | 'boldCell'
 export type Cell = { v?: string | number | null, f?: string, s?: CellStyle } | string | number | null | undefined
 export type Sheet = { name: string, rows: Cell[][], widths?: number[], merges?: string[], freeze?: number, heights?: Record<number, number> }
 
-const STYLE_INDEX: Record<CellStyle, number> = { text: 0, bold: 1, header: 2, title: 3, money: 4, moneyBold: 5, edit: 6, editMoney: 7, wrap: 8, num: 9, numBold: 10, note: 11, sub: 12, subMoney: 13, flag: 14, flagLine: 15, editNum: 16, band0: 17, band0Num: 18, band0Money: 19, band1: 20, band1Num: 21, band1Money: 22, band2: 23, band2Num: 24, band2Money: 25, band3: 26, band3Num: 27, band3Money: 28, band4: 29, band4Num: 30, band4Money: 31, band5: 32, band5Num: 33, band5Money: 34 }
+const STYLE_INDEX: Record<CellStyle, number> = { text: 0, bold: 1, header: 2, title: 3, money: 4, moneyBold: 5, edit: 6, editMoney: 7, wrap: 8, num: 9, numBold: 10, note: 11, sub: 12, subMoney: 13, flag: 14, flagLine: 15, editNum: 16, band0: 17, band0Num: 18, band0Money: 19, band1: 20, band1Num: 21, band1Money: 22, band2: 23, band2Num: 24, band2Money: 25, band3: 26, band3Num: 27, band3Money: 28, band4: 29, band4Num: 30, band4Money: 31, band5: 32, band5Num: 33, band5Money: 34, cell: 35, noteCell: 36, boldCell: 37 }
 
 function esc(s: string) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') }
 export function colLetter(n: number) { let s = ''; let x = n; while (x > 0) { const m = (x - 1) % 26; s = String.fromCharCode(65 + m) + s; x = Math.floor((x - 1) / 26) } return s }
@@ -47,26 +47,26 @@ const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <numFmts count="1"><numFmt numFmtId="164" formatCode="&quot;R&quot;#,##0.00"/></numFmts>
 <fonts count="4"><font><sz val="10"/><name val="Calibri"/></font><font><b/><sz val="10"/><name val="Calibri"/></font><font><b/><sz val="13"/><name val="Calibri"/></font><font><i/><sz val="9"/><color rgb="FF555555"/><name val="Calibri"/></font></fonts>
 <fills count="12"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFD9D9D9"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFF2A8"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFEAF3FF"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFDE2E2"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFEAF3FF"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFEAF8EC"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFF6E5"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF6EAFB"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFEEF0"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFEDF7F9"/></patternFill></fill></fills>
-<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFBBBBBB"/></left><right style="thin"><color rgb="FFBBBBBB"/></right><top style="thin"><color rgb="FFBBBBBB"/></top><bottom style="thin"><color rgb="FFBBBBBB"/></bottom><diagonal/></border></borders>
+<borders count="3"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFBBBBBB"/></left><right style="thin"><color rgb="FFBBBBBB"/></right><top style="thin"><color rgb="FFBBBBBB"/></top><bottom style="thin"><color rgb="FFBBBBBB"/></bottom><diagonal/></border><border><left style="thin"><color rgb="FF000000"/></left><right style="thin"><color rgb="FF000000"/></right><top style="thin"><color rgb="FF000000"/></top><bottom style="thin"><color rgb="FF000000"/></bottom><diagonal/></border></borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="35">
+<cellXfs count="38">
 <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
 <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>
-<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="1" fillId="2" borderId="2" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
 <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
-<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
-<xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>
-<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1"/>
-<xf numFmtId="164" fontId="0" fillId="3" borderId="1" xfId="0" applyNumberFormat="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="164" fontId="0" fillId="0" borderId="2" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
+<xf numFmtId="164" fontId="1" fillId="0" borderId="2" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1"/>
+<xf numFmtId="0" fontId="0" fillId="3" borderId="2" xfId="0" applyFill="1" applyBorder="1"/>
+<xf numFmtId="164" fontId="0" fillId="3" borderId="2" xfId="0" applyNumberFormat="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
 <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf>
-<xf numFmtId="2" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
-<xf numFmtId="2" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>
+<xf numFmtId="2" fontId="0" fillId="0" borderId="2" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
+<xf numFmtId="2" fontId="1" fillId="0" borderId="2" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1"/>
 <xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf>
-<xf numFmtId="2" fontId="1" fillId="4" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1"/>
-<xf numFmtId="164" fontId="1" fillId="4" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1"/>
+<xf numFmtId="2" fontId="1" fillId="4" borderId="2" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="164" fontId="1" fillId="4" borderId="2" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
 <xf numFmtId="0" fontId="1" fillId="5" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf>
 <xf numFmtId="0" fontId="1" fillId="5" borderId="0" xfId="0" applyFont="1" applyFill="1"/>
-<xf numFmtId="2" fontId="1" fillId="3" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="2" fontId="1" fillId="3" borderId="2" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>
 <xf numFmtId="0" fontId="0" fillId="6" borderId="0" xfId="0" applyFill="1"/>
 <xf numFmtId="2" fontId="0" fillId="6" borderId="0" xfId="0" applyNumberFormat="1" applyFill="1"/>
 <xf numFmtId="164" fontId="0" fillId="6" borderId="0" xfId="0" applyNumberFormat="1" applyFill="1"/>
@@ -85,6 +85,9 @@ const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <xf numFmtId="0" fontId="0" fillId="11" borderId="0" xfId="0" applyFill="1"/>
 <xf numFmtId="2" fontId="0" fillId="11" borderId="0" xfId="0" applyNumberFormat="1" applyFill="1"/>
 <xf numFmtId="164" fontId="0" fillId="11" borderId="0" xfId="0" applyNumberFormat="1" applyFill="1"/>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="2" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="2" xfId="0" applyBorder="1" applyAlignment="1"><alignment wrapText="1" vertical="center" horizontal="left"/></xf>
+<xf numFmtId="0" fontId="1" fillId="0" borderId="2" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
 </cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`

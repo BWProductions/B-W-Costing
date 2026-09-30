@@ -271,7 +271,7 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
   days.forEach((d, i) => { const c = 2 + i * 2; hdr1.push({ v: `${i + 1}  ${DAY_SHORT[isoToDate(d)!.getUTCDay()]}`, s: 'header' }, { v: '', s: 'header' }); hdr2.push({ v: d, s: 'header' }, { v: '', s: 'header' }); hdr3.push({ v: 'HR', s: 'header' }, { v: 'Amount', s: 'header' }); merges2.push(`${colLetter(c)}1:${colLetter(c + 1)}1`, `${colLetter(c)}2:${colLetter(c + 1)}2`) })
   const MC = 16 // missed shifts HR column (P), amount Q
   hdr1.push({ v: '6  CATCH-UPS', s: 'header' }, { v: '', s: 'header' }); hdr2.push({ v: 'worked in previous payroll, entered late', s: 'header' }, { v: '', s: 'header' }); hdr3.push({ v: 'HR', s: 'header' }, { v: 'Amount', s: 'header' }); merges2.push(`P1:Q1`, `P2:Q2`)
-  const tail = ['Total Hours (Sat–Fri + Missed)', 'Wages (linked)', 'Fixed Deductions Due', 'Fixed Deducted (edit)', 'Fixed Outstanding After Payroll', 'Additional Loan Due', 'Additional Loan Deducted (edit)', 'Additional Loan Outstanding After Payroll', 'Total Deducted This Period', 'NET WAGE']
+  const tail = ['Total Hours (Sat–Fri + Missed)', 'Wages (linked)', 'Fixed Deductions Due', 'Fixed Deducted (edit)', 'Fixed Outstanding After Payroll', 'Additional Loan Due', 'Additional Loan Deducted (edit)', 'Additional Loan Outstanding After Payroll', 'Total Deducted This Period', 'NET WAGE', 'DEDUCTION NOTES — why we are deducting (for the auditor)']
   tail.forEach((h, i) => { const c = 18 + i; hdr1.push({ v: h, s: 'header' }); hdr2.push({ v: '', s: 'header' }); hdr3.push({ v: '', s: 'header' }); merges2.push(`${colLetter(c)}1:${colLetter(c)}3`) })
   t2.push(hdr1, hdr2, hdr3)
   const T2_FIRST = 4
@@ -290,6 +290,35 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
   const loanBal = (sid: number) => hasRecordedWeek(sid)
     ? loans.filter((l) => l.staff_id === sid).reduce((a, l) => a + Number(l.outstanding_balance || 0), 0) + repsThisWeek.filter((r) => r.staff_id === sid).reduce((a, r) => a + Number(r.amount_deducted || 0), 0)
     : loans.filter((l) => l.staff_id === sid && l.status === 'active').reduce((a, l) => a + Number(l.outstanding_balance || 0), 0)
+  // Owner 30 Sep 2026: "add a note section where you put the notes as to why we are deducting — we need to show the auditor why."
+  // One plain-English line per deduction, built from the fixed-deduction record and the loan ledger for THIS payroll week.
+  // Short auditor-friendly purpose for a loan (owner-entered wording often contains the worker's WhatsApp text).
+  const loanPurpose = (reason: string | null | undefined): string => {
+    const r = (reason || '').split('|')[0].toLowerCase()
+    if (/car|vehicle|fix/.test(r)) return 'car repair'
+    if (/fuel|oil|petrol/.test(r)) return 'fuel / oil'
+    if (/trip|kids|school/.test(r)) return "children's school trip"
+    if (/scan|hospital|medical|doctor/.test(r)) return 'medical'
+    if (/whatsapp/.test(r)) return 'cash advance requested by WhatsApp'
+    return 'cash advance'
+  }
+  const deductionNotes = (sid: number): string => {
+    const parts: string[] = []
+    for (const f of fixed.filter((x) => x.staff_id === sid)) {
+      parts.push(`FIXED ${fmtR(Number(f.amount || 0))}/week — ${f.deduction_type}${/car/i.test(f.deduction_type) ? ' (vehicle: held from wages weekly, paid over to the worker on the 25th of each month)' : ''}, every week since ${f.effective_from}${f.effective_to ? ' to ' + f.effective_to : ', ongoing until the owner ends it'}. Not a loan.`)
+    }
+    const myLoans = loans.filter((l) => l.staff_id === sid)
+    for (const l of myLoans) {
+      const rec = repsThisWeek.find((r) => r.loan_id === l.id)
+      if (rec) {
+        const after = Number(rec.balance_after || 0)
+        parts.push(`LOAN #${l.id} ${fmtR(Number(l.original_amount))} given ${l.loan_date} (${loanPurpose(l.reason)}): ${fmtR(Number(rec.amount_deducted || 0))} deducted this week${Number(rec.amount_deducted) < Number(rec.scheduled_amount) ? ' (only what was left)' : ''}; ${after > 0 ? fmtR(after) + ' still owing → next payroll' : 'now fully repaid — CLOSED, nothing further'}.`)
+      } else if (l.status === 'active' && Number(l.outstanding_balance || 0) > 0 && (l.deduction_start_date || l.loan_date) <= weekEnd) {
+        parts.push(`LOAN #${l.id} ${fmtR(Number(l.original_amount))}: instalment ${fmtR(Math.min(Number(l.deduction_amount), Number(l.outstanding_balance)))} due; ${fmtR(Number(l.outstanding_balance))} owing before this payroll.`)
+      }
+    }
+    return parts.map((x, i) => (parts.length > 1 ? (i + 1) + '. ' : '') + x).join('\n')
+  }
   // Include workers with deductions/loans but no shifts? Keep to workers with paid shifts (as the engine does) plus fixed-weekly staff.
   const trailWorkers = [...workers]
   for (const s of staffAll) if (s.payroll_rule === 'fixed_weekly' && !trailWorkers.find((w) => w[0] === s.id)) trailWorkers.push([s.id, s.display_name])
@@ -297,7 +326,7 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
   trailWorkers.forEach(([sid, name], i) => {
     const rn = T2_FIRST + i
     trailRowByStaff[sid] = rn
-    const row: Cell[] = [{ v: name, s: 'bold' }]
+    const row: Cell[] = [{ v: name, s: 'boldCell' }]
     days.forEach((d, di) => {
       const c = 2 + di * 2
       const hrsF = `SUMIFS(${rng('O')},${rng('B')},$A${rn},${rng('C')},${colLetter(c)}$2,${rng('E')},"")`
@@ -319,14 +348,18 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     row.push({ v: fd, s: 'money' }, { v: fd, s: 'editMoney' }, { f: `MAX(0,T${rn}-U${rn})`, s: 'money' })
     row.push({ v: ld, s: 'money' }, { v: ld, s: 'editMoney' }, { f: `MAX(0,${lb}-X${rn})`, s: 'money' })
     row.push({ f: `U${rn}+X${rn}`, s: 'money' }, { f: `MAX(0,S${rn}-Z${rn})`, s: 'subMoney' })
+    row.push({ v: deductionNotes(sid), s: 'noteCell' })
     t2.push(row)
   })
   const T2_LAST = T2_FIRST + trailWorkers.length - 1
-  const gt: Cell[] = [{ v: 'GRAND TOTAL', s: 'bold' }]
+  const gt: Cell[] = [{ v: 'GRAND TOTAL', s: 'boldCell' }]
   for (let c = 2; c <= 27; c++) gt.push({ f: `SUM(${colLetter(c)}${T2_FIRST}:${colLetter(c)}${T2_LAST})`, s: (c % 2 === 1 || c >= 19) ? 'moneyBold' : 'numBold' })
   gt[17] = { f: `SUM(R${T2_FIRST}:R${T2_LAST})`, s: 'numBold' } // Total Hours column R is hours
+  gt.push({ v: '', s: 'cell' })
   t2.push(gt)
-  const sheet2: Sheet = { name: S2, rows: t2, freeze: 3, merges: merges2, widths: [26, 6, 10, 6, 10, 6, 10, 6, 10, 6, 10, 6, 10, 6, 10, 7, 11, 11, 12, 11, 11, 11, 11, 11, 11, 11, 12] }
+  const h2: Record<number, number> = { 1: 22, 2: 22, 3: 34 }
+  trailWorkers.forEach(([sid], i) => { const n = deductionNotes(sid).split('\n').filter(Boolean).length; if (n) h2[T2_FIRST + i] = 16 + n * 27 })
+  const sheet2: Sheet = { name: S2, rows: t2, freeze: 3, merges: merges2, widths: [28, 6, 11, 6, 11, 6, 11, 6, 11, 6, 11, 6, 11, 6, 11, 7, 11, 13, 14, 14, 14, 14, 14, 14, 14, 14, 15, 95], heights: h2 }
   const T2 = sheetRef(S2)
 
   // ============================ TAB 3: Auditor Summary ========================
@@ -335,21 +368,23 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     [{ v: 'B&W PRODUCTIONS — AUDITOR SUMMARY', s: 'title' }],
     [{ v: `Payroll week ${weekStart} to ${weekEnd}. Linked to Auditor Trail Linked; hours and wages include block 6 (Missed Shifts). No bonus columns.`, s: 'note' }],
     [],
-    ['Name', 'Days Worked', 'Hours (incl. missed)', 'Missed Shift Hours', 'Wages', 'Fixed Deductions Due', 'Fixed Deducted', 'Fixed Outstanding', 'Additional Loan Due', 'Additional Loan Deducted', 'Additional Loan Outstanding', 'Total Deducted', 'NET WAGE'].map((h) => ({ v: h, s: 'header' as const })),
+    ['Name', 'Days Worked', 'Hours (incl. missed)', 'Missed Shift Hours', 'Wages', 'Fixed Deductions Due', 'Fixed Deducted', 'Fixed Outstanding', 'Additional Loan Due', 'Additional Loan Deducted', 'Additional Loan Outstanding', 'Total Deducted', 'NET WAGE', 'DEDUCTION NOTES — why we are deducting (for the auditor)'].map((h) => ({ v: h, s: 'header' as const })),
   ]
   const S3_FIRST = 5
   trailWorkers.forEach(([sid, name], i) => {
     const tr = trailRowByStaff[sid]
-    s3.push([name,
+    s3.push([{ v: name, s: 'boldCell' },
       { f: `--(${T2}!B${tr}>0)+--(${T2}!D${tr}>0)+--(${T2}!F${tr}>0)+--(${T2}!H${tr}>0)+--(${T2}!J${tr}>0)+--(${T2}!L${tr}>0)+--(${T2}!N${tr}>0)`, s: 'num' },
       { f: `${T2}!R${tr}`, s: 'num' }, { f: `${T2}!P${tr}`, s: 'num' }, { f: `${T2}!S${tr}`, s: 'money' },
       { f: `${T2}!T${tr}`, s: 'money' }, { f: `${T2}!U${tr}`, s: 'money' }, { f: `${T2}!V${tr}`, s: 'money' },
       { f: `${T2}!W${tr}`, s: 'money' }, { f: `${T2}!X${tr}`, s: 'money' }, { f: `${T2}!Y${tr}`, s: 'money' },
-      { f: `${T2}!Z${tr}`, s: 'money' }, { f: `${T2}!AA${tr}`, s: 'subMoney' }])
+      { f: `${T2}!Z${tr}`, s: 'money' }, { f: `${T2}!AA${tr}`, s: 'subMoney' }, { v: deductionNotes(sid), s: 'noteCell' }])
   })
   const S3_LAST = S3_FIRST + trailWorkers.length - 1
-  s3.push([{ v: 'GRAND TOTAL', s: 'bold' }, { f: `SUM(B${S3_FIRST}:B${S3_LAST})`, s: 'numBold' }, { f: `SUM(C${S3_FIRST}:C${S3_LAST})`, s: 'numBold' }, { f: `SUM(D${S3_FIRST}:D${S3_LAST})`, s: 'numBold' }, ...['E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M'].map((c) => ({ f: `SUM(${c}${S3_FIRST}:${c}${S3_LAST})`, s: 'moneyBold' as const }))])
-  const sheet3: Sheet = { name: S3, rows: s3, freeze: 4, widths: [26, 10, 12, 12, 13, 13, 12, 12, 13, 13, 13, 13, 14], ...headBand(13) }
+  s3.push([{ v: 'GRAND TOTAL', s: 'boldCell' }, { f: `SUM(B${S3_FIRST}:B${S3_LAST})`, s: 'numBold' }, { f: `SUM(C${S3_FIRST}:C${S3_LAST})`, s: 'numBold' }, { f: `SUM(D${S3_FIRST}:D${S3_LAST})`, s: 'numBold' }, ...['E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M'].map((c) => ({ f: `SUM(${c}${S3_FIRST}:${c}${S3_LAST})`, s: 'moneyBold' as const })), { v: '', s: 'cell' }])
+  const h3: Record<number, number> = { 1: 22, 2: 30, 4: 48 }
+  trailWorkers.forEach(([sid], i) => { const n = deductionNotes(sid).split('\n').filter(Boolean).length; if (n) h3[S3_FIRST + i] = 16 + n * 27 })
+  const sheet3: Sheet = { name: S3, rows: s3, freeze: 4, widths: [28, 10, 13, 13, 15, 15, 15, 15, 15, 15, 15, 15, 16, 95], ...headBand(14), heights: h3 }
 
   // ============================ TAB 4: Flagged / Reviewed =====================
   const S4 = 'Flagged - Reviewed'

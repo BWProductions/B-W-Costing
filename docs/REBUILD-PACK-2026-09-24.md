@@ -398,3 +398,8 @@ Rule (owner): each payroll, deduct the instalment or what is left if less, RECOR
 
 ### CORRECTION 30 Sep 2026 (owner) — Erick loans
 Owner did NOT approve R500 + R500. Approved: **R250 on #1 (August car repair) + R250 on #7 (22 Sep WhatsApp) in the 26 Sep payroll; another R250 + R250 in the 3–9 Oct payroll**, then both closed. Erick this week: fixed R1 000 vehicle + R500 loans = R1 500 → net **R3 693,63**. Next week: fixed R1 000 + R500 loans (final). Ledger and loan records corrected (instalment R250, R250 left each).
+
+## 30 Sep 2026 — Auditor Excel: DEDUCTION NOTES column + owner formatting (v2026-09-30-5)
+Owner: "add a note section where you put the notes as to why we are deducting — we need to show the auditor why", and match his manual formatting (wider columns, dark gridlines).
+- `payroll-excel.ts` `deductionNotes(sid)`: one numbered line per deduction — FIXED (type, weekly since, "Not a loan"; car = vehicle money held and paid over on the 25th) and each LOAN with a recorded repayment this week (#, original, date, short purpose via `loanPurpose()`, deducted this week, still owing → next payroll / fully repaid — CLOSED). Column added to **Auditor Trail Linked** (AB) and **Auditor Summary** (N); row height grows with the number of lines.
+- `xlsx-lite.ts`: borderId 2 = thin black on all data/header styles; new styles `cell`, `noteCell` (wrap, left, v-centre), `boldCell`; money/num cells vertically centred. Widths: Summary [28,10,13,13,15×8,16,95]; Trail deduction columns 13–15, notes 95.
