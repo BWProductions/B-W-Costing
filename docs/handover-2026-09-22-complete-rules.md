@@ -548,3 +548,7 @@ When the payroll Excel is downloaded, every row is locked as PAID (`wage_paid_sn
 - **Isaac:** loans deducted **as normal each payroll until R0**, then each closes off. After 26 Sep: #2 R100 left, #8 R250 left (both due 3–9 Oct, then zero); #3 and #6 closed. His fixed R260 eggs continues.
 - **Fixed vehicle deductions** (Erick R1 000, Joshua R1 000) are **not** loans — they continue every week until Bernie ends them.
 - Every payroll's instalment is written to `wage_additional_loan_repayments` so balances move and the Excel shows the recorded amount.
+
+
+### CORRECTION 30 Sep 2026 (owner) — Erick loans
+Owner did NOT approve R500 + R500. Approved: **R250 on #1 (August car repair) + R250 on #7 (22 Sep WhatsApp) in the 26 Sep payroll; another R250 + R250 in the 3–9 Oct payroll**, then both closed. Erick this week: fixed R1 000 vehicle + R500 loans = R1 500 → net **R3 693,63**. Next week: fixed R1 000 + R500 loans (final). Ledger and loan records corrected (instalment R250, R250 left each).

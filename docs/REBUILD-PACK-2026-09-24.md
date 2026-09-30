@@ -394,3 +394,7 @@ Owner: "you need to triple-check this next week so that I don't get pulled again
 
 ## 30 Sep 2026 — Loan deductions recorded (v2026-09-30-4)
 Rule (owner): each payroll, deduct the instalment or what is left if less, RECORD it in `wage_additional_loan_repayments`, and the loan goes to 0 from the next week. Erick #1 and #7 paid off (R500 + R500); Isaac #3 (R150) and #6 (R600) paid off, #2 R250 (R100 left), #8 R250 (R250 left). Excel uses recorded repayments for the week when present. Details `docs/restore-2026-09-30-loans/`.
+
+
+### CORRECTION 30 Sep 2026 (owner) — Erick loans
+Owner did NOT approve R500 + R500. Approved: **R250 on #1 (August car repair) + R250 on #7 (22 Sep WhatsApp) in the 26 Sep payroll; another R250 + R250 in the 3–9 Oct payroll**, then both closed. Erick this week: fixed R1 000 vehicle + R500 loans = R1 500 → net **R3 693,63**. Next week: fixed R1 000 + R500 loans (final). Ledger and loan records corrected (instalment R250, R250 left each).

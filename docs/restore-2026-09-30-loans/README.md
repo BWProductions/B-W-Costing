@@ -20,3 +20,7 @@ Note: 12 Sep and 19 Sep sheets showed the same loan balances as due because the 
 
 ## Owner closing rule (30 Sep, later)
 Erick: 26 Sep = LAST loan deductions (#1, #7 closed) — only fixed R1 000 vehicle continues. Isaac: deduct as normal until R0 then close (#2 R100, #8 R250 left). Fixed vehicle deductions for Erick and Joshua continue. Rule stamped on each loan's reason field.
+
+
+### CORRECTION 30 Sep 2026 (owner) — Erick loans
+Owner did NOT approve R500 + R500. Approved: **R250 on #1 (August car repair) + R250 on #7 (22 Sep WhatsApp) in the 26 Sep payroll; another R250 + R250 in the 3–9 Oct payroll**, then both closed. Erick this week: fixed R1 000 vehicle + R500 loans = R1 500 → net **R3 693,63**. Next week: fixed R1 000 + R500 loans (final). Ledger and loan records corrected (instalment R250, R250 left each).
