@@ -23,3 +23,11 @@ Reviews closed: rate-choice #10307, 10309, 10311, 10279, 10271, 10253, 10301, 10
 Week totals after fix (shifts): Givemore 2 875 · Taka 5 361,88 · Petrus 3 840 · Bhekizitha 5 383,63 · Isaac 4 598,13 · John 6 775,63 · Erence 5 326,63 · Erick 5 288,63 · Daniel 4 680,63 · Solomon 5 383,63 · Patrick 5 006,25 · Thandanani 5 383,63 · Joshua 5 288,63 · Lebo 2 062,50 (to Tue) = R67 254,80 + Brian R2 500 fixed.
 
 SQL used: see /tmp/fix.sql pattern — UPDATE wage_shifts SET hourly_rate_snapshot, normal_amount, total_amount, gross_wage, calculation_version=10, manager_update_reason, payroll_note (appended 'OWNER 30 Sep 2026 (Bernie Burness): …').
+
+## Owner replies 30 Sep (second pass)
+1. Tue 29 warehouse loading stays WAREHOUSE R690,63 for the whole team. Rule: wording "warehouse loading" = warehouse; anything saying set-up / strike / a venue name → venue, only after owner approval.
+2. Sonop Sat 26 = 06:00–14:00, fixed, cannot change. Team rule: look at everyone on the team and set the time to the highest the team chose. Erick #9924 → 06:00–14:00 = 8 h × R95 = R760 (window added for staff 9 on day rule 2026-09-26).
+3. Thu 1 Oct: everyone at FNB → Erick #9943 "wharehouse loading" approved venue R855 (note added).
+4. Middleburg activations (John Thu/Fri) = Music Bus. Fixed R750 covers 07:00–16:00; hours outside 07–16 at R120/h. Pre-submitted with 07:00–16:00 — owner cannot confirm until actual times known. Left at R750 pending times.
+5. Isaac Thu 1 "Sunbet setup" → event rate R855 approved (note added).
+Lebo: paid next week (ledger). Must submit Wed–Fri by Monday 5 Oct to be paid Tuesday 6 Oct.
