@@ -31,3 +31,6 @@ SQL used: see /tmp/fix.sql pattern — UPDATE wage_shifts SET hourly_rate_snapsh
 4. Middleburg activations (John Thu/Fri) = Music Bus. Fixed R750 covers 07:00–16:00; hours outside 07–16 at R120/h. Pre-submitted with 07:00–16:00 — owner cannot confirm until actual times known. Left at R750 pending times.
 5. Isaac Thu 1 "Sunbet setup" → event rate R855 approved (note added).
 Lebo: paid next week (ledger). Must submit Wed–Fri by Monday 5 Oct to be paid Tuesday 6 Oct.
+
+## Correction 30 Sep (owner): Erick Sat 26 = NOT Sonop team → 13:00
+Erick wrote 07:00–16:00 (entered Wed 30 Sep 05:19; draft 998; original_* fields). Owner: "Everybody finished at 13:00 except the team that was at Sonop" — Sonop team is Solomon, Bhekizitha, Lebo, Thandanani, Erence only. Erick #9924 → 07:00–13:00 = 6 h × R95 = **R570** (earlier set 06:00–14:00 R760 in error). Day-rule window for staff 9 → 06:00–13:00 "NOT Sonop team". Paid snapshot row 9924 updated to R570. All 17 Saturday rows verified against the rule: Sonop team ≤14:00, everyone else ≤13:00, Petrus R640, Music Bus own times — all OK.
