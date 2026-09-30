@@ -508,3 +508,8 @@ Escape hatch for debugging only: ?bw_show_check=1 still renders the engine page.
    "Approve public holiday rates — R…" (hours − meeting × R160) or "Approve fixed rate — R640,00" (choice `fixed_day`), plus other amount / R0.
 3. Planned finish time (Sat 26 13:00, Sun 27 11:30 etc.) applies to WAREHOUSE and VENUE staff only — never to Music Bus entries
    (work type / venue contains "music bus") and never to Petrus. `planEndApplies()` gates both the CLAIMED PAST pill and the on-row note.
+
+### Lebo venue rate + Sonop 14:00 (v2026-09-29-3, owner 29 Sep 2026)
+Lebo: R50/h is WAREHOUSE ONLY. Venue / collection / setup / event = R75/h (`STUDENT_EVENT_HOURLY`). Sunday R75/h anywhere. Holiday R100/h.
+Sat 26 Sep Sonop team (Solomon, Bhekizitha, Daniel, Lebo, Thandanani, Erence) worked to 14:00 — rows re-timed and re-priced; Patrick/Joshua
+were NOT at Sonop and stay 13:00. A per-person owner window overrides the general planned-end pill. Full detail: docs/restore-2026-09-29-sonop-lebo/.

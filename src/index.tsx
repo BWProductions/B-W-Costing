@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-29-1'
+const WAGES_UI_VERSION = 'v2026-09-29-3'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4108,6 +4108,9 @@ const GARDENER_HOURLY = 62.5
 // Student (Lebo, staff 16) — owner 24 Sep 2026: R50/h at any place, every clocked hour (NO meeting deduction); public holiday ×2 = R100/h (held).
 // Owner 28 Sep 2026: Lebo's Sunday is ×1.5 = R75/h (NOT the ×1.2 the rest of the team gets) — Lebo only.
 const STUDENT_STAFF_ID = 16, STUDENT_HOURLY = 50, STUDENT_SUNDAY_FACTOR = 1.5
+// Owner 29 Sep 2026: Lebo — R50/h ONLY in the warehouse (loading etc.). Out at a venue (setup, collection, delivery,
+// standby, event) = R75/h. Sunday = R75/h anywhere. Public holiday ×2 of warehouse = R100/h.
+const STUDENT_EVENT_HOURLY = 75
 // Petrus (staff 4), owner 2026-09-22 (amended later the same day): SET DAY RATE R640,00 for 06:00–16:00 every day;
 // Mon–Fri time before 06:00 / after 16:00 R55/h (held for office approval); Sat & Sun before 06:00 / after 16:00 R80/h (automatic).
 const PETRUS_DAY = 640, PETRUS_WINDOW_START = 6 * 60, PETRUS_WINDOW_END = 16 * 60, PETRUS_EXTRA_RATE = 55, PETRUS_WEEKEND_EXTRA_RATE = 80
@@ -4204,7 +4207,8 @@ function ownerPayForShift(dateIso: string, startTime: string, endTime: string, k
     // Owner 24 Sep 2026: Lebo R50/h any place, every clocked hour; Sunday ×1.5 (owner 28 Sep). NO 07:00–07:30 meeting deduction
     // ("because the wages are so little … his rate is far less than anyone else's").
     if (dow === 0) return { amount: r2(totalH * STUDENT_HOURLY * STUDENT_SUNDAY_FACTOR), hourlyRate: r2(STUDENT_HOURLY * STUDENT_SUNDAY_FACTOR), breakdown: `Student Sunday: ${h(totalH)} h × R75 (R50 × 1.5 — owner 28 Sep)` }
-    return { amount: r2(totalH * STUDENT_HOURLY), hourlyRate: STUDENT_HOURLY, breakdown: `Student: ${h(totalH)} h × R50 (no meeting deduction)` }
+    if (kind === 'student') return { amount: r2(totalH * STUDENT_EVENT_HOURLY), hourlyRate: STUDENT_EVENT_HOURLY, breakdown: `Student at a venue/collection/setup: ${h(totalH)} h × R75 (owner 29 Sep — R50 is warehouse only)` }
+    return { amount: r2(totalH * STUDENT_HOURLY), hourlyRate: STUDENT_HOURLY, breakdown: `Student warehouse: ${h(totalH)} h × R50 (no meeting deduction)` }
   }
   if (kind === 'gardener') {
     // Owner 24 Sep 2026: gardener House work is hourly R62,50; Sunday ×1.2 = R75/h like everyone else.
@@ -4374,6 +4378,8 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   const planEndApplies = (r: { staff_id?: number, work_type?: string, outlet_venue?: string }) => !/music\s*bus/i.test((r.work_type || '') + ' ' + (r.outlet_venue || '')) && Number(r.staff_id || 0) !== PETRUS_STAFF_ID
   const beyondPlanned = (r: { work_date: string, start_time: string, end_time: string, hours_worked?: number, staff_id?: number, work_type?: string, outlet_venue?: string }) => {
     if (isOwnerAmountLine(r) || !planEndApplies(r)) return null
+    // A per-person window the owner set for this day (e.g. Sonop team 06:00–14:00) overrides the general finish time.
+    if (r.staff_id && ownerWindowsFor(dayRules[r.work_date], r.staff_id).length) return null
     const p = plannedEnds[r.work_date]; if (!p) return null
     const e = timeToMinutes(r.end_time), pe = timeToMinutes(p.planned_end), st = timeToMinutes(r.start_time)
     if (e === null || pe === null || st === null) return null
@@ -4391,7 +4397,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     const sM = timeToMinutes(r.start_time), eM = timeToMinutes(r.end_time)
     const box = (bg: string, fg: string, text: string) => `<div style="margin-top:3px;padding:4px 7px;border-radius:6px;background:${bg};color:${fg};font-size:11.5px;line-height:1.35">${text}</div>`
     if (d?.force_kind === 'event' && /warehouse/i.test((r.work_type || '') + ' ' + (r.outlet_venue || ''))) {
-      if (r.staff_id === STUDENT_STAFF_ID) out.push(box('rgba(202,138,4,.22)', '#fde68a', `📌 <strong>OWNER NOTE ${escapeHtmlText(proxyLongDate(r.work_date))}:</strong> everyone at the venue rate today — <strong>except Lebo</strong>, who stays on his student rate (R50/h; Sunday ×1.5 = R75/h).`))
+      if (r.staff_id === STUDENT_STAFF_ID) out.push(box('rgba(202,138,4,.22)', '#fde68a', `📌 <strong>OWNER NOTE ${escapeHtmlText(proxyLongDate(r.work_date))}:</strong> everyone at the venue rate today — <strong>except Lebo</strong>, who stays on his student rate (warehouse R50/h, venue R75/h, Sunday R75/h).`))
       else out.push(box('rgba(202,138,4,.22)', '#fde68a', `📌 <strong>OWNER NOTE ${escapeHtmlText(proxyLongDate(r.work_date))}:</strong> everyone at the <strong>VENUE rate</strong> today — this Warehouse entry ${isDraft ? 'will be' : 'is'} priced as venue (Sunday R114/h).`))
     }
     if (d?.staff_off?.includes(r.staff_id)) out.push(box('rgba(127,29,29,.35)', '#fecaca', `⛔ <strong>OWNER NOTE:</strong> this worker was marked <strong>OFF</strong> on ${escapeHtmlText(proxyLongDate(r.work_date))} — not allowed to claim. ${isDraft ? 'If he final-submits it is held at R0 for your decision.' : 'Held at R0 — see the red review.'}`))
@@ -4517,7 +4523,8 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     if (dateIso) kind = applyDayRuleKind(dateIso, kind)
     if ((kind === 'warehouse_or_event' || kind === 'gardener' || kind === 'event' || kind === 'warehouse') && shiftId && rateChoiceByShift[shiftId]) kind = rateChoiceByShift[shiftId]
     if (kind === 'gardener') return { start, end, rate: workRates[staffId + '|' + wt] ?? GARDENER_HOURLY, kind: 'ownrate', label: wt }
-    if (kind === 'student' || kind === 'student_warehouse') return { start, end, rate: STUDENT_HOURLY, kind, label: wt + ' (student R50/h)' }
+    if (kind === 'student_warehouse') return { start, end, rate: STUDENT_HOURLY, kind, label: wt + ' (student warehouse R50/h)' }
+    if (kind === 'student') return { start, end, rate: STUDENT_EVENT_HOURLY, kind, label: wt + ' (student venue R75/h)' }
     if (kind === 'musicbus') return { start, end, rate: 120, kind: 'musicbus', label: wt, ...(shiftId && petrusExtraByShift[shiftId] ? { addAmount: petrusExtraByShift[shiftId].amount, addLabel: petrusExtraByShift[shiftId].label } : {}) }
     if (kind === 'petrus') return { start, end, rate: PETRUS_EXTRA_RATE, kind: 'petrus', label: wt, ...(shiftId && petrusExtraByShift[shiftId] ? { addAmount: petrusExtraByShift[shiftId].amount, addLabel: petrusExtraByShift[shiftId].label } : {}) }
     const add = shiftId && petrusExtraByShift[shiftId] ? { addAmount: petrusExtraByShift[shiftId].amount, addLabel: petrusExtraByShift[shiftId].label } : {}
