@@ -18,3 +18,12 @@ Warehouse (loading etc.) R50/h · venue / collection / setup / event R75/h (`STU
 `ownerPayKind` → 'student_warehouse' when work type or wording says warehouse, else 'student' (R75).
 Re-priced: 9862 Fri 25 collection 9 h × R75 = R675 (was R450); 9863 Sat as above; 9877 Mon 28 collection R675 (was R450). 9861 Thu R800, 9867 Sun R337,50, 9879 Tue warehouse R450 unchanged.
 Ledger due Tue 6 Oct: R800 + R675 + R600 + R337,50 + R675 + R450 = R3 537,50 (through Tue 29 Sep). Wed–Fri this week are event days → R75.
+
+### Update 29 Sep (v2026-09-29-4)
+- Daniel #9897 Sat 26: NOT on the Sonop team (only 07:00 starter; enters 07:00 on every shift) — reverted to 07:00–13:00 = R570 (owner option B).
+  Sonop 14:00 team is: Solomon, Bhekizitha, Lebo, Thandanani, Erence.
+- Lebo rate is read from WHAT HE WRITES (owner: "just read what he writes"): `studentKindFromWording()` —
+  event words (collect / setup / deliver / drop-off / breakdown / strike / standby / activation / event / venue / golf / stadium / hotel /
+  arena / festival / wedding / function / install / rig) → R75, and they WIN over the word "warehouse";
+  otherwise warehouse words (load / offload / prepar / pack / clean / wash / sort / stock / receiv / warehouse) or Warehouse work type → R50;
+  anything else → R75. No owner question needed.

@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-29-3'
+const WAGES_UI_VERSION = 'v2026-09-29-4'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4122,6 +4122,17 @@ const PETRUS_STAFF_ID = 4, PETRUS_WEEK_DAYS = 6, PETRUS_WEEK_GUARANTEE = PETRUS_
 // mentions "warehouse" — not clearly warehouse-only, so Bernie must choose Warehouse or
 // Event/Venue in Review before the weekday rate is decided (engine amount stands meanwhile).
 type OwnerPayKind = 'event' | 'warehouse' | 'warehouse_or_event' | 'musicbus' | 'petrus' | 'gardener' | 'student' | 'student_warehouse' | 'fixed_weekly'
+// Owner 29 Sep 2026 — Lebo: "Just read what he writes. Loading / preparing = warehouse (R50). Collection / setup = event (R75)."
+// EVENT words win over the word "warehouse" (e.g. "Sonop + warehouse — collection" is a collection day). Only when nothing
+// says event and the place or words say warehouse is it the R50 warehouse rate. Anything else out of the warehouse = R75.
+const STUDENT_EVENT_WORDS = /collect|setup|set[\s-]?up|deliver|drop[\s-]?off|break[\s-]?down|strike|standby|stand[\s-]?by|activation|event|venue|golf|stadium|hotel|arena|festival|wedding|function|install|rig/i
+const STUDENT_WAREHOUSE_WORDS = /load|offload|off[\s-]?load|prepar|pack|re-?pack|clean|wash|sort|stock|receiv|recieiv|w[ae]a?re?\s?house/i
+function studentKindFromWording(wt: string, wording: string): OwnerPayKind {
+  const all = (wt || '') + ' ' + (wording || '')
+  if (STUDENT_EVENT_WORDS.test(all)) return 'student'
+  if (/warehouse/i.test(wt || '') || STUDENT_WAREHOUSE_WORDS.test(all)) return 'student_warehouse'
+  return 'student'
+}
 function ownerPayKind(staffId: number, workType: string, wording: string, payrollRule: string): OwnerPayKind {
   if ((payrollRule || '') === 'fixed_weekly') return 'fixed_weekly'
   const wt = (workType || '').trim()
@@ -4129,7 +4140,7 @@ function ownerPayKind(staffId: number, workType: string, wording: string, payrol
   if (staffId === 4) return 'petrus'
   // Owner 24 Sep 2026: Lebo (staff 16) is a student — R50/h whatever the place, Sunday ×1.5 (owner 28 Sep), public holiday ×2,
   // Mon–Fri 07:00–07:30 meeting unpaid when he is in the warehouse (same as the guys).
-  if (staffId === STUDENT_STAFF_ID) return (/warehouse/i.test(wt) || /w[ae]a?re?\s?house/i.test(wording || '')) ? 'student_warehouse' : 'student'
+  if (staffId === STUDENT_STAFF_ID) return studentKindFromWording(wt, wording || '')
   // Gardeners: only their House / House/Garden block keeps the gardener rate; the Team
   // block (Warehouse Team / Team Assistance) is general staff for that day.
   if ((staffId === 1 || staffId === 2) && /house|garden/i.test(wt) && !/team/i.test(wt)) return 'gardener'

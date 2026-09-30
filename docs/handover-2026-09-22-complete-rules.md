@@ -513,3 +513,12 @@ Escape hatch for debugging only: ?bw_show_check=1 still renders the engine page.
 Lebo: R50/h is WAREHOUSE ONLY. Venue / collection / setup / event = R75/h (`STUDENT_EVENT_HOURLY`). Sunday R75/h anywhere. Holiday R100/h.
 Sat 26 Sep Sonop team (Solomon, Bhekizitha, Daniel, Lebo, Thandanani, Erence) worked to 14:00 — rows re-timed and re-priced; Patrick/Joshua
 were NOT at Sonop and stay 13:00. A per-person owner window overrides the general planned-end pill. Full detail: docs/restore-2026-09-29-sonop-lebo/.
+
+### Update 29 Sep (v2026-09-29-4)
+- Daniel #9897 Sat 26: NOT on the Sonop team (only 07:00 starter; enters 07:00 on every shift) — reverted to 07:00–13:00 = R570 (owner option B).
+  Sonop 14:00 team is: Solomon, Bhekizitha, Lebo, Thandanani, Erence.
+- Lebo rate is read from WHAT HE WRITES (owner: "just read what he writes"): `studentKindFromWording()` —
+  event words (collect / setup / deliver / drop-off / breakdown / strike / standby / activation / event / venue / golf / stadium / hotel /
+  arena / festival / wedding / function / install / rig) → R75, and they WIN over the word "warehouse";
+  otherwise warehouse words (load / offload / prepar / pack / clean / wash / sort / stock / receiv / warehouse) or Warehouse work type → R50;
+  anything else → R75. No owner question needed.
