@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-30-1'
+const WAGES_UI_VERSION = 'v2026-09-30-2'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4971,6 +4971,30 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     }
   } catch (err) {}
 
+  // Owner 30 Sep 2026 (Brian): "This rate fluctuates. You need to ask me every week what we are putting. You can't assume
+  // it's going to be the same amount." Fixed-weekly staff flagged varies_weekly get NO amount until the owner types this
+  // week's figure here. The panel asks every week; the Excel uses only the figure entered for that week.
+  let weeklyAmountPanel = ''
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS wage_fixed_weekly_amounts (staff_id INTEGER NOT NULL, week_start TEXT NOT NULL, amount REAL NOT NULL, set_by TEXT, note TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (staff_id, week_start))`).run()
+    try { await db.prepare(`ALTER TABLE wage_staff ADD COLUMN varies_weekly INTEGER DEFAULT 0`).run() } catch (err) {}
+    const vs = await db.prepare(`SELECT s.id, s.display_name, s.standard_weekly_amount, f.amount, f.set_by, f.note, f.created_at, (SELECT amount FROM wage_fixed_weekly_amounts p WHERE p.staff_id = s.id AND p.week_start < ? ORDER BY p.week_start DESC LIMIT 1) prev_amount FROM wage_staff s LEFT JOIN wage_fixed_weekly_amounts f ON f.staff_id = s.id AND f.week_start = ? WHERE s.active = 1 AND s.payroll_rule = 'fixed_weekly' AND COALESCE(s.varies_weekly, 0) = 1 ORDER BY s.display_name`).bind(weekStart, weekStart).all()
+    const vrows = (vs.results || []) as Array<{ id: number, display_name: string, standard_weekly_amount: number, amount: number | null, set_by: string | null, note: string | null, created_at: string | null, prev_amount: number | null }>
+    if (vrows.length) {
+      const li = vrows.map((r) => `<tr style="border-top:1px solid rgba(255,255,255,.08)">
+        <td style="padding:6px 8px;font-weight:800">${escapeHtmlText(r.display_name)}</td>
+        <td style="padding:6px 8px">${r.amount !== null ? `<strong style="color:#86efac;font-size:15px">${fmtRand(Number(r.amount))}</strong> <span style="font-size:11px;opacity:.75">set by ${escapeHtmlText(r.set_by || 'office')} ${escapeHtmlText(String(r.created_at || '').slice(0, 10))}${r.note ? ' — ' + escapeHtmlText(r.note) : ''}</span>` : `<strong style="color:#fecaca">NOT SET for this week</strong> <span style="font-size:11px;opacity:.75">— the Excel shows R0,00 for him until you enter it${r.prev_amount !== null ? ' (last week was ' + fmtRand(Number(r.prev_amount)) + ')' : ''}</span>`}</td>
+        <td style="padding:6px 8px;white-space:nowrap"><form method="post" action="/wages-admin/weekly-amount" style="display:flex;gap:6px;align-items:center;margin:0"><input type="hidden" name="staff_id" value="${r.id}"><input type="hidden" name="week_start" value="${weekStart}"><input type="hidden" name="return_to" value="__RETURN__">R <input type="number" name="amount" step="0.01" min="0" value="${r.amount !== null ? Number(r.amount) : ''}" placeholder="this week's amount" required style="width:120px;padding:5px 7px;border-radius:6px;border:1px solid rgba(255,255,255,.3);background:#111;color:#fff"> <input type="text" name="note" placeholder="reason (optional)" style="width:180px;padding:5px 7px;border-radius:6px;border:1px solid rgba(255,255,255,.2);background:#111;color:#fff"> <button type="submit" style="padding:6px 12px;border-radius:8px;border:0;background:${r.amount !== null ? '#374151' : '#16a34a'};color:#fff;font-weight:800;cursor:pointer">${r.amount !== null ? 'Change' : 'Set for this week'}</button></form></td>
+      </tr>`).join('')
+      const unset = vrows.filter((r) => r.amount === null).length
+      weeklyAmountPanel = `<section id="bw-weekly-amount" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:${unset ? 'rgba(127,29,29,.18)' : 'rgba(22,163,74,.12)'};border:1px solid ${unset ? 'rgba(252,165,165,.6)' : 'rgba(134,239,172,.5)'}">
+        <div style="font-weight:800;color:${unset ? '#fca5a5' : '#86efac'};font-size:14px">${unset ? '❓ Bernie — what is this week\'s amount?' : '✔ This week\'s fixed amounts are set'} (payroll ${escapeHtmlText(weekStart)} to ${escapeHtmlText(weekEnd)})</div>
+        <div style="font-size:12.5px;opacity:.85;margin-top:2px"><strong>What this is:</strong> these people are paid a fixed weekly amount that <strong>changes from week to week</strong>. The system never assumes last week's figure — it asks you every week (owner 30 Sep 2026). Until you type the amount, the Excel carries R0,00 for them.</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px"><tbody>${li}</tbody></table>
+      </section>`
+    }
+  } catch (err) {}
+
   let petrusPanel = ''
   try {
     const ws = parseProxyIsoDate(weekStart)
@@ -5267,6 +5291,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     })()}
     ${followUpPanel}
     ${ownSchedulePanel}
+    ${weeklyAmountPanel}
     ${petrusPanel}
     ${preSubmitPanel}
     <div style="display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 12px;font-size:13px">
@@ -6071,6 +6096,34 @@ app.post('/wages-admin/petrus-extra', async (c) => {
 // changes — amounts, reviews and the payroll Excel are untouched. Logged in wage_debug_capture.
 // Owner 28 Sep 2026: Petrus weekly guarantee — adds an owner line of R640 for each Mon–Sat day of the payroll week that has
 // nothing paid and no draft, so the week clears R3 840. Idempotent per day (event_name 'Petrus weekly guarantee').
+// Owner 30 Sep 2026: this week's amount for a fixed-weekly worker whose pay varies (Brian). One row per staff per week.
+app.post('/wages-admin/weekly-amount', async (c) => {
+  const db = c.env?.DB
+  const admin = await adminUserFromCookie(c.req.raw.headers.get('cookie') || '')
+  const back = (v: string) => new Response(null, { status: 302, headers: { location: v, 'cache-control': 'no-store' } })
+  if (!db) return c.text('no database', 500)
+  if (!admin) return back('/login?next=' + encodeURIComponent('/admin/wages'))
+  let form: FormData
+  try { form = await c.req.raw.formData() } catch (err) { return back('/admin/wages?error=' + encodeURIComponent('Could not read the form.')) }
+  const staffId = Number(normalizeProxyFieldValue(form.get('staff_id')))
+  const weekStart = normalizeProxyFieldValue(form.get('week_start'))
+  const amount = Number(normalizeProxyFieldValue(form.get('amount')))
+  const note = normalizeProxyFieldValue(form.get('note')) || ''
+  const returnTo = normalizeProxyFieldValue(form.get('return_to')) || '/admin/wages'
+  const safeReturn = /^\/admin\/wages(\?|$)/.test(returnTo) ? returnTo : '/admin/wages'
+  const sep = safeReturn.includes('?') ? '&' : '?'
+  if (!staffId || !parseProxyIsoDate(weekStart) || !(amount >= 0)) return back(safeReturn + sep + 'error=' + encodeURIComponent('Type the amount for this week.') + '#bw-weekly-amount')
+  try {
+    const st = await db.prepare(`SELECT display_name FROM wage_staff WHERE id = ? AND payroll_rule = 'fixed_weekly'`).bind(staffId).first<{ display_name: string }>()
+    if (!st) return back(safeReturn + sep + 'error=' + encodeURIComponent('Not a fixed-weekly worker.'))
+    await db.prepare(`INSERT INTO wage_fixed_weekly_amounts (staff_id, week_start, amount, set_by, note) VALUES (?, ?, ?, ?, ?) ON CONFLICT(staff_id, week_start) DO UPDATE SET amount = excluded.amount, set_by = excluded.set_by, note = excluded.note, created_at = CURRENT_TIMESTAMP`).bind(staffId, weekStart, Math.round(amount * 100) / 100, admin.name, note).run()
+    await captureWagesDebug(c.env, { request_path: '/wages-admin/weekly-amount', request_method: 'POST', original_payload_json: JSON.stringify({ staff_id: staffId, week_start: weekStart, amount, note, by: admin.name }), rewritten_payload_json: '{}', rewrite_applied: 1, response_status: 302, response_location: safeReturn, response_error_text: '' })
+    return back(safeReturn + sep + 'msg=' + encodeURIComponent(st.display_name + ': ' + fmtRand(amount) + ' set for payroll week ' + weekStart + ' by ' + admin.name + '.') + '#bw-weekly-amount')
+  } catch (err) {
+    return back(safeReturn + sep + 'error=' + encodeURIComponent('Could not save: ' + describeProxyError(err)))
+  }
+})
+
 app.post('/wages-admin/petrus-guarantee', async (c) => {
   const db = c.env?.DB
   const admin = await adminUserFromCookie(c.req.raw.headers.get('cookie') || '')

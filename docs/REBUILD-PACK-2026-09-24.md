@@ -357,3 +357,21 @@ that they will submit for Thursday and Friday, and then your job next week is to
 ### Brian Ndlovu fixed weekly R2 500 (owner 30 Sep 2026)
 wage_staff id 12: payroll_rule 'fixed_weekly', standard_weekly_amount 2500 (from payroll 26 Sep–2 Oct). Same mechanism as Sharleen (R3 000).
 Excel puts the fixed amount in his week total; no hourly shifts expected; extra shifts, if any, are entered by the office as additional lines.
+
+## 30 Sep 2026 — Brian Ndlovu: fixed weekly amount VARIES — ask the owner every week (v2026-09-30-2)
+
+Owner (Bernie, 30 Sep 2026): "This rate fluctuates. You need to ask me every week what we are putting. Please, you can't assume it's going to be the same amount."
+
+Rule
+- Brian (staff 12) is `payroll_rule='fixed_weekly'` with `wage_staff.varies_weekly = 1`.
+- A varies-weekly person has NO amount for a payroll week until the owner types it. The system never carries last week's figure forward and never uses `standard_weekly_amount` as a default for them.
+- Amount per week is stored in `wage_fixed_weekly_amounts(staff_id, week_start, amount, set_by, note, created_at)` (PK staff_id + week_start; week_start = payroll Saturday).
+- Week 2026-09-26: R2 500 set by Bernie Burness (owner confirmed 30 Sep).
+
+Where it shows
+- `/admin/wages` panel `#bw-weekly-amount`: red "❓ Bernie — what is this week's amount?" while any varies-weekly person is NOT SET; green "✔ This week's fixed amounts are set" once entered. Shows last week's figure for reference only. Form posts to `/wages-admin/weekly-amount` (staff_id, week_start, amount, note, return_to) — upsert.
+- Auditor Excel (`payroll-excel.ts`): week-total cell uses the entered amount for that week; if not entered and varies_weekly → R0,00 (deliberately, so it is noticed), otherwise standard_weekly_amount for ordinary fixed-weekly staff.
+
+Restore
+- `UPDATE wage_staff SET varies_weekly=1 WHERE id=12;`
+- `INSERT INTO wage_fixed_weekly_amounts (staff_id, week_start, amount, set_by, note) VALUES (12,'2026-09-26',2500,'Bernie Burness','Owner 30 Sep: this week R2 500 — varies weekly, ask every week');`

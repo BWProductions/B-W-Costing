@@ -536,3 +536,6 @@ that they will submit for Thursday and Friday, and then your job next week is to
 ### Brian Ndlovu fixed weekly R2 500 (owner 30 Sep 2026)
 wage_staff id 12: payroll_rule 'fixed_weekly', standard_weekly_amount 2500 (from payroll 26 Sep–2 Oct). Same mechanism as Sharleen (R3 000).
 Excel puts the fixed amount in his week total; no hourly shifts expected; extra shifts, if any, are entered by the office as additional lines.
+
+## Brian Ndlovu — weekly amount changes every week (owner rule, 30 Sep 2026)
+Brian is on a fixed weekly amount, but the amount is different each week. Never assume it. Every payroll week the office dashboard (`/admin/wages`, panel "❓ Bernie — what is this week's amount?") asks the owner for Brian's figure; until it is typed the auditor Excel shows R0,00 for Brian. Week 26 Sep–2 Oct 2026 = R2 500 (owner confirmed). Stored per week in `wage_fixed_weekly_amounts`; flag `wage_staff.varies_weekly=1`.

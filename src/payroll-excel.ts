@@ -79,6 +79,19 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
   // Deductions and loans.
   const staffAllRes = await db.prepare(`SELECT id, display_name, payroll_rule, standard_weekly_amount FROM wage_staff WHERE active = 1 ORDER BY display_name`).all()
   const staffAll = (staffAllRes.results || []) as Array<{ id: number, display_name: string, payroll_rule: string, standard_weekly_amount: number }>
+  // Owner 30 Sep 2026: some fixed-weekly amounts CHANGE every week (Brian). wage_fixed_weekly_amounts(staff_id, week_start, amount)
+  // holds the owner's figure for THIS week. For a staff member flagged varies_weekly = 1, only that figure is used — never the
+  // standing amount — and if the owner has not set it yet the cell is 0 with a note.
+  let weekFixed: Record<number, number> = {}
+  let variesWeekly: Record<number, boolean> = {}
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS wage_fixed_weekly_amounts (staff_id INTEGER NOT NULL, week_start TEXT NOT NULL, amount REAL NOT NULL, set_by TEXT, note TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (staff_id, week_start))`).run()
+    const wf = await db.prepare(`SELECT staff_id, amount FROM wage_fixed_weekly_amounts WHERE week_start = ?`).bind(weekStart).all()
+    for (const r of (wf.results || []) as any[]) weekFixed[Number(r.staff_id)] = Number(r.amount)
+    try { await db.prepare(`ALTER TABLE wage_staff ADD COLUMN varies_weekly INTEGER DEFAULT 0`).run() } catch (err) {}
+    const vw = await db.prepare(`SELECT id FROM wage_staff WHERE COALESCE(varies_weekly, 0) = 1`).all()
+    for (const r of (vw.results || []) as any[]) variesWeekly[Number(r.id)] = true
+  } catch (err) {}
   const fixedRes = await db.prepare(`SELECT d.id, d.staff_id, s.display_name, d.deduction_type, d.reason, d.amount, d.effective_from, d.effective_to, d.active FROM wage_recurring_deductions d JOIN wage_staff s ON s.id = d.staff_id
         WHERE d.active = 1 AND d.effective_from <= ? AND (d.effective_to IS NULL OR d.effective_to >= ?) ORDER BY s.display_name, d.id`).bind(weekEnd, weekStart).all()
   const fixed = (fixedRes.results || []) as Array<{ id: number, staff_id: number, display_name: string, deduction_type: string, reason: string, amount: number, effective_from: string, effective_to: string | null }>
@@ -289,7 +302,8 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     row.push({ f: mr ? `IF(${T6}!C${mr}=0,IF(P${rn}>0,ROUND(P${rn}*90,2),0),ROUND(${T6}!D${mr}*P${rn}/${T6}!C${mr},2))` : `IF(P${rn}>0,ROUND(P${rn}*90,2),0)`, s: 'subMoney' })
     const fixedWeekly = staffAll.find((s) => s.id === sid && s.payroll_rule === 'fixed_weekly')
     row.push({ f: `SUM(B${rn},D${rn},F${rn},H${rn},J${rn},L${rn},N${rn},P${rn})`, s: 'numBold' })
-    row.push(fixedWeekly ? { v: Number(fixedWeekly.standard_weekly_amount || 0), s: 'moneyBold' } : { f: `SUM(C${rn},E${rn},G${rn},I${rn},K${rn},M${rn},O${rn},Q${rn})`, s: 'moneyBold' })
+    const fixedAmt = fixedWeekly ? (weekFixed[sid] !== undefined ? weekFixed[sid] : (variesWeekly[sid] ? 0 : Number(fixedWeekly.standard_weekly_amount || 0))) : 0
+    row.push(fixedWeekly ? { v: fixedAmt, s: 'moneyBold' } : { f: `SUM(C${rn},E${rn},G${rn},I${rn},K${rn},M${rn},O${rn},Q${rn})`, s: 'moneyBold' })
     const fd = dueFixed(sid), ld = dueLoan(sid), lb = loanBal(sid)
     row.push({ v: fd, s: 'money' }, { v: fd, s: 'editMoney' }, { f: `MAX(0,T${rn}-U${rn})`, s: 'money' })
     row.push({ v: ld, s: 'money' }, { v: ld, s: 'editMoney' }, { f: `MAX(0,${lb}-X${rn})`, s: 'money' })
