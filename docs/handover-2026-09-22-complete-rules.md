@@ -500,3 +500,11 @@ The proxy now treats that GET like the confirmation POST: rewrites it to POST /f
 (time_correct / end_time_correct / information_complete), runs the normal final-submit handling (Saturday parking, real date,
 owner-rule re-pricing) and redirects to /wages/me?submitted=1. The check page is never shown. Errors go to /wages/me?error=….
 Escape hatch for debugging only: ?bw_show_check=1 still renders the engine page. Tested 29 Sep with a throwaway draft (removed).
+
+### Owner corrections 29 Sep 2026 (v2026-09-29-1)
+1. Holiday follow-up panel ("REALLY WORKED UNTIL") excludes owner-amount lines (0 h, start = end, e.g. Thina R650) and fixed-weekly
+   staff — those were paid properly and need no re-check.
+2. Petrus on a Mon–Fri public holiday: the owner MUST approve (was he actually there?). Review offers two buttons:
+   "Approve public holiday rates — R…" (hours − meeting × R160) or "Approve fixed rate — R640,00" (choice `fixed_day`), plus other amount / R0.
+3. Planned finish time (Sat 26 13:00, Sun 27 11:30 etc.) applies to WAREHOUSE and VENUE staff only — never to Music Bus entries
+   (work type / venue contains "music bus") and never to Petrus. `planEndApplies()` gates both the CLAIMED PAST pill and the on-row note.

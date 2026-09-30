@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-09-28-8'
+const WAGES_UI_VERSION = 'v2026-09-29-1'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4369,8 +4369,11 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   }
   // Owner-amount lines (e.g. Thina R650 Heritage Day allowance, 28 Sep): no hours, 00:00–00:00 — no time checks.
   const isOwnerAmountLine = (r: { start_time: string, end_time: string, hours_worked?: number }) => Number(r.hours_worked || 0) === 0 && r.start_time === r.end_time
-  const beyondPlanned = (r: { work_date: string, start_time: string, end_time: string, hours_worked?: number }) => {
-    if (isOwnerAmountLine(r)) return null
+  // Owner 28 Sep 2026: "The owner was talking about the warehouse staff specifically, and venue staff — not music busses."
+  // The day's finish time never applies to Music Bus entries (own route, own hours) or to Petrus (fixed day).
+  const planEndApplies = (r: { staff_id?: number, work_type?: string, outlet_venue?: string }) => !/music\s*bus/i.test((r.work_type || '') + ' ' + (r.outlet_venue || '')) && Number(r.staff_id || 0) !== PETRUS_STAFF_ID
+  const beyondPlanned = (r: { work_date: string, start_time: string, end_time: string, hours_worked?: number, staff_id?: number, work_type?: string, outlet_venue?: string }) => {
+    if (isOwnerAmountLine(r) || !planEndApplies(r)) return null
     const p = plannedEnds[r.work_date]; if (!p) return null
     const e = timeToMinutes(r.end_time), pe = timeToMinutes(p.planned_end), st = timeToMinutes(r.start_time)
     if (e === null || pe === null || st === null) return null
@@ -4403,7 +4406,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       else out.push(box('rgba(22,163,74,.2)', '#bbf7d0', `🕧 <strong>OWNER NOTE:</strong> you recorded him ${winTxt} on ${escapeHtmlText(proxyLongDate(r.work_date))}. He entered ${escapeHtmlText(r.start_time)}–${escapeHtmlText(r.end_time)} — inside your times ✔`))
     }
     // A per-person window (e.g. Taka garden 12:30–14:14) overrides the general finish time (e.g. warehouse 11:40).
-    if (pe && !st && !en && eM !== null && timeToMinutes(pe.planned_end) !== null) {
+    if (pe && !st && !en && eM !== null && timeToMinutes(pe.planned_end) !== null && planEndApplies(r)) {
       const over = eM > timeToMinutes(pe.planned_end)!
       out.push(box(over ? 'rgba(127,29,29,.35)' : 'rgba(22,163,74,.2)', over ? '#fecaca' : '#bbf7d0', `⏰ <strong>OWNER NOTE:</strong> work ended <strong>${escapeHtmlText(pe.planned_end)}</strong> on ${escapeHtmlText(proxyLongDate(r.work_date))}${pe.note ? ' (' + escapeHtmlText(pe.note) + ')' : ''}. He entered until ${escapeHtmlText(r.end_time)}${over ? ` — <strong>${((eM - timeToMinutes(pe.planned_end)!) / 60).toFixed(2)} h past your time</strong>. Ask what time he really finished.` : ' — within your time ✔'}`))
     }
@@ -4536,9 +4539,10 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       return `<form method="post" action="/wages-admin/petrus-extra" class="bw-review-decide" style="margin-top:6px;padding:8px;border-radius:8px;background:rgba(255,255,255,.05);font-size:12px">
       <input type="hidden" name="review_id" value="${v.id}">
       <input type="hidden" name="return_to" value="__RETURN__">
-      <div style="margin-bottom:6px"><strong>${snap.ownerStart ? `🕧 You recorded ${escapeHtmlText(String(snap.employee || 'this worker'))} as there ${escapeHtmlText(String(snap.ownerStartTime || ''))}–${escapeHtmlText(String(snap.ownerEndTime || ''))} on this day. He entered ${escapeHtmlText(String(snap.startTime || ''))}–${escapeHtmlText(String(snap.endTime || ''))}, so he is paid ${escapeHtmlText(String(snap.ownerStartTime || ''))}–${escapeHtmlText(String(snap.ownerEndTime || ''))} (${fmtRand(Number(snap.baseAmount || 0))}). If his times are right after all, the difference is ${fmtRand(rec)}. Leave it, or override if something changed.` : snap.staffOff ? `⛔ You marked ${escapeHtmlText(String(snap.employee || 'this worker'))} OFF on this day — he was not allowed to claim, but he has entered a shift. Nothing is paid until you decide. If he did work: ${escapeHtmlText(snap.recommendedText || '')} = ${fmtRand(rec)}.` : snap.publicHoliday ? `Public holiday — ${escapeHtmlText(snap.publicHoliday)}. Nothing is paid until you decide. Recommended: ${escapeHtmlText(snap.recommendedText || '')} = ${fmtRand(rec)}.` : `Petrus worked on a Sunday — nothing is paid until you decide. Recommended: ${Number(snap.baseAmount || 0) > 0 ? 'R640 set day rate' : 'no 06–16 time'}${hrs > 0 ? ' + ' + hrs.toFixed(2) + ' h outside 06–16 × R80' : ''} = ${fmtRand(rec)}.`}</strong></div>
+      <div style="margin-bottom:6px"><strong>${snap.ownerStart ? `🕧 You recorded ${escapeHtmlText(String(snap.employee || 'this worker'))} as there ${escapeHtmlText(String(snap.ownerStartTime || ''))}–${escapeHtmlText(String(snap.ownerEndTime || ''))} on this day. He entered ${escapeHtmlText(String(snap.startTime || ''))}–${escapeHtmlText(String(snap.endTime || ''))}, so he is paid ${escapeHtmlText(String(snap.ownerStartTime || ''))}–${escapeHtmlText(String(snap.ownerEndTime || ''))} (${fmtRand(Number(snap.baseAmount || 0))}). If his times are right after all, the difference is ${fmtRand(rec)}. Leave it, or override if something changed.` : snap.staffOff ? `⛔ You marked ${escapeHtmlText(String(snap.employee || 'this worker'))} OFF on this day — he was not allowed to claim, but he has entered a shift. Nothing is paid until you decide. If he did work: ${escapeHtmlText(snap.recommendedText || '')} = ${fmtRand(rec)}.` : snap.publicHoliday ? (Number(v.staff_id) === PETRUS_STAFF_ID ? `Public holiday — ${escapeHtmlText(snap.publicHoliday)}. Petrus: was he actually there? Nothing is paid until you decide. <strong>Approve public holiday rates</strong> = ${escapeHtmlText(snap.recommendedText || '')} = ${fmtRand(rec)}, or <strong>Approve fixed rate</strong> = his ordinary R640 day.` : `Public holiday — ${escapeHtmlText(snap.publicHoliday)}. Nothing is paid until you decide. Recommended: ${escapeHtmlText(snap.recommendedText || '')} = ${fmtRand(rec)}.`) : `Petrus worked on a Sunday — nothing is paid until you decide. Recommended: ${Number(snap.baseAmount || 0) > 0 ? 'R640 set day rate' : 'no 06–16 time'}${hrs > 0 ? ' + ' + hrs.toFixed(2) + ' h outside 06–16 × R80' : ''} = ${fmtRand(rec)}.`}</strong></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-        <button type="submit" name="choice" value="offered" style="padding:5px 10px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer">${snap.ownerStart ? 'OVERRIDE — he was there, add' : snap.staffOff ? 'He did work — approve' : snap.publicHoliday ? 'Approve public holiday' : 'Approve Sunday'} — ${fmtRand(rec)}</button>
+        <button type="submit" name="choice" value="offered" style="padding:5px 10px;border-radius:6px;border:0;background:#e2b93b;color:#111;font-weight:800;cursor:pointer">${snap.ownerStart ? 'OVERRIDE — he was there, add' : snap.staffOff ? 'He did work — approve' : snap.publicHoliday ? (Number(v.staff_id) === PETRUS_STAFF_ID ? 'Approve public holiday rates' : 'Approve public holiday') : 'Approve Sunday'} — ${fmtRand(rec)}</button>
+        ${snap.publicHoliday && Number(v.staff_id) === PETRUS_STAFF_ID ? `<button type="submit" name="choice" value="fixed_day" style="padding:5px 10px;border-radius:6px;border:1px solid #e2b93b;background:transparent;color:#e2b93b;font-weight:800;cursor:pointer">Approve fixed rate — ${fmtRand(PETRUS_DAY)}</button>` : ''}
         <span style="display:inline-flex;align-items:center;gap:4px">Other amount: R<input type="number" name="custom_amount" step="0.01" min="0" style="width:90px;padding:3px 5px;border-radius:5px;border:1px solid rgba(255,255,255,.3);background:#111;color:#fff"> <button type="submit" name="choice" value="custom_amount" style="padding:5px 10px;border-radius:6px;border:1px solid #e2b93b;background:transparent;color:#e2b93b;font-weight:700;cursor:pointer">Approve this amount</button></span>
         <button type="submit" name="choice" value="zero" style="padding:5px 10px;border-radius:6px;border:1px solid rgba(255,255,255,.35);background:transparent;color:#fff;font-weight:700;cursor:pointer">${snap.ownerStart ? 'Keep ' + escapeHtmlText(String(snap.ownerStartTime || '')) + '–' + escapeHtmlText(String(snap.ownerEndTime || '')) + ' — nothing more' : snap.staffOff ? 'He was OFF — decline, R0' : 'Decline — R0'}</button>
       </div>
@@ -4818,7 +4822,8 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     if (holDays.length) {
       const blocks: string[] = []
       for (const hd of holDays) {
-        const rowsRes = await db.prepare(`SELECT w.id, w.staff_id, s.display_name, s.payroll_rule, w.start_time, w.end_time, w.hours_worked, w.work_type, w.outlet_venue, w.area, w.work_description, COALESCE(w.gross_wage, w.total_amount, 0) amount, w.hourly_rate_snapshot rate, w.payroll_note FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id WHERE w.work_date = ? AND COALESCE(w.event_name,'') <> 'Public holiday correction' AND COALESCE(w.work_description,'') NOT LIKE 'CORRECTION — public holiday%' ORDER BY s.display_name, w.start_time`).bind(hd.work_date).all()
+        const rowsRes = await db.prepare(`SELECT w.id, w.staff_id, s.display_name, s.payroll_rule, w.start_time, w.end_time, w.hours_worked, w.work_type, w.outlet_venue, w.area, w.work_description, COALESCE(w.gross_wage, w.total_amount, 0) amount, w.hourly_rate_snapshot rate, w.payroll_note FROM wage_shifts w JOIN wage_staff s ON s.id = w.staff_id WHERE w.work_date = ? AND COALESCE(w.event_name,'') <> 'Public holiday correction' AND COALESCE(w.work_description,'') NOT LIKE 'CORRECTION — public holiday%'
+          AND NOT (COALESCE(w.hours_worked,0) = 0 AND w.start_time = w.end_time) AND COALESCE(s.payroll_rule,'hourly') <> 'fixed_weekly' ORDER BY s.display_name, w.start_time`).bind(hd.work_date).all()
         const hrows = (rowsRes.results || []) as any[]
         if (!hrows.length) continue
         const pending = hrows.filter((r) => !/HOLIDAY HOURS CONFIRMED/.test(r.payroll_note || ''))
@@ -5962,7 +5967,7 @@ app.post('/wages-admin/petrus-extra', async (c) => {
   const returnTo = normalizeProxyFieldValue(form.get('return_to')) || '/admin/wages'
   const safeReturn = /^\/admin\/wages(\?|$)/.test(returnTo) ? returnTo : '/admin/wages'
   const sep = safeReturn.includes('?') ? '&' : '?'
-  if (!reviewId || !['offered', 'custom', 'custom_amount', 'zero'].includes(choice)) return back(safeReturn + sep + 'error=' + encodeURIComponent('Invalid Petrus extra-time decision.'))
+  if (!reviewId || !['offered', 'custom', 'custom_amount', 'zero', 'fixed_day'].includes(choice)) return back(safeReturn + sep + 'error=' + encodeURIComponent('Invalid Petrus extra-time decision.'))
   if (choice === 'custom' && !(customRate > 0)) return back(safeReturn + sep + 'error=' + encodeURIComponent('Type the rate per hour before clicking "Approve at this rate".') + '#bw-review-' + reviewId)
   if (choice === 'custom_amount' && !(customAmount > 0)) return back(safeReturn + sep + 'error=' + encodeURIComponent('Type the amount before clicking "Approve this amount".') + '#bw-review-' + reviewId)
   try {
@@ -5975,14 +5980,14 @@ app.post('/wages-admin/petrus-extra', async (c) => {
     const sunday = !!snap.petrusSunday
     const rate = choice === 'zero' ? 0 : choice === 'custom' ? Math.round(customRate * 100) / 100 : Number(snap.offeredRate || PETRUS_EXTRA_RATE)
     const extra = sunday
-      ? (choice === 'zero' ? 0 : choice === 'custom_amount' ? Math.round(customAmount * 100) / 100 : Number(snap.recommendedAmount || 0))
+      ? (choice === 'zero' ? 0 : choice === 'fixed_day' ? PETRUS_DAY : choice === 'custom_amount' ? Math.round(customAmount * 100) / 100 : Number(snap.recommendedAmount || 0))
       : Math.round(hrs * rate * 100) / 100
     const row = await db.prepare(`SELECT id, staff_id, total_amount, gross_wage FROM wage_shifts WHERE id = ? AND staff_id = ?`).bind(rv.subject_shift_id, rv.staff_id).first<{ id: number, staff_id: number, total_amount: number, gross_wage: number }>()
     if (!row) return back(safeReturn + sep + 'error=' + encodeURIComponent('Paid shift #' + rv.subject_shift_id + ' for review #' + reviewId + ' no longer exists.'))
     const before = before0(row)
     const after = Math.round((before + extra) * 100) / 100
     const label = sunday
-      ? (choice === 'zero' ? (snap.ownerStart ? 'Owner times ' + snap.ownerStartTime + '–' + (snap.ownerEndTime || '') + ' stand — extra hours not paid' : snap.staffOff ? 'Marked OFF — declined, R0' : snap.publicHoliday ? 'Public holiday declined — R0' : 'Sunday declined — R0') : (snap.ownerStart ? 'Owner OVERRIDE — worker\'s times accepted, added ' : snap.staffOff ? 'Marked OFF but owner confirms he worked — approved ' : snap.publicHoliday ? 'Public holiday (' + snap.publicHoliday + ') approved — ' : 'Sunday approved — ') + fmtRand(extra) + (choice === 'custom_amount' ? ' (owner amount)' : ' (as recommended)'))
+      ? (choice === 'zero' ? (snap.ownerStart ? 'Owner times ' + snap.ownerStartTime + '–' + (snap.ownerEndTime || '') + ' stand — extra hours not paid' : snap.staffOff ? 'Marked OFF — declined, R0' : snap.publicHoliday ? 'Public holiday declined — R0' : 'Sunday declined — R0') : (snap.ownerStart ? 'Owner OVERRIDE — worker\'s times accepted, added ' : snap.staffOff ? 'Marked OFF but owner confirms he worked — approved ' : snap.publicHoliday ? (choice === 'fixed_day' ? 'Public holiday (' + snap.publicHoliday + ') — owner chose the FIXED day rate, not holiday rates — ' : 'Public holiday (' + snap.publicHoliday + ') approved at holiday rates — ') : 'Sunday approved — ') + fmtRand(extra) + (choice === 'custom_amount' ? ' (owner amount)' : choice === 'fixed_day' ? ' (fixed R640 day)' : ' (as recommended)'))
       : choice === 'zero' ? 'Not payable — R0' : hrs.toFixed(2) + ' h outside 06–16 × ' + fmtRand(rate) + '/h = ' + fmtRand(extra)
     const note = (snap.ownerStart ? 'Owner start time' : snap.staffOff ? 'Staff OFF day' : snap.publicHoliday ? 'Public holiday (' + snap.publicHoliday + ')' : 'Petrus ' + (sunday ? 'Sunday' : 'extra time')) + ' decided by ' + admin.name + ' (review #' + reviewId + '): ' + label + ' — shift ' + fmtRand(before) + ' → ' + fmtRand(after)
     snap.approvedRate = rate; snap.approvedExtraAmount = extra; snap.decidedBy = admin.name
