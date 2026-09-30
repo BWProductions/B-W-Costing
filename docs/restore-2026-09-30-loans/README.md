@@ -17,3 +17,6 @@ Next week (3–9 Oct) loans due: Isaac #2 R100 + #8 R250 = R350 only; Erick R0.
 Ledger rows written to `wage_additional_loan_repayments` (payroll_week_start 2026-09-26); `wage_additional_loans` balances/status updated (`next_due_date` is NOT NULL — paid loans set to 2026-10-02). Backup before: `loans_before.json`.
 Excel (`payroll-excel.ts`, v2026-09-30-4): when the week has recorded repayments, "Additional Loan Due/Deducted" = the recorded amounts and "Outstanding after" = balance after; otherwise falls back to due-from-balance. Loans tab "Due this week" likewise.
 Note: 12 Sep and 19 Sep sheets showed the same loan balances as due because the ledger was not written those weeks — owner instructed to proceed on the ledger as it stands.
+
+## Owner closing rule (30 Sep, later)
+Erick: 26 Sep = LAST loan deductions (#1, #7 closed) — only fixed R1 000 vehicle continues. Isaac: deduct as normal until R0 then close (#2 R100, #8 R250 left). Fixed vehicle deductions for Erick and Joshua continue. Rule stamped on each loan's reason field.

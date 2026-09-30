@@ -542,3 +542,9 @@ Brian is on a fixed weekly amount, but the amount is different each week. Never 
 
 ## Triple-check of paid hours (owner rule, 30 Sep 2026)
 When the payroll Excel is downloaded, every row is locked as PAID (`wage_paid_snapshot`). The `/admin/wages` panel "🔎 Triple-check: what we PAID vs what the rows say now" lists any row that later differs — exact paid times and Rand vs the current claim, with the difference — and any row added after the sheet. Claims more → pay difference only if owner approves; claims less → deduct next payroll. Sharleen: fixed weekly, amount asked every week (R3 500 for 26 Sep). Thina: not in week 26 Sep.
+
+## Loans — closing rule (owner, 30 Sep 2026)
+- **Erick:** the 26 Sep payroll carried his **last** loan deductions (#1 August car loan R500; #7 WhatsApp 22 Sep R500). Both closed. From 3 Oct **no loan deductions for Erick** — only his **fixed R1 000 vehicle deduction** continues.
+- **Isaac:** loans deducted **as normal each payroll until R0**, then each closes off. After 26 Sep: #2 R100 left, #8 R250 left (both due 3–9 Oct, then zero); #3 and #6 closed. His fixed R260 eggs continues.
+- **Fixed vehicle deductions** (Erick R1 000, Joshua R1 000) are **not** loans — they continue every week until Bernie ends them.
+- Every payroll's instalment is written to `wage_additional_loan_repayments` so balances move and the Excel shows the recorded amount.
