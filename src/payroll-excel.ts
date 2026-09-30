@@ -277,8 +277,19 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
   const T2_FIRST = 4
   const trailRowByStaff: Record<number, number> = {}
   const dueFixed = (sid: number) => fixed.filter((f) => f.staff_id === sid).reduce((a, f) => a + Number(f.amount || 0), 0)
-  const dueLoan = (sid: number) => loans.filter((l) => l.staff_id === sid && l.status === 'active' && (l.deduction_start_date || l.loan_date) <= weekEnd).reduce((a, l) => a + Math.min(Number(l.deduction_amount || 0), Number(l.outstanding_balance || 0)), 0)
-  const loanBal = (sid: number) => loans.filter((l) => l.staff_id === sid && l.status === 'active').reduce((a, l) => a + Number(l.outstanding_balance || 0), 0)
+  // Owner 30 Sep 2026: when this week's instalments have been RECORDED in the repayment ledger (wage_additional_loan_repayments
+  // for this payroll week), the sheet shows exactly what was recorded — the instalment, or what was left if less — and the
+  // balance AFTER this payroll. Loans then go to 0 from next week automatically. Only when nothing is recorded yet does it fall
+  // back to "due from the current balance".
+  const repsThisWeek = reps.filter((r) => r.payroll_week_start === weekStart)
+  const hasRecordedWeek = (sid: number) => repsThisWeek.some((r) => r.staff_id === sid)
+  const dueLoan = (sid: number) => hasRecordedWeek(sid)
+    ? repsThisWeek.filter((r) => r.staff_id === sid).reduce((a, r) => a + Number(r.amount_deducted || 0), 0)
+    : loans.filter((l) => l.staff_id === sid && l.status === 'active' && (l.deduction_start_date || l.loan_date) <= weekEnd).reduce((a, l) => a + Math.min(Number(l.deduction_amount || 0), Number(l.outstanding_balance || 0)), 0)
+  // Balance BEFORE this payroll (so "outstanding after" = balance − deducted works either way).
+  const loanBal = (sid: number) => hasRecordedWeek(sid)
+    ? loans.filter((l) => l.staff_id === sid).reduce((a, l) => a + Number(l.outstanding_balance || 0), 0) + repsThisWeek.filter((r) => r.staff_id === sid).reduce((a, r) => a + Number(r.amount_deducted || 0), 0)
+    : loans.filter((l) => l.staff_id === sid && l.status === 'active').reduce((a, l) => a + Number(l.outstanding_balance || 0), 0)
   // Include workers with deductions/loans but no shifts? Keep to workers with paid shifts (as the engine does) plus fixed-weekly staff.
   const trailWorkers = [...workers]
   for (const s of staffAll) if (s.payroll_rule === 'fixed_weekly' && !trailWorkers.find((w) => w[0] === s.id)) trailWorkers.push([s.id, s.display_name])
@@ -379,7 +390,8 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
   if (!fixed.length) s5.push(['', 'none'])
   s5.push([], [{ v: 'ADDITIONAL LOANS', s: 'bold' }], ['Loan #', 'Employee', 'Date given', 'Deductions from', 'Reason', 'Original amount', 'Instalment', 'Repaid to date', 'Outstanding balance', 'Due this week', 'Frequency', 'Status', 'Check'].map((h) => ({ v: h, s: 'header' as const })))
   loans.forEach((l) => {
-    const due = l.status === 'active' && (l.deduction_start_date || l.loan_date) <= weekEnd ? Math.min(Number(l.deduction_amount), Number(l.outstanding_balance)) : 0
+    const recThis = repsThisWeek.find((r) => r.loan_id === l.id)
+    const due = recThis ? Number(recThis.amount_deducted || 0) : (l.status === 'active' && (l.deduction_start_date || l.loan_date) <= weekEnd ? Math.min(Number(l.deduction_amount), Number(l.outstanding_balance)) : 0)
     const repaidLedger = reps.filter((r) => r.loan_id === l.id).reduce((a, r) => a + Number(r.amount_deducted || 0), 0)
     const check = l.status === 'paid' && repaidLedger < Number(l.original_amount) - 0.005 ? `Marked PAID but ledger shows only ${fmtR(repaidLedger)} repaid of ${fmtR(Number(l.original_amount))} — please check` : (Math.abs(repaidLedger - Number(l.total_repaid)) > 0.005 ? `Ledger ${fmtR(repaidLedger)} ≠ total repaid ${fmtR(Number(l.total_repaid))}` : '')
     s5.push(['#' + l.id, l.display_name, l.loan_date, l.deduction_start_date || l.loan_date, (l.reason || '').replace(/\s+/g, ' ').slice(0, 70), { v: Number(l.original_amount), s: 'money' }, { v: Number(l.deduction_amount), s: 'money' }, { v: Number(l.total_repaid), s: 'money' }, { v: Number(l.outstanding_balance), s: 'moneyBold' }, { v: due, s: 'money' }, l.deduction_frequency, l.status, { v: check, s: check ? 'flagLine' : 'text' }])

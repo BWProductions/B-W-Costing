@@ -391,3 +391,6 @@ Owner: "you need to triple-check this next week so that I don't get pulled again
 - Owner approved: Tue 29 warehouse loading = warehouse R690,63 whole team; Sonop Sat 26 06:00–14:00 fixed for the team (Erick #9924 → R760); Thu 1 Oct FNB → venue; Middleburg activations = Music Bus fixed R750 for 07:00–16:00, after 16:00 R120/h; Isaac Sunbet set-up event R855.
 - Rule: "warehouse loading" wording = warehouse; set-up / strike / venue name = venue only after owner approval. Team rule: set the time to the highest the team chose.
 - Lebo: submits Wed–Fri by Monday 5 Oct, paid Tuesday 6 Oct (ledger).
+
+## 30 Sep 2026 — Loan deductions recorded (v2026-09-30-4)
+Rule (owner): each payroll, deduct the instalment or what is left if less, RECORD it in `wage_additional_loan_repayments`, and the loan goes to 0 from the next week. Erick #1 and #7 paid off (R500 + R500); Isaac #3 (R150) and #6 (R600) paid off, #2 R250 (R100 left), #8 R250 (R250 left). Excel uses recorded repayments for the week when present. Details `docs/restore-2026-09-30-loans/`.
