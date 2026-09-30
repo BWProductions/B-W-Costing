@@ -353,3 +353,7 @@ that they will submit for Thursday and Friday, and then your job next week is to
   rules re-price). Rows with a manager correction show ✔ checked.
 - Next-week job: compare each pre-submitted Thu/Fri row with what actually happened; deduct via the edit form. The deduction lands as a
   correction on the row (already paid in the closed payroll → the difference must be recovered in the next payroll by the office).
+
+### Brian Ndlovu fixed weekly R2 500 (owner 30 Sep 2026)
+wage_staff id 12: payroll_rule 'fixed_weekly', standard_weekly_amount 2500 (from payroll 26 Sep–2 Oct). Same mechanism as Sharleen (R3 000).
+Excel puts the fixed amount in his week total; no hourly shifts expected; extra shifts, if any, are entered by the office as additional lines.
