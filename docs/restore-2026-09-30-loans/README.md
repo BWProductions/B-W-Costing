@@ -28,3 +28,7 @@ Owner did NOT approve R500 + R500. Approved: **R250 on #1 (August car repair) + 
 ## 1 Oct 2026 (owner) — Isaac this week limited to R1 000
 Owner: "I've got R1 000 only." Lines: Eggs R260 · #2 R350 (all left, CLOSED) · #3 R150 (all left, CLOSED) · #6 kids' trip R240 (R360 left, R250/week from 3 Oct) · #8 fuel R0 this week (R500 left, R250/week from 3 Oct). Total R1 000 → net R3 598,13. Ledger rows for 26 Sep updated (#8 result 'deferred'). Notes column shows "NOTHING taken this week by owner decision" for #8 (v2026-10-01-1).
 Owner also asked to see last week per line: ledger has no loan entries for 12 Sep or 19 Sep (only 5 Sep and 26 Sep recorded).
+
+## 1 Oct 2026 (owner) — auditor note shows ONLY what is deducted this week
+Isaac's note lists lines 1–4 (eggs 260, #2 350 closed, #3 150 closed, #6 240 → R360 carried). Line 5 (#8, nothing taken) is NOT written — it belongs to next week. Code: a loan with a 0/deferred repayment this week is omitted from `deductionNotes`.
+Next week (3–9 Oct) set by owner: #6 remaining **R360 in full**, #8 **R500 in full** → Isaac then has only the fixed eggs. (`deduction_amount` set to 360 / 500.) Erick next week: #1 R250 + #7 R250 (final) + fixed R1 000.

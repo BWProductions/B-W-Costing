@@ -311,12 +311,15 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     for (const l of myLoans) {
       const rec = repsThisWeek.find((r) => r.loan_id === l.id)
       if (rec && Number(rec.amount_deducted || 0) === 0) {
-        parts.push(`LOAN #${l.id} ${fmtR(Number(l.original_amount))} given ${l.loan_date} (${loanPurpose(l.reason)}): NOTHING taken this week by owner decision — ${fmtR(Number(rec.balance_after || l.outstanding_balance || 0))} still owing, ${fmtR(Number(l.deduction_amount || 0))}/week from the next payroll.`)
+        // Owner 1 Oct 2026: the auditor note lists ONLY what is actually deducted this week. A loan with nothing taken
+        // this week is not written here — it belongs to next week's sheet.
+        continue
       } else if (rec) {
         const after = Number(rec.balance_after || 0)
-        parts.push(`LOAN #${l.id} ${fmtR(Number(l.original_amount))} given ${l.loan_date} (${loanPurpose(l.reason)}): ${fmtR(Number(rec.amount_deducted || 0))} deducted this week${Number(rec.amount_deducted) < Number(rec.scheduled_amount) ? ' (only what was left)' : ''}; ${after > 0 ? fmtR(after) + ' still owing → ' + fmtR(Number(l.deduction_amount || 0)) + '/week from next payroll' : 'now fully repaid — CLOSED, nothing further'}.`)
-      } else if (l.status === 'active' && Number(l.outstanding_balance || 0) > 0 && (l.deduction_start_date || l.loan_date) <= weekEnd) {
-        parts.push(`LOAN #${l.id} ${fmtR(Number(l.original_amount))}: instalment ${fmtR(Math.min(Number(l.deduction_amount), Number(l.outstanding_balance)))} due; ${fmtR(Number(l.outstanding_balance))} owing before this payroll.`)
+        parts.push(`LOAN #${l.id} ${fmtR(Number(l.original_amount))} given ${l.loan_date} (${loanPurpose(l.reason)}): ${fmtR(Number(rec.amount_deducted || 0))} deducted this week${Number(rec.amount_deducted) < Number(rec.scheduled_amount) ? ' (only what was left)' : ''}; ${after > 0 ? fmtR(after) + ' still owing — carried to the next payroll' : 'now fully repaid — CLOSED, nothing further'}.`)
+      } else if (!hasRecordedWeek(sid) && l.status === 'active' && Number(l.outstanding_balance || 0) > 0 && (l.deduction_start_date || l.loan_date) <= weekEnd) {
+        // Nothing recorded yet for this week: the sheet is still showing the scheduled instalment, so explain it.
+        parts.push(`LOAN #${l.id} ${fmtR(Number(l.original_amount))} given ${l.loan_date} (${loanPurpose(l.reason)}): instalment ${fmtR(Math.min(Number(l.deduction_amount), Number(l.outstanding_balance)))} this week; ${fmtR(Number(l.outstanding_balance))} owing before this payroll.`)
       }
     }
     return parts.map((x, i) => (parts.length > 1 ? (i + 1) + '. ' : '') + x).join('\n')
