@@ -303,26 +303,29 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     return 'cash advance'
   }
   const deductionNotes = (sid: number): string => {
-    const parts: string[] = []
+    // Owner 1 Oct 2026 format: "1 Eggs: 260 · 2 Cash advance: 900, taking 350 · ... · = TOTAL". Amount first, plain words,
+    // only what is actually deducted this week, and the lines add up to the Total Deducted column.
+    const lines: string[] = []
+    let total = 0
+    const r0 = (n: number) => (Math.abs(n - Math.round(n)) < 0.005 ? String(Math.round(n)) : n.toFixed(2).replace('.', ','))
     for (const f of fixed.filter((x) => x.staff_id === sid)) {
-      parts.push(`FIXED ${fmtR(Number(f.amount || 0))}/week — ${f.deduction_type}${/car/i.test(f.deduction_type) ? ' (vehicle: held from wages weekly, paid over to the worker on the 25th of each month)' : ''}, every week since ${f.effective_from}${f.effective_to ? ' to ' + f.effective_to : ', ongoing until the owner ends it'}. Not a loan.`)
+      const amt = Number(f.amount || 0); if (amt <= 0) continue
+      total += amt
+      lines.push(`${f.deduction_type}${/car/i.test(f.deduction_type) ? ' (vehicle, fixed weekly)' : ' (fixed weekly)'}: taking ${r0(amt)}`)
     }
-    const myLoans = loans.filter((l) => l.staff_id === sid)
-    for (const l of myLoans) {
+    for (const l of loans.filter((x) => x.staff_id === sid)) {
       const rec = repsThisWeek.find((r) => r.loan_id === l.id)
-      if (rec && Number(rec.amount_deducted || 0) === 0) {
-        // Owner 1 Oct 2026: the auditor note lists ONLY what is actually deducted this week. A loan with nothing taken
-        // this week is not written here — it belongs to next week's sheet.
-        continue
-      } else if (rec) {
-        const after = Number(rec.balance_after || 0)
-        parts.push(`LOAN #${l.id} ${fmtR(Number(l.original_amount))} given ${l.loan_date} (${loanPurpose(l.reason)}): ${fmtR(Number(rec.amount_deducted || 0))} deducted this week${Number(rec.amount_deducted) < Number(rec.scheduled_amount) ? ' (only what was left)' : ''}; ${after > 0 ? fmtR(after) + ' still owing — carried to the next payroll' : 'now fully repaid — CLOSED, nothing further'}.`)
-      } else if (!hasRecordedWeek(sid) && l.status === 'active' && Number(l.outstanding_balance || 0) > 0 && (l.deduction_start_date || l.loan_date) <= weekEnd) {
-        // Nothing recorded yet for this week: the sheet is still showing the scheduled instalment, so explain it.
-        parts.push(`LOAN #${l.id} ${fmtR(Number(l.original_amount))} given ${l.loan_date} (${loanPurpose(l.reason)}): instalment ${fmtR(Math.min(Number(l.deduction_amount), Number(l.outstanding_balance)))} this week; ${fmtR(Number(l.outstanding_balance))} owing before this payroll.`)
-      }
+      let amt = 0
+      if (rec) amt = Number(rec.amount_deducted || 0)
+      else if (!hasRecordedWeek(sid) && l.status === 'active' && Number(l.outstanding_balance || 0) > 0 && (l.deduction_start_date || l.loan_date) <= weekEnd) amt = Math.min(Number(l.deduction_amount), Number(l.outstanding_balance))
+      if (amt <= 0) continue // nothing taken this week → not written (owner 1 Oct 2026)
+      total += amt
+      const after = rec ? Number(rec.balance_after || 0) : Number(l.outstanding_balance || 0) - amt
+      const purpose = loanPurpose(l.reason); const cap = purpose.charAt(0).toUpperCase() + purpose.slice(1)
+      lines.push(`${cap} (loan ${l.loan_date}): ${r0(Number(l.original_amount))}, taking ${r0(amt)}${after > 0.005 ? ' — ' + r0(after) + ' still owing' : ' — paid off, closed'}`)
     }
-    return parts.map((x, i) => (parts.length > 1 ? (i + 1) + '. ' : '') + x).join('\n')
+    if (!lines.length) return ''
+    return lines.map((x, i) => `${i + 1}  ${x}`).join('\n') + `\n= TOTAL DEDUCTED ${r0(total)}`
   }
   // Include workers with deductions/loans but no shifts? Keep to workers with paid shifts (as the engine does) plus fixed-weekly staff.
   const trailWorkers = [...workers]
