@@ -303,29 +303,23 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     return 'cash advance'
   }
   const deductionNotes = (sid: number): string => {
-    // Owner 1 Oct 2026 format: "1 Eggs: 260 · 2 Cash advance: 900, taking 350 · ... · = TOTAL". Amount first, plain words,
-    // only what is actually deducted this week, and the lines add up to the Total Deducted column.
+    // Owner 1 Oct 2026 — exactly his table: Line | what | Owing before | Taken. Only what is deducted this week.
     const lines: string[] = []
-    let total = 0
-    const r0 = (n: number) => (Math.abs(n - Math.round(n)) < 0.005 ? String(Math.round(n)) : n.toFixed(2).replace('.', ','))
+    const r0 = (n: number) => 'R' + (Math.abs(n - Math.round(n)) < 0.005 ? String(Math.round(n)) : n.toFixed(2).replace('.', ','))
     for (const f of fixed.filter((x) => x.staff_id === sid)) {
       const amt = Number(f.amount || 0); if (amt <= 0) continue
-      total += amt
-      lines.push(`${f.deduction_type}${/car/i.test(f.deduction_type) ? ' (vehicle, fixed weekly)' : ' (fixed weekly)'}: taking ${r0(amt)}`)
+      lines.push(`${f.deduction_type} (fixed)  |  Owing before: —  |  Taken: ${r0(amt)}`)
     }
     for (const l of loans.filter((x) => x.staff_id === sid)) {
       const rec = repsThisWeek.find((r) => r.loan_id === l.id)
       let amt = 0
       if (rec) amt = Number(rec.amount_deducted || 0)
       else if (!hasRecordedWeek(sid) && l.status === 'active' && Number(l.outstanding_balance || 0) > 0 && (l.deduction_start_date || l.loan_date) <= weekEnd) amt = Math.min(Number(l.deduction_amount), Number(l.outstanding_balance))
-      if (amt <= 0) continue // nothing taken this week → not written (owner 1 Oct 2026)
-      total += amt
-      const after = rec ? Number(rec.balance_after || 0) : Number(l.outstanding_balance || 0) - amt
-      const purpose = loanPurpose(l.reason); const cap = purpose.charAt(0).toUpperCase() + purpose.slice(1)
-      lines.push(`${cap} (loan ${l.loan_date}): ${r0(Number(l.original_amount))}, taking ${r0(amt)}${after > 0.005 ? ' — ' + r0(after) + ' still owing' : ' — paid off, closed'}`)
+      if (amt <= 0) continue
+      const before = rec ? Number(rec.balance_before || 0) : Number(l.outstanding_balance || 0)
+      lines.push(`#${l.id} ${loanPurpose(l.reason)} ${r0(Number(l.original_amount))}  |  Owing before: ${r0(before)}  |  Taken: ${r0(amt)}`)
     }
-    if (!lines.length) return ''
-    return lines.map((x, i) => `${i + 1}  ${x}`).join('\n') + `\n= TOTAL DEDUCTED ${r0(total)}`
+    return lines.map((x, i) => `${i + 1}  ${x}`).join('\n')
   }
   // Include workers with deductions/loans but no shifts? Keep to workers with paid shifts (as the engine does) plus fixed-weekly staff.
   const trailWorkers = [...workers]
