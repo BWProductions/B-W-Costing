@@ -24,3 +24,7 @@ Erick: 26 Sep = LAST loan deductions (#1, #7 closed) — only fixed R1 000 vehic
 
 ### CORRECTION 30 Sep 2026 (owner) — Erick loans
 Owner did NOT approve R500 + R500. Approved: **R250 on #1 (August car repair) + R250 on #7 (22 Sep WhatsApp) in the 26 Sep payroll; another R250 + R250 in the 3–9 Oct payroll**, then both closed. Erick this week: fixed R1 000 vehicle + R500 loans = R1 500 → net **R3 693,63**. Next week: fixed R1 000 + R500 loans (final). Ledger and loan records corrected (instalment R250, R250 left each).
+
+## 1 Oct 2026 (owner) — Isaac this week limited to R1 000
+Owner: "I've got R1 000 only." Lines: Eggs R260 · #2 R350 (all left, CLOSED) · #3 R150 (all left, CLOSED) · #6 kids' trip R240 (R360 left, R250/week from 3 Oct) · #8 fuel R0 this week (R500 left, R250/week from 3 Oct). Total R1 000 → net R3 598,13. Ledger rows for 26 Sep updated (#8 result 'deferred'). Notes column shows "NOTHING taken this week by owner decision" for #8 (v2026-10-01-1).
+Owner also asked to see last week per line: ledger has no loan entries for 12 Sep or 19 Sep (only 5 Sep and 26 Sep recorded).

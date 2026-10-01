@@ -310,9 +310,11 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     const myLoans = loans.filter((l) => l.staff_id === sid)
     for (const l of myLoans) {
       const rec = repsThisWeek.find((r) => r.loan_id === l.id)
-      if (rec) {
+      if (rec && Number(rec.amount_deducted || 0) === 0) {
+        parts.push(`LOAN #${l.id} ${fmtR(Number(l.original_amount))} given ${l.loan_date} (${loanPurpose(l.reason)}): NOTHING taken this week by owner decision — ${fmtR(Number(rec.balance_after || l.outstanding_balance || 0))} still owing, ${fmtR(Number(l.deduction_amount || 0))}/week from the next payroll.`)
+      } else if (rec) {
         const after = Number(rec.balance_after || 0)
-        parts.push(`LOAN #${l.id} ${fmtR(Number(l.original_amount))} given ${l.loan_date} (${loanPurpose(l.reason)}): ${fmtR(Number(rec.amount_deducted || 0))} deducted this week${Number(rec.amount_deducted) < Number(rec.scheduled_amount) ? ' (only what was left)' : ''}; ${after > 0 ? fmtR(after) + ' still owing → next payroll' : 'now fully repaid — CLOSED, nothing further'}.`)
+        parts.push(`LOAN #${l.id} ${fmtR(Number(l.original_amount))} given ${l.loan_date} (${loanPurpose(l.reason)}): ${fmtR(Number(rec.amount_deducted || 0))} deducted this week${Number(rec.amount_deducted) < Number(rec.scheduled_amount) ? ' (only what was left)' : ''}; ${after > 0 ? fmtR(after) + ' still owing → ' + fmtR(Number(l.deduction_amount || 0)) + '/week from next payroll' : 'now fully repaid — CLOSED, nothing further'}.`)
       } else if (l.status === 'active' && Number(l.outstanding_balance || 0) > 0 && (l.deduction_start_date || l.loan_date) <= weekEnd) {
         parts.push(`LOAN #${l.id} ${fmtR(Number(l.original_amount))}: instalment ${fmtR(Math.min(Number(l.deduction_amount), Number(l.outstanding_balance)))} due; ${fmtR(Number(l.outstanding_balance))} owing before this payroll.`)
       }
