@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-10-01-4'
+const WAGES_UI_VERSION = 'v2026-10-01-5'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4916,7 +4916,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         </tr>`
       }).join('') : `<tr><td colspan="6" style="padding:6px 8px;opacity:.75">Nothing unpaid — everything from ${escapeHtmlText(proxyLongDate(o.from_date))} has been marked paid.</td></tr>`
       const payable = unpaid.filter((r) => !openHold(r))
-      const payBtn = payable.length ? `<form method="post" id="bw-own-pay-form" action="/wages-admin/own-schedule-paid" style="margin:0" onsubmit="var n=this.querySelectorAll('input[name=shift_id]:checked').length; if(!n){alert('Tick the square next to each shift that has been paid first.');return false;} return confirm('Mark the '+n+' ticked ${firstName} shift(s) as PAID? They will leave this list.')"><input type="hidden" name="return_to" value="__RETURN__"><button type="submit" style="padding:7px 14px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-weight:800;cursor:pointer">✔ Mark the TICKED shifts as PAID</button></form>` : ''
+      const payBtn = payable.length ? `<form method="post" id="bw-own-pay-form" action="/wages-admin/own-schedule-paid" style="margin:0" onsubmit="var n=document.querySelectorAll('input[name=shift_id][form=bw-own-pay-form]:checked').length; if(!n){alert('Tick the square next to each shift that has been paid first.');return false;} return confirm('Mark the '+n+' ticked ${firstName} shift(s) as PAID? They will leave this list.')"><input type="hidden" name="return_to" value="__RETURN__"><button type="submit" style="padding:7px 14px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-weight:800;cursor:pointer">✔ Mark the TICKED shifts as PAID</button></form>` : ''
       blocks.push(`<div style="margin-top:6px">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div style="font-weight:800">${escapeHtmlText(o.display_name)} — unpaid since ${escapeHtmlText(proxyLongDate(o.from_date))}${o.note ? ` <span style="opacity:.75;font-weight:500">(${escapeHtmlText(o.note)})</span>` : ''}</div><div style="font-size:12px;opacity:.75">${unpaid.length} NOT paid · ${paidCount} already marked paid</div></div>
         ${o.next_pay_date ? `<div style="margin-top:4px;padding:6px 10px;border-radius:8px;background:rgba(22,163,74,.18);border:1px solid rgba(134,239,172,.5);font-size:12.5px"><strong>💰 ONE PAYMENT DUE ${escapeHtmlText(proxyLongDate(o.next_pay_date).toUpperCase())}</strong> — everything he works until then accumulates here. On that day pay the TOTAL below, <strong>tick every square</strong>, then press <strong>Mark the TICKED shifts as PAID</strong>. Every clocked hour is paid — <strong>no 07:00–07:30 meeting deduction</strong> for him (owner 24 Sep: his rate is far lower than anyone else's).</div>` : ''}
