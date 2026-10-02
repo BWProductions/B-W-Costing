@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-10-02-2'
+const WAGES_UI_VERSION = 'v2026-10-02-4'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4442,7 +4442,13 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       const prevWeekStart = (() => { const d = parseProxyIsoDate(weekStart); return d ? formatProxyIsoDate(new Date(d.getTime() - 7 * 86400000)) : weekStart })()
       const days = Object.values(plannedEnds).filter((p) => p.work_date >= prevWeekStart && p.work_date <= weekEnd).sort((a, b) => a.work_date.localeCompare(b.work_date))
       const ruleDays = Object.values(dayRules).filter((d) => d.work_date >= prevWeekStart && d.work_date <= weekEnd).sort((a, b) => a.work_date.localeCompare(b.work_date))
-      if (!days.length && !ruleDays.length) return ''
+      let extrasEmpty = ''
+      try {
+        const ex = await db.prepare(`SELECT e.id, s.display_name, e.work_date, e.amount, e.description, e.added_by FROM wage_owner_extras e JOIN wage_staff s ON s.id = e.staff_id WHERE e.payroll_week_start = ? ORDER BY s.display_name, e.work_date`).bind(weekStart).all()
+        const er = (ex.results || []) as any[]
+        if (er.length) extrasEmpty = `<section id="bw-owner-extras" style="margin:6px 0 12px;padding:9px 14px;border-radius:12px;background:rgba(202,138,4,.15);border:1px solid rgba(253,224,71,.55)"><div style="font-weight:800;color:#fde68a;font-size:14px">💰 Owner extras to pay this payroll (${escapeHtmlText(weekStart)} → ${escapeHtmlText(weekEnd)}) — ${er.length} · ${fmtRand(er.reduce((a: number, r: any) => a + Number(r.amount || 0), 0))}</div><div style="font-size:12.5px;opacity:.85;margin-top:2px"><strong>Only you see this.</strong> Added into the worker's Wages on the auditor Excel for this week.</div><ul style="margin:4px 0 0 16px;padding:0;font-size:12.5px">${er.map((r: any) => `<li><strong>${escapeHtmlText(r.display_name)}</strong> — ${escapeHtmlText(proxyLongDate(r.work_date))} — ${escapeHtmlText(r.description || '')} — <strong style="color:#fde68a">${fmtRand(Number(r.amount))}</strong></li>`).join('')}</ul></section>`
+      } catch (err) {}
+      if (!days.length && !ruleDays.length) return extrasEmpty
       const tag = (iso: string) => iso < weekStart ? ' <span style="font-size:11px;padding:1px 6px;border-radius:999px;background:rgba(255,255,255,.12);opacity:.85">last week — still being checked</span>' : ''
       const li = days.map((p) => `<li style="margin:3px 0"><strong>${escapeHtmlText(proxyLongDate(p.work_date))} — work ended ${escapeHtmlText(p.planned_end)}</strong>${tag(p.work_date)}${p.note ? ` <span style="opacity:.8">(${escapeHtmlText(p.note)})</span>` : ''}<br><span style="font-size:12px;opacity:.75">no entries in this week yet</span></li>`).join('')
       const ruleLi = ruleDays.map((d) => {
@@ -4452,7 +4458,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         if (d.staff_off.length) parts.push(`<strong>OFF — not allowed to claim:</strong> ${d.staff_off.map((id) => escapeHtmlText(offNameById[id] || ('staff ' + id))).join(', ')}`)
         return `<li style="margin:3px 0"><strong>${escapeHtmlText(proxyLongDate(d.work_date))}</strong>${tag(d.work_date)} — ${parts.join(' · ')}${d.note ? ` <span style="opacity:.8">(${escapeHtmlText(d.note)})</span>` : ''}</li>`
       }).join('')
-      return `<section id="bw-planned-end-note" style="margin:6px 0 12px;padding:9px 14px;border-radius:12px;background:rgba(202,138,4,.15);border:1px solid rgba(253,224,71,.55)">
+      return extrasEmpty + `<section id="bw-planned-end-note" style="margin:6px 0 12px;padding:9px 14px;border-radius:12px;background:rgba(202,138,4,.15);border:1px solid rgba(253,224,71,.55)">
         <div style="font-weight:800;color:#fde68a;font-size:13.5px">📌 Owner's notes for this week</div>
         <ul style="margin:4px 0 0 16px;padding:0;font-size:12.5px">${ruleLi}${li}</ul>
         <div style="font-size:11.5px;opacity:.7;margin-top:4px">No wages entered for this payroll week yet. Any entry that runs past the set time will be flagged red <strong>⏰ CLAIMED PAST</strong> on the row.</div>
@@ -4967,9 +4973,9 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   let paidCheckPanel = ''
   try {
     await db.prepare(`CREATE TABLE IF NOT EXISTS wage_paid_snapshot (week_start TEXT NOT NULL, shift_id INTEGER NOT NULL, staff_id INTEGER, display_name TEXT, work_date TEXT, start_time TEXT, end_time TEXT, hours REAL, rate REAL, amount REAL, outlet_venue TEXT, work_description TEXT, snapshot_by TEXT, snapshot_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (week_start, shift_id))`).run()
-    const wsD = parseProxyIsoDate(weekStart)
-    const prevWeek = wsD ? formatProxyIsoDate(new Date(wsD.getTime() - 7 * 86400000)) : ''
-    const weeks = [weekStart, prevWeek].filter(Boolean)
+    // Owner 2 Oct 2026: the triple-check shows the payroll week being viewed ONLY — once the new week starts it is gone
+    // (the previous week is all paid). The lock stays in the table; view last week with ?from= to see it again.
+    const weeks = [weekStart]
     const blocks: string[] = []
     let flagged = 0
     for (const wk of weeks) {
@@ -5037,6 +5043,26 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   // Owner 30 Sep 2026 (Brian): "This rate fluctuates. You need to ask me every week what we are putting. You can't assume
   // it's going to be the same amount." Fixed-weekly staff flagged varies_weekly get NO amount until the owner types this
   // week's figure here. The panel asks every week; the Excel uses only the figure entered for that week.
+  // Owner 2 Oct 2026 (Givemore): "add a flag ... extras with the warehouse team: putting cement, Jocelyn Shane for dog
+  // ... pay R500, added into the pay for the next payroll, but only for me to see. He can't see it." Owner-only extras:
+  // never shown on /wages; listed here and added into the Wages column of the auditor Excel for that payroll week.
+  let extrasPanel = ''
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS wage_owner_extras (id INTEGER PRIMARY KEY AUTOINCREMENT, staff_id INTEGER NOT NULL, work_date TEXT NOT NULL, payroll_week_start TEXT NOT NULL, amount REAL NOT NULL, description TEXT, added_by TEXT, paid_at DATETIME, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`).run()
+    const ex = await db.prepare(`SELECT e.id, e.staff_id, s.display_name, e.work_date, e.payroll_week_start, e.amount, e.description, e.added_by FROM wage_owner_extras e JOIN wage_staff s ON s.id = e.staff_id WHERE e.payroll_week_start = ? ORDER BY s.display_name, e.work_date`).bind(weekStart).all()
+    const erows = (ex.results || []) as Array<{ id: number, staff_id: number, display_name: string, work_date: string, payroll_week_start: string, amount: number, description: string | null, added_by: string | null }>
+    const staffOpts = await db.prepare(`SELECT id, display_name FROM wage_staff WHERE active = 1 ORDER BY display_name`).all()
+    const opts = ((staffOpts.results || []) as any[]).map((r) => `<option value="${r.id}">${escapeHtmlText(r.display_name)}</option>`).join('')
+    const total = erows.reduce((a, r) => a + Number(r.amount || 0), 0)
+    const li = erows.map((r) => `<tr style="border-top:1px solid rgba(255,255,255,.08)"><td style="padding:4px 8px;font-weight:700">${escapeHtmlText(r.display_name)}</td><td style="padding:4px 8px;white-space:nowrap">${escapeHtmlText(proxyLongDate(r.work_date))}</td><td style="padding:4px 8px">${escapeHtmlText(r.description || '')}</td><td style="padding:4px 8px;text-align:right;font-weight:800;color:#fde68a">${fmtRand(Number(r.amount))}</td><td style="padding:4px 8px;font-size:11px;opacity:.7">${escapeHtmlText(r.added_by || '')}</td><td style="padding:4px 8px"><form method="post" action="/wages-admin/owner-extra" style="margin:0" onsubmit="return confirm('Remove this ${fmtRand(Number(r.amount))} extra for ${escapeHtmlText(r.display_name.split(' ')[0])}?')"><input type="hidden" name="action" value="remove"><input type="hidden" name="extra_id" value="${r.id}"><input type="hidden" name="return_to" value="__RETURN__"><button type="submit" style="padding:2px 8px;border-radius:6px;border:1px solid rgba(252,165,165,.5);background:transparent;color:#fca5a5;font-size:11px;cursor:pointer">✕ remove</button></form></td></tr>`).join('')
+    extrasPanel = `<section id="bw-owner-extras" style="margin:6px 0 14px;padding:10px 14px;border-radius:12px;background:${erows.length ? 'rgba(202,138,4,.15)' : 'rgba(255,255,255,.04)'};border:1px solid ${erows.length ? 'rgba(253,224,71,.55)' : 'rgba(255,255,255,.12)'}">
+      <div style="font-weight:800;color:#fde68a;font-size:14px">💰 Owner extras to pay this payroll (${escapeHtmlText(weekStart)} → ${escapeHtmlText(weekEnd)})${erows.length ? ' — ' + erows.length + ' · ' + fmtRand(total) : ' — none'}</div>
+      <div style="font-size:12.5px;opacity:.85;margin-top:2px"><strong>Only you see this.</strong> Extra work you want paid on top of the shifts (not entered by the worker, not visible on his /wages page). Each line is added into that person's <strong>Wages</strong> on the auditor Excel for this payroll week with a note "EXTRA PAY".</div>
+      ${erows.length ? `<table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px"><thead><tr style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;opacity:.7"><th style="padding:2px 8px;text-align:left">Worker</th><th style="padding:2px 8px;text-align:left">Date worked</th><th style="padding:2px 8px;text-align:left">What</th><th style="padding:2px 8px;text-align:right">Amount</th><th style="padding:2px 8px;text-align:left">Added by</th><th></th></tr></thead><tbody>${li}</tbody></table>` : ''}
+      <form method="post" action="/wages-admin/owner-extra" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px" onsubmit="return confirm('Add this extra to the ${escapeHtmlText(weekStart)} payroll? Only you will see it.')"><input type="hidden" name="action" value="add"><input type="hidden" name="payroll_week_start" value="${escapeHtmlText(weekStart)}"><input type="hidden" name="return_to" value="__RETURN__"><select name="staff_id" required style="padding:5px 7px;border-radius:6px;border:1px solid rgba(255,255,255,.3);background:#111;color:#fff"><option value="">— worker —</option>${opts}</select><input type="date" name="work_date" value="${escapeHtmlText(formatProxyIsoDate(new Date()))}" required style="padding:5px 7px;border-radius:6px;border:1px solid rgba(255,255,255,.3);background:#111;color:#fff">R <input type="number" name="amount" step="0.01" min="1" placeholder="amount" required style="width:100px;padding:5px 7px;border-radius:6px;border:1px solid rgba(255,255,255,.3);background:#111;color:#fff"><input type="text" name="description" placeholder="what was done" required style="flex:1;min-width:220px;padding:5px 7px;border-radius:6px;border:1px solid rgba(255,255,255,.2);background:#111;color:#fff"><button type="submit" style="padding:6px 12px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-weight:800;cursor:pointer">Add extra</button></form>
+    </section>`
+  } catch (err) {}
+
   let weeklyAmountPanel = ''
   try {
     await db.prepare(`CREATE TABLE IF NOT EXISTS wage_fixed_weekly_amounts (staff_id INTEGER NOT NULL, week_start TEXT NOT NULL, amount REAL NOT NULL, set_by TEXT, note TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (staff_id, week_start))`).run()
@@ -5360,6 +5386,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     ${followUpPanel}
     ${ownSchedulePanel}
     ${weeklyAmountPanel}
+    ${extrasPanel}
     ${paidCheckPanel}
     ${petrusPanel}
     ${preSubmitPanel}
@@ -6195,6 +6222,42 @@ app.post('/wages-admin/paid-snapshot', async (c) => {
     return back(safeReturn + sep + 'msg=' + encodeURIComponent('Locked ' + r.rows + ' rows (' + fmtRand(r.total) + ') as PAID for payroll ' + weekStart + ' by ' + admin.name + '.') + '#bw-paid-check')
   } catch (err) {
     return back(safeReturn + sep + 'error=' + encodeURIComponent('Could not lock: ' + describeProxyError(err)) + '#bw-paid-check')
+  }
+})
+
+// Owner 2 Oct 2026: owner-only extras (add / remove).
+app.post('/wages-admin/owner-extra', async (c) => {
+  const db = c.env?.DB
+  const admin = await adminUserFromCookie(c.req.raw.headers.get('cookie') || '')
+  if (!db) return c.text('no database', 500)
+  if (!admin) return new Response(null, { status: 302, headers: { location: '/login?next=' + encodeURIComponent('/admin/wages') } })
+  const form = await c.req.formData()
+  const action = String(form.get('action') || 'add')
+  const returnTo = String(form.get('return_to') || '/admin/wages')
+  const safeReturn = returnTo.startsWith('/admin/wages') ? returnTo : '/admin/wages'
+  const sep = safeReturn.includes('?') ? '&' : '?'
+  const back = (u: string) => new Response(null, { status: 303, headers: { location: u } })
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS wage_owner_extras (id INTEGER PRIMARY KEY AUTOINCREMENT, staff_id INTEGER NOT NULL, work_date TEXT NOT NULL, payroll_week_start TEXT NOT NULL, amount REAL NOT NULL, description TEXT, added_by TEXT, paid_at DATETIME, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`).run()
+    if (action === 'remove') {
+      const id = Number(form.get('extra_id') || 0)
+      const e = await db.prepare(`SELECT e.id, e.amount, s.display_name FROM wage_owner_extras e JOIN wage_staff s ON s.id = e.staff_id WHERE e.id = ?`).bind(id).first<{ id: number, amount: number, display_name: string }>()
+      if (!e) return back(safeReturn + sep + 'error=' + encodeURIComponent('Extra not found.') + '#bw-owner-extras')
+      await db.prepare(`DELETE FROM wage_owner_extras WHERE id = ?`).bind(id).run()
+      return back(safeReturn + sep + 'msg=' + encodeURIComponent(e.display_name + ': ' + fmtRand(Number(e.amount)) + ' extra removed by ' + admin.name + '.') + '#bw-owner-extras')
+    }
+    const staffId = Number(form.get('staff_id') || 0)
+    const workDate = String(form.get('work_date') || '')
+    const weekStart = String(form.get('payroll_week_start') || '')
+    const amount = Number(String(form.get('amount') || '').replace(',', '.'))
+    const description = String(form.get('description') || '').trim().slice(0, 300)
+    const st = await db.prepare(`SELECT display_name FROM wage_staff WHERE id = ?`).bind(staffId).first<{ display_name: string }>()
+    if (!st || !(amount > 0) || !parseProxyIsoDate(workDate) || !parseProxyIsoDate(weekStart) || !description) return back(safeReturn + sep + 'error=' + encodeURIComponent('Pick the worker, date, amount and what was done.') + '#bw-owner-extras')
+    await db.prepare(`INSERT INTO wage_owner_extras (staff_id, work_date, payroll_week_start, amount, description, added_by) VALUES (?, ?, ?, ?, ?, ?)`).bind(staffId, workDate, weekStart, amount, description, admin.name).run()
+    await captureWagesDebug(c.env, { request_path: '/wages-admin/owner-extra', request_method: 'POST', original_payload_json: JSON.stringify({ staff_id: staffId, work_date: workDate, payroll_week_start: weekStart, amount, description, by: admin.name }), rewritten_payload_json: '{}', rewrite_applied: 1, response_status: 303, response_location: safeReturn, response_error_text: '' })
+    return back(safeReturn + sep + 'msg=' + encodeURIComponent(st.display_name + ': extra ' + fmtRand(amount) + ' (' + description.slice(0, 60) + ') added to payroll ' + weekStart + ' by ' + admin.name + '. Only you see it; it goes into his Wages on the Excel.') + '#bw-owner-extras')
+  } catch (err) {
+    return back(safeReturn + sep + 'error=' + encodeURIComponent('Could not save the extra: ' + describeProxyError(err)) + '#bw-owner-extras')
   }
 })
 

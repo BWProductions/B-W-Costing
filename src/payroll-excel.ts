@@ -92,6 +92,16 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     const vw = await db.prepare(`SELECT id FROM wage_staff WHERE COALESCE(varies_weekly, 0) = 1`).all()
     for (const r of (vw.results || []) as any[]) variesWeekly[Number(r.id)] = true
   } catch (err) {}
+  // Owner 2 Oct 2026: owner-only EXTRAS (e.g. Givemore R500 cement/dog work) added into the worker's wages for a payroll week.
+  // Stored in wage_owner_extras; the worker never sees them on /wages. Shown as a plain line in the Wages column + note.
+  let extras: Array<{ id: number, staff_id: number, work_date: string, amount: number, description: string }> = []
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS wage_owner_extras (id INTEGER PRIMARY KEY AUTOINCREMENT, staff_id INTEGER NOT NULL, work_date TEXT NOT NULL, payroll_week_start TEXT NOT NULL, amount REAL NOT NULL, description TEXT, added_by TEXT, paid_at DATETIME, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`).run()
+    const ex = await db.prepare(`SELECT id, staff_id, work_date, amount, description FROM wage_owner_extras WHERE payroll_week_start = ? ORDER BY staff_id, work_date`).bind(weekStart).all()
+    extras = (ex.results || []) as any[]
+  } catch (err) {}
+  const extrasFor = (sid: number) => extras.filter((e) => e.staff_id === sid)
+  const extrasTotal = (sid: number) => extrasFor(sid).reduce((a, e) => a + Number(e.amount || 0), 0)
   const fixedRes = await db.prepare(`SELECT d.id, d.staff_id, s.display_name, d.deduction_type, d.reason, d.amount, d.effective_from, d.effective_to, d.active FROM wage_recurring_deductions d JOIN wage_staff s ON s.id = d.staff_id
         WHERE d.active = 1 AND d.effective_from <= ? AND (d.effective_to IS NULL OR d.effective_to >= ?) ORDER BY s.display_name, d.id`).bind(weekEnd, weekStart).all()
   const fixed = (fixedRes.results || []) as Array<{ id: number, staff_id: number, display_name: string, deduction_type: string, reason: string, amount: number, effective_from: string, effective_to: string | null }>
@@ -306,6 +316,7 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     // Owner 1 Oct 2026 — exactly his table: Line | what | Owing before | Taken. Only what is deducted this week.
     const lines: string[] = []
     const r0 = (n: number) => 'R' + (Math.abs(n - Math.round(n)) < 0.005 ? String(Math.round(n)) : n.toFixed(2).replace('.', ','))
+    const exLines = extrasFor(sid).map((e) => `EXTRA PAY ${e.work_date}: ${(e.description || 'extra work').replace(/\s+/g, ' ').slice(0, 80)} — ${r0(Number(e.amount))} added to wages (owner)`)
     for (const f of fixed.filter((x) => x.staff_id === sid)) {
       const amt = Number(f.amount || 0); if (amt <= 0) continue
       lines.push(`${f.deduction_type} (fixed)  |  Owing before: —  |  Taken: ${r0(amt)}`)
@@ -319,11 +330,13 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
       const before = rec ? Number(rec.balance_before || 0) : Number(l.outstanding_balance || 0)
       lines.push(`#${l.id} ${loanPurpose(l.reason)} ${r0(Number(l.original_amount))}  |  Owing before: ${r0(before)}  |  Taken: ${r0(amt)}`)
     }
-    return lines.map((x, i) => `${i + 1}  ${x}`).join('\n')
+    const numbered = lines.map((x, i) => `${i + 1}  ${x}`)
+    return [...exLines, ...numbered].join('\n')
   }
   // Include workers with deductions/loans but no shifts? Keep to workers with paid shifts (as the engine does) plus fixed-weekly staff.
   const trailWorkers = [...workers]
   for (const s of staffAll) if (s.payroll_rule === 'fixed_weekly' && !trailWorkers.find((w) => w[0] === s.id)) trailWorkers.push([s.id, s.display_name])
+  for (const s of staffAll) if (extrasTotal(s.id) > 0 && !trailWorkers.find((w) => w[0] === s.id)) trailWorkers.push([s.id, s.display_name])
   trailWorkers.sort((a, b) => a[1].localeCompare(b[1]))
   trailWorkers.forEach(([sid, name], i) => {
     const rn = T2_FIRST + i
@@ -345,7 +358,8 @@ export async function buildPayrollWorkbook(deps: PayrollDeps): Promise<{ bytes: 
     const fixedWeekly = staffAll.find((s) => s.id === sid && s.payroll_rule === 'fixed_weekly')
     row.push({ f: `SUM(B${rn},D${rn},F${rn},H${rn},J${rn},L${rn},N${rn},P${rn})`, s: 'numBold' })
     const fixedAmt = fixedWeekly ? (weekFixed[sid] !== undefined ? weekFixed[sid] : (variesWeekly[sid] ? 0 : Number(fixedWeekly.standard_weekly_amount || 0))) : 0
-    row.push(fixedWeekly ? { v: fixedAmt, s: 'moneyBold' } : { f: `SUM(C${rn},E${rn},G${rn},I${rn},K${rn},M${rn},O${rn},Q${rn})`, s: 'moneyBold' })
+    const exAmt = extrasTotal(sid)
+    row.push(fixedWeekly ? { v: fixedAmt + exAmt, s: 'moneyBold' } : { f: `SUM(C${rn},E${rn},G${rn},I${rn},K${rn},M${rn},O${rn},Q${rn})${exAmt > 0 ? '+' + exAmt : ''}`, s: 'moneyBold' })
     const fd = dueFixed(sid), ld = dueLoan(sid), lb = loanBal(sid)
     row.push({ v: fd, s: 'money' }, { v: fd, s: 'editMoney' }, { f: `MAX(0,T${rn}-U${rn})`, s: 'money' })
     row.push({ v: ld, s: 'money' }, { v: ld, s: 'editMoney' }, { f: `MAX(0,${lb}-X${rn})`, s: 'money' })

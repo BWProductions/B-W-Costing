@@ -411,3 +411,10 @@ Owner ticked squares and pressed "Mark the TICKED shifts as PAID" but always got
 Owner: "banner for the new week showing that on 2 Oct each staff member worked 16:00–16:15 — the time frame in which they can claim. Excluded: Jay (John), Patrick, Solomon, Kapano."
 - `wage_planned_hours` 2026-10-02 planned_end **16:15**; `wage_owner_day_rules` 2026-10-02 windows 00:00–23:59 for John (7), Patrick (13), Solomon (11) = excluded from the cap. "Kapano" is not on the staff list — owner to identify.
 - Dashboard banner `#bw-planned-end-note` now shows planned ends / day rules from the PREVIOUS payroll week too (tagged "last week — still being checked"), and renders even when the new week has no entries yet (`buildAdminCombinedSheet` early-return now builds a slim notes-only banner).
+
+## 2 Oct 2026 — Owner-only EXTRAS; triple-check scoped to the week viewed (v2026-10-02-4)
+- Owner: "Givemore, 2 Oct, extras with the warehouse team: putting cement, Jocelyn Shane for dog — R500 into the NEXT payroll, only for me to see." Table `wage_owner_extras(id, staff_id, work_date, payroll_week_start, amount, description, added_by, paid_at)`. Row: Givemore (1), 2026-10-02, week 2026-10-03, R500.
+- Dashboard panel `#bw-owner-extras` (also on an empty new week) with add/remove form → `POST /wages-admin/owner-extra`. Never shown on the worker's /wages page.
+- Excel (`payroll-excel.ts`): extras added into the Wages column for that payroll week (formula `SUM(...)+500` or fixed+extra); note line "EXTRA PAY <date>: <what> — R500 added to wages (owner)". Worker with only an extra still gets a Trail/Summary row.
+- Triple-check `#bw-paid-check` now shows only the payroll week being viewed (owner: "disappears with the new payroll"). Lebo's Thu 1 / Fri 2 Oct (#9971, #9972, marked paid by owner) added to the 26 Sep lock → 97 rows R69 378,55, 0 differences.
+- "Kapano" exclusion dropped (owner: ignore).
