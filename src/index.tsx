@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-10-01-5'
+const WAGES_UI_VERSION = 'v2026-10-02-2'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4435,7 +4435,30 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     paid = paid.filter((r) => r.staff_id === sid)
     drafts = drafts.filter((r) => r.staff_id === sid)
   }
-  if (!paid.length && !drafts.length) return ''
+  if (!paid.length && !drafts.length) {
+    // Owner 2 Oct 2026: a brand-new payroll week has no entries yet, but the owner's standing notes (planned finish
+    // times / day rules from this week AND last week) must still show so the first claims can be checked against them.
+    try {
+      const prevWeekStart = (() => { const d = parseProxyIsoDate(weekStart); return d ? formatProxyIsoDate(new Date(d.getTime() - 7 * 86400000)) : weekStart })()
+      const days = Object.values(plannedEnds).filter((p) => p.work_date >= prevWeekStart && p.work_date <= weekEnd).sort((a, b) => a.work_date.localeCompare(b.work_date))
+      const ruleDays = Object.values(dayRules).filter((d) => d.work_date >= prevWeekStart && d.work_date <= weekEnd).sort((a, b) => a.work_date.localeCompare(b.work_date))
+      if (!days.length && !ruleDays.length) return ''
+      const tag = (iso: string) => iso < weekStart ? ' <span style="font-size:11px;padding:1px 6px;border-radius:999px;background:rgba(255,255,255,.12);opacity:.85">last week — still being checked</span>' : ''
+      const li = days.map((p) => `<li style="margin:3px 0"><strong>${escapeHtmlText(proxyLongDate(p.work_date))} — work ended ${escapeHtmlText(p.planned_end)}</strong>${tag(p.work_date)}${p.note ? ` <span style="opacity:.8">(${escapeHtmlText(p.note)})</span>` : ''}<br><span style="font-size:12px;opacity:.75">no entries in this week yet</span></li>`).join('')
+      const ruleLi = ruleDays.map((d) => {
+        const winIds = Array.from(new Set([...Object.keys(d.staff_start || {}), ...Object.keys(d.staff_end || {}), ...Object.keys(d.staff_windows || {})].map(Number)))
+        const parts: string[] = []
+        for (const sid of winIds) { const wins = ownerWindowsFor(d, sid); parts.push(`<strong>${escapeHtmlText(offNameById[sid] || ('staff ' + sid))}</strong> ${wins.map((w) => (w.start === '00:00' && w.end === '23:59' ? '' : escapeHtmlText(w.start + '–' + w.end) + ' ') + (w.place ? '<span style="opacity:.8">' + escapeHtmlText(w.place) + '</span>' : '')).join(', ')}`) }
+        if (d.staff_off.length) parts.push(`<strong>OFF — not allowed to claim:</strong> ${d.staff_off.map((id) => escapeHtmlText(offNameById[id] || ('staff ' + id))).join(', ')}`)
+        return `<li style="margin:3px 0"><strong>${escapeHtmlText(proxyLongDate(d.work_date))}</strong>${tag(d.work_date)} — ${parts.join(' · ')}${d.note ? ` <span style="opacity:.8">(${escapeHtmlText(d.note)})</span>` : ''}</li>`
+      }).join('')
+      return `<section id="bw-planned-end-note" style="margin:6px 0 12px;padding:9px 14px;border-radius:12px;background:rgba(202,138,4,.15);border:1px solid rgba(253,224,71,.55)">
+        <div style="font-weight:800;color:#fde68a;font-size:13.5px">📌 Owner's notes for this week</div>
+        <ul style="margin:4px 0 0 16px;padding:0;font-size:12.5px">${ruleLi}${li}</ul>
+        <div style="font-size:11.5px;opacity:.7;margin-top:4px">No wages entered for this payroll week yet. Any entry that runs past the set time will be flagged red <strong>⏰ CLAIMED PAST</strong> on the row.</div>
+      </section>`
+    } catch (err) { return '' }
+  }
 
   const staffIds = Array.from(new Set([...paid.map((r) => r.staff_id), ...drafts.map((r) => r.staff_id)]))
   const ph = staffIds.map(() => '?').join(',')
@@ -5302,14 +5325,19 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       // Owner 24 Sep 2026: "Put a note in the system that everyone at the warehouse worked until 13:00 on Saturday
       // 26 Sep, so when they start putting their hours in we can triple-check it." Every planned end for a day in
       // THIS payroll week is shown here as a standing reminder; entries past it carry the red ⏰ pill on the row.
-      const days = Object.values(plannedEnds).filter((p) => p.work_date >= weekStart && p.work_date <= weekEnd).sort((a, b) => a.work_date.localeCompare(b.work_date))
-      const ruleDays = Object.values(dayRules).filter((d) => d.work_date >= weekStart && d.work_date <= weekEnd).sort((a, b) => a.work_date.localeCompare(b.work_date))
+      // Owner 2 Oct 2026: "I need a banner for the NEW week that shows that on the 2nd of October each staff member worked
+      // 16:00–16:15 — the time frame in which they can claim." Planned ends / day rules set for the PREVIOUS payroll week
+      // stay on the banner through the following week (marked "last week"), so late Thu/Fri claims are still checked.
+      const prevWeekStart = (() => { const d = parseProxyIsoDate(weekStart); return d ? formatProxyIsoDate(new Date(d.getTime() - 7 * 86400000)) : weekStart })()
+      const days = Object.values(plannedEnds).filter((p) => p.work_date >= prevWeekStart && p.work_date <= weekEnd).sort((a, b) => a.work_date.localeCompare(b.work_date))
+      const ruleDays = Object.values(dayRules).filter((d) => d.work_date >= prevWeekStart && d.work_date <= weekEnd).sort((a, b) => a.work_date.localeCompare(b.work_date))
+      const lastWeekTag = (iso: string) => iso < weekStart ? ' <span style="font-size:11px;padding:1px 6px;border-radius:999px;background:rgba(255,255,255,.12);opacity:.85">last week — still being checked</span>' : ''
       if (!days.length && !ruleDays.length) return ''
       const li = days.map((p) => {
         const rowsThatDay = paid.filter((r: AdminPaidRow) => r.work_date === p.work_date)
         const over = rowsThatDay.filter((r: AdminPaidRow) => beyondPlanned(r))
         const state = rowsThatDay.length ? `${rowsThatDay.length} entr${rowsThatDay.length === 1 ? 'y' : 'ies'} in so far · <strong style="color:${over.length ? '#fca5a5' : '#86efac'}">${over.length ? over.length + ' claim past ' + escapeHtmlText(p.planned_end) + ' — see the ⏰ pill on the row' : 'none past ' + escapeHtmlText(p.planned_end)}</strong>` : 'no entries in yet'
-        return `<li style="margin:3px 0"><strong>${escapeHtmlText(proxyLongDate(p.work_date))} — work ended ${escapeHtmlText(p.planned_end)}</strong>${p.note ? ` <span style="opacity:.8">(${escapeHtmlText(p.note)})</span>` : ''}<br><span style="font-size:12px">${state}</span></li>`
+        return `<li style="margin:3px 0"><strong>${escapeHtmlText(proxyLongDate(p.work_date))} — work ended ${escapeHtmlText(p.planned_end)}</strong>${lastWeekTag(p.work_date)}${p.note ? ` <span style="opacity:.8">(${escapeHtmlText(p.note)})</span>` : ''}<br><span style="font-size:12px">${state}</span></li>`
       }).join('')
       const ruleLi = ruleDays.map((d) => {
         const offNames = d.staff_off.map((id) => offNameById[id] || ('staff ' + id))
@@ -5321,7 +5349,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         const winIds = Array.from(new Set([...Object.keys(d.staff_start || {}), ...Object.keys(d.staff_end || {}), ...Object.keys(d.staff_windows || {})].map(Number)))
         for (const sid of winIds) { const wins = ownerWindowsFor(d, sid); const claims = rowsThatDay.filter((r: AdminPaidRow) => r.staff_id === sid); const outside = claims.some((r: AdminPaidRow) => { const s0 = timeToMinutes(r.start_time)!, e0 = timeToMinutes(r.end_time)!; return ownerWindowOverlap(r.start_time, r.end_time, wins).minutes < (e0 <= s0 ? e0 + 1440 : e0) - s0 - 0.5 }); parts.push(`<strong>${escapeHtmlText(offNameById[sid] || ('staff ' + sid))} only ${wins.map((w) => escapeHtmlText(w.start + '–' + w.end + (w.place ? ' ' + w.place : ''))).join(' and ')}</strong> — paid inside those times whatever he enters${claims.length ? (outside ? ' <span style="color:#fca5a5;font-weight:800">⚠ he entered time outside it — capped, red review to override</span>' : ' <span style="color:#86efac">— his entry is inside the window</span>') : ' <span style="opacity:.75">— no entry from him yet</span>'}`) }
         if (offNames.length) parts.push(`<strong>OFF — not allowed to claim:</strong> ${offNames.map(escapeHtmlText).join(', ')}${offClaims.length ? ` <span style="color:#fca5a5;font-weight:800">⚠ ${offClaims.length} of them entered a shift anyway — held at R0, see the red review</span>` : ' <span style="color:#86efac">— no claims from them so far</span>'}`)
-        return `<li style="margin:3px 0"><strong>${escapeHtmlText(proxyLongDate(d.work_date))}</strong> — ${parts.join(' · ')}${d.note ? ` <span style="opacity:.8">(${escapeHtmlText(d.note)})</span>` : ''}<br><span style="font-size:12px">${rowsThatDay.length ? rowsThatDay.length + ' entr' + (rowsThatDay.length === 1 ? 'y' : 'ies') + ' in so far' : 'no entries in yet'}</span></li>`
+        return `<li style="margin:3px 0"><strong>${escapeHtmlText(proxyLongDate(d.work_date))}</strong>${lastWeekTag(d.work_date)} — ${parts.join(' · ')}${d.note ? ` <span style="opacity:.8">(${escapeHtmlText(d.note)})</span>` : ''}<br><span style="font-size:12px">${rowsThatDay.length ? rowsThatDay.length + ' entr' + (rowsThatDay.length === 1 ? 'y' : 'ies') + ' in so far' : 'no entries in yet'}</span></li>`
       }).join('')
       return `<section id="bw-planned-end-note" style="margin:6px 0 12px;padding:9px 14px;border-radius:12px;background:rgba(202,138,4,.15);border:1px solid rgba(253,224,71,.55)">
         <div style="font-weight:800;color:#fde68a;font-size:13.5px">📌 Owner's notes for this week</div>

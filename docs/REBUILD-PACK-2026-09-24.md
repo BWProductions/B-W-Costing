@@ -406,3 +406,8 @@ Owner: "add a note section where you put the notes as to why we are deducting �
 
 ## 1 Oct 2026 — Lebo ledger PAID button bug fixed (v2026-10-01-5)
 Owner ticked squares and pressed "Mark the TICKED shifts as PAID" but always got "Tick the square next to each shift that has been paid first." Cause: the tick boxes sit in the table and are linked to the form by `form="bw-own-pay-form"`, but the onsubmit counted with `this.querySelectorAll(...)` which only looks INSIDE the form element → always 0. Fix: `document.querySelectorAll('input[name=shift_id][form=bw-own-pay-form]:checked')`. Browser-tested: 2 ticks → confirm "Mark the 2 ticked Lebo shift(s) as PAID?" (submit intercepted, nothing marked).
+
+## 2 Oct 2026 — Fri 2 Oct claim window 16:00–16:15; owner notes carry into the new week (v2026-10-02-2)
+Owner: "banner for the new week showing that on 2 Oct each staff member worked 16:00–16:15 — the time frame in which they can claim. Excluded: Jay (John), Patrick, Solomon, Kapano."
+- `wage_planned_hours` 2026-10-02 planned_end **16:15**; `wage_owner_day_rules` 2026-10-02 windows 00:00–23:59 for John (7), Patrick (13), Solomon (11) = excluded from the cap. "Kapano" is not on the staff list — owner to identify.
+- Dashboard banner `#bw-planned-end-note` now shows planned ends / day rules from the PREVIOUS payroll week too (tagged "last week — still being checked"), and renders even when the new week has no entries yet (`buildAdminCombinedSheet` early-return now builds a slim notes-only banner).
