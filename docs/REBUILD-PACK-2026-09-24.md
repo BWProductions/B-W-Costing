@@ -418,3 +418,6 @@ Owner: "banner for the new week showing that on 2 Oct each staff member worked 1
 - Excel (`payroll-excel.ts`): extras added into the Wages column for that payroll week (formula `SUM(...)+500` or fixed+extra); note line "EXTRA PAY <date>: <what> — R500 added to wages (owner)". Worker with only an extra still gets a Trail/Summary row.
 - Triple-check `#bw-paid-check` now shows only the payroll week being viewed (owner: "disappears with the new payroll"). Lebo's Thu 1 / Fri 2 Oct (#9971, #9972, marked paid by owner) added to the 26 Sep lock → 97 rows R69 378,55, 0 differences.
 - "Kapano" exclusion dropped (owner: ignore).
+
+## 3 Oct 2026 — New payroll week shows ONLY 3–9 Oct (v2026-10-03-2)
+Owner: "you've brought in the previous week's stuff — only reflect what is needed now, from the 3rd till the 9th." Reverted the 2 Oct carry-over: owner-notes banner = current payroll week only (both full and empty-week versions). Holiday follow-up now joins `wage_public_holidays` (real holidays only, previous 7 days) — Sat 26 Sep was wrongly offered as a "public holiday" with top-ups; fixed. Lebo ledger: "unpaid since" = first unpaid shift (or "nothing unpaid"); `next_pay_date` cleared (no fixed date — paid when ticked).

@@ -9,7 +9,7 @@ type Bindings = {
 }
 
 const ORIGIN = 'https://3c3bcb89.bw-productions.pages.dev'
-const WAGES_UI_VERSION = 'v2026-10-02-4'
+const WAGES_UI_VERSION = 'v2026-10-03-2'
 
 const WAGES_STAFF_CHOICES = [
   { id: '1', name: 'Givemore Chifetete Kuziwa' },
@@ -4439,9 +4439,8 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
     // Owner 2 Oct 2026: a brand-new payroll week has no entries yet, but the owner's standing notes (planned finish
     // times / day rules from this week AND last week) must still show so the first claims can be checked against them.
     try {
-      const prevWeekStart = (() => { const d = parseProxyIsoDate(weekStart); return d ? formatProxyIsoDate(new Date(d.getTime() - 7 * 86400000)) : weekStart })()
-      const days = Object.values(plannedEnds).filter((p) => p.work_date >= prevWeekStart && p.work_date <= weekEnd).sort((a, b) => a.work_date.localeCompare(b.work_date))
-      const ruleDays = Object.values(dayRules).filter((d) => d.work_date >= prevWeekStart && d.work_date <= weekEnd).sort((a, b) => a.work_date.localeCompare(b.work_date))
+      const days = Object.values(plannedEnds).filter((p) => p.work_date >= weekStart && p.work_date <= weekEnd).sort((a, b) => a.work_date.localeCompare(b.work_date))
+      const ruleDays = Object.values(dayRules).filter((d) => d.work_date >= weekStart && d.work_date <= weekEnd).sort((a, b) => a.work_date.localeCompare(b.work_date))
       let extrasEmpty = ''
       try {
         const ex = await db.prepare(`SELECT e.id, s.display_name, e.work_date, e.amount, e.description, e.added_by FROM wage_owner_extras e JOIN wage_staff s ON s.id = e.staff_id WHERE e.payroll_week_start = ? ORDER BY s.display_name, e.work_date`).bind(weekStart).all()
@@ -4449,7 +4448,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
         if (er.length) extrasEmpty = `<section id="bw-owner-extras" style="margin:6px 0 12px;padding:9px 14px;border-radius:12px;background:rgba(202,138,4,.15);border:1px solid rgba(253,224,71,.55)"><div style="font-weight:800;color:#fde68a;font-size:14px">💰 Owner extras to pay this payroll (${escapeHtmlText(weekStart)} → ${escapeHtmlText(weekEnd)}) — ${er.length} · ${fmtRand(er.reduce((a: number, r: any) => a + Number(r.amount || 0), 0))}</div><div style="font-size:12.5px;opacity:.85;margin-top:2px"><strong>Only you see this.</strong> Added into the worker's Wages on the auditor Excel for this week.</div><ul style="margin:4px 0 0 16px;padding:0;font-size:12.5px">${er.map((r: any) => `<li><strong>${escapeHtmlText(r.display_name)}</strong> — ${escapeHtmlText(proxyLongDate(r.work_date))} — ${escapeHtmlText(r.description || '')} — <strong style="color:#fde68a">${fmtRand(Number(r.amount))}</strong></li>`).join('')}</ul></section>`
       } catch (err) {}
       if (!days.length && !ruleDays.length) return extrasEmpty
-      const tag = (iso: string) => iso < weekStart ? ' <span style="font-size:11px;padding:1px 6px;border-radius:999px;background:rgba(255,255,255,.12);opacity:.85">last week — still being checked</span>' : ''
+      const tag = (_iso: string) => ''
       const li = days.map((p) => `<li style="margin:3px 0"><strong>${escapeHtmlText(proxyLongDate(p.work_date))} — work ended ${escapeHtmlText(p.planned_end)}</strong>${tag(p.work_date)}${p.note ? ` <span style="opacity:.8">(${escapeHtmlText(p.note)})</span>` : ''}<br><span style="font-size:12px;opacity:.75">no entries in this week yet</span></li>`).join('')
       const ruleLi = ruleDays.map((d) => {
         const winIds = Array.from(new Set([...Object.keys(d.staff_start || {}), ...Object.keys(d.staff_end || {}), ...Object.keys(d.staff_windows || {})].map(Number)))
@@ -4864,7 +4863,9 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
   // and asks for the real end time, with under/over-paid worked out. Answer recorded on the row (manager correction).
   let followUpPanel = ''
   try {
-    const prevHol = await db.prepare(`SELECT ph.work_date, ph.planned_end, ph.note FROM wage_planned_hours ph WHERE ph.work_date < ? AND ph.work_date >= date(?, '-14 days') ORDER BY ph.work_date`).bind(weekStart, weekStart).all()
+    // Owner 2 Oct 2026: only REAL public holidays (wage_public_holidays), and only in the payroll week straight after the
+    // holiday — never ordinary planned-finish days (Sat 26 Sep was wrongly offered as a "public holiday" with top-ups).
+    const prevHol = await db.prepare(`SELECT ph.work_date, ph.planned_end, ph.note FROM wage_planned_hours ph JOIN wage_public_holidays h ON h.holiday_date = ph.work_date AND h.active = 1 WHERE ph.work_date < ? AND ph.work_date >= date(?, '-7 days') ORDER BY ph.work_date`).bind(weekStart, weekStart).all()
     const holDays = (prevHol.results || []) as Array<{ work_date: string, planned_end: string, note: string }>
     if (holDays.length) {
       const blocks: string[] = []
@@ -4947,7 +4948,7 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       const payable = unpaid.filter((r) => !openHold(r))
       const payBtn = payable.length ? `<form method="post" id="bw-own-pay-form" action="/wages-admin/own-schedule-paid" style="margin:0" onsubmit="var n=document.querySelectorAll('input[name=shift_id][form=bw-own-pay-form]:checked').length; if(!n){alert('Tick the square next to each shift that has been paid first.');return false;} return confirm('Mark the '+n+' ticked ${firstName} shift(s) as PAID? They will leave this list.')"><input type="hidden" name="return_to" value="__RETURN__"><button type="submit" style="padding:7px 14px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-weight:800;cursor:pointer">✔ Mark the TICKED shifts as PAID</button></form>` : ''
       blocks.push(`<div style="margin-top:6px">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div style="font-weight:800">${escapeHtmlText(o.display_name)} — unpaid since ${escapeHtmlText(proxyLongDate(o.from_date))}${o.note ? ` <span style="opacity:.75;font-weight:500">(${escapeHtmlText(o.note)})</span>` : ''}</div><div style="font-size:12px;opacity:.75">${unpaid.length} NOT paid · ${paidCount} already marked paid</div></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div style="font-weight:800">${escapeHtmlText(o.display_name)} — ${unpaid.length ? 'unpaid since ' + escapeHtmlText(proxyLongDate(unpaid[0].work_date)) : 'nothing unpaid'}${o.note ? ` <span style="opacity:.75;font-weight:500">(${escapeHtmlText(o.note)})</span>` : ''}</div><div style="font-size:12px;opacity:.75">${unpaid.length} NOT paid · ${paidCount} already marked paid</div></div>
         ${o.next_pay_date ? `<div style="margin-top:4px;padding:6px 10px;border-radius:8px;background:rgba(22,163,74,.18);border:1px solid rgba(134,239,172,.5);font-size:12.5px"><strong>💰 ONE PAYMENT DUE ${escapeHtmlText(proxyLongDate(o.next_pay_date).toUpperCase())}</strong> — everything he works until then accumulates here. On that day pay the TOTAL below, <strong>tick every square</strong>, then press <strong>Mark the TICKED shifts as PAID</strong>. Every clocked hour is paid — <strong>no 07:00–07:30 meeting deduction</strong> for him (owner 24 Sep: his rate is far lower than anyone else's).</div>` : ''}
         <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:4px"><thead><tr style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;opacity:.7"><th style="padding:2px 8px;text-align:center">Paid?</th><th style="padding:2px 8px;text-align:left">Day</th><th style="padding:2px 8px;text-align:left">Times</th><th style="padding:2px 8px;text-align:left">Work</th><th style="padding:2px 8px;text-align:right">Amount</th><th style="padding:2px 8px;text-align:left">Status</th></tr></thead><tbody>${li}</tbody>
         <tfoot><tr style="border-top:2px solid rgba(253,224,71,.5)"><td colspan="4" style="padding:6px 8px;font-weight:800">TOTAL STILL TO PAY ${firstName}</td><td style="padding:6px 8px;text-align:right;font-weight:900;font-size:15px;color:#fde68a">${fmtRand(total)}</td><td style="padding:6px 8px">${payBtn}</td></tr></tfoot></table>
@@ -5354,10 +5355,10 @@ async function buildAdminCombinedSheet(env: Bindings | undefined, weekStart: str
       // Owner 2 Oct 2026: "I need a banner for the NEW week that shows that on the 2nd of October each staff member worked
       // 16:00–16:15 — the time frame in which they can claim." Planned ends / day rules set for the PREVIOUS payroll week
       // stay on the banner through the following week (marked "last week"), so late Thu/Fri claims are still checked.
-      const prevWeekStart = (() => { const d = parseProxyIsoDate(weekStart); return d ? formatProxyIsoDate(new Date(d.getTime() - 7 * 86400000)) : weekStart })()
-      const days = Object.values(plannedEnds).filter((p) => p.work_date >= prevWeekStart && p.work_date <= weekEnd).sort((a, b) => a.work_date.localeCompare(b.work_date))
-      const ruleDays = Object.values(dayRules).filter((d) => d.work_date >= prevWeekStart && d.work_date <= weekEnd).sort((a, b) => a.work_date.localeCompare(b.work_date))
-      const lastWeekTag = (iso: string) => iso < weekStart ? ' <span style="font-size:11px;padding:1px 6px;border-radius:999px;background:rgba(255,255,255,.12);opacity:.85">last week — still being checked</span>' : ''
+      // Owner 2 Oct 2026: "only reflect stuff that is needed now, from the 3rd till the 9th" — this payroll week ONLY.
+      const days = Object.values(plannedEnds).filter((p) => p.work_date >= weekStart && p.work_date <= weekEnd).sort((a, b) => a.work_date.localeCompare(b.work_date))
+      const ruleDays = Object.values(dayRules).filter((d) => d.work_date >= weekStart && d.work_date <= weekEnd).sort((a, b) => a.work_date.localeCompare(b.work_date))
+      const lastWeekTag = (_iso: string) => ''
       if (!days.length && !ruleDays.length) return ''
       const li = days.map((p) => {
         const rowsThatDay = paid.filter((r: AdminPaidRow) => r.work_date === p.work_date)
