@@ -32,3 +32,6 @@ Owner also asked to see last week per line: ledger has no loan entries for 12 Se
 ## 1 Oct 2026 (owner) — auditor note shows ONLY what is deducted this week
 Isaac's note lists lines 1–4 (eggs 260, #2 350 closed, #3 150 closed, #6 240 → R360 carried). Line 5 (#8, nothing taken) is NOT written — it belongs to next week. Code: a loan with a 0/deferred repayment this week is omitted from `deductionNotes`.
 Next week (3–9 Oct) set by owner: #6 remaining **R360 in full**, #8 **R500 in full** → Isaac then has only the fixed eggs. (`deduction_amount` set to 360 / 500.) Erick next week: #1 R250 + #7 R250 (final) + fixed R1 000.
+
+## 4 Oct 2026 — Isaac loan #9 petrol R600 (owner)
+WhatsApp 2 Oct 06:48 "Morning can u talk to sipho to borrow me 600 for patrol please mother". Owner: load R600, deduct R150/week from this week (3–9 Oct), with the other agreed ones. Loan #9: R600, R150/week, deduction_start 2026-10-03 → clears 24 Oct. This week Isaac: eggs R260 + #6 R360 (all left) + #8 R500 (all left) + #9 R150 = **R1 270**. From 10 Oct: eggs R260 + #9 R150 = R410/week until 24 Oct, then eggs only.
