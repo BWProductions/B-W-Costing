@@ -421,3 +421,6 @@ Owner: "banner for the new week showing that on 2 Oct each staff member worked 1
 
 ## 3 Oct 2026 — New payroll week shows ONLY 3–9 Oct (v2026-10-03-2)
 Owner: "you've brought in the previous week's stuff — only reflect what is needed now, from the 3rd till the 9th." Reverted the 2 Oct carry-over: owner-notes banner = current payroll week only (both full and empty-week versions). Holiday follow-up now joins `wage_public_holidays` (real holidays only, previous 7 days) — Sat 26 Sep was wrongly offered as a "public holiday" with top-ups; fixed. Lebo ledger: "unpaid since" = first unpaid shift (or "nothing unpaid"); `next_pay_date` cleared (no fixed date — paid when ticked).
+
+## 4 Oct 2026 — Sunday team cut-offs (owner)
+`wage_owner_day_rules` 2026-10-04 windows: **Botanical Gardens / Homecoming strike-down team — Takka (2), Joshua (15), Bheki (5) → 13:00** (owner first said 11:40–12:00, corrected to 13:00); **Benoni team — Isaac (6), Givemore (1), Erence (8), Daniel (10) → 14:00**. `wage_planned_hours` 2026-10-04 = 14:00. Drafts at the time: Takka & Joshua Sun 07:00–14:00 (→ cap 13:00), Bheki 07:00–13:30 (→ 13:00).
